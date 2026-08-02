@@ -309,3 +309,97 @@ body {
   letter-spacing: 0.03em;
   color: #666;
 }
+
+.jobs-summary {
+  color: #555;
+}
+
+.job-row {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.job-row-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.job-row-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.job-row-link:hover {
+  text-decoration: underline;
+}
+
+.job-row-location {
+  color: #777;
+  font-size: 0.85rem;
+}
+
+.job-row-scores {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.job-row-rationale {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.job-row-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.job-row-breakdown {
+  font-size: 0.85rem;
+}
+
+.job-row-breakdown ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.job-row-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.job-row-actions button {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+
+.job-row-error {
+  color: #b00020;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.jobs-filtered-out {
+  margin-top: 1.5rem;
+}
+
+.jobs-filtered-out-row {
+  margin-bottom: 0.75rem;
+}
+
+.jobs-filtered-out-reason {
+  color: #777;
+  font-size: 0.8rem;
+  margin: 0.2rem 0 0;
+}

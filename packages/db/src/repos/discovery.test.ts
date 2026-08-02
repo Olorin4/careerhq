@@ -3,17 +3,21 @@ import { eq } from "drizzle-orm";
 import {
   DEFAULT_SCORING_PROFILE, normalizedJobSchema, type NormalizedJob,
 } from "@careerhq/contracts";
-import { createDb, jobs, type Db, workspaces } from "../index.js";
+import {
+  applicationEvents, applications, createDb, jobs, type Db, workspaces,
+} from "../index.js";
 import {
   addWatchlistEntry,
   applyRerank,
   countInboxDuplicates,
+  dismissJob,
   getOrCreateCompany,
   getScoringProfile,
   listIngestRuns,
   listInboxJobs,
   listWatchlist,
   markExpiredJobs,
+  promoteJob,
   recordIngestRun,
   removeWatchlistEntry,
   saveScoringProfile,
@@ -143,5 +147,56 @@ d("discovery repo", () => {
     const limited = await listIngestRuns(db, workspaceId, 1);
     expect(limited).toHaveLength(1);
     expect(limited[0]!.source).toBe("remoteok");
+  });
+
+  it("promoteJob creates an application linked to the same job row, logs a discovery event, and flips job status", async () => {
+    await upsertNormalizedJobs(db, workspaceId, [{ job: nj({ externalId: "promo-1" }), contentHash: "hp1" }]);
+    const [job] = await db.select().from(jobs).where(eq(jobs.externalId, "promo-1"));
+    const result = await promoteJob(db, workspaceId, job!.id);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+
+    const [app] = await db.select().from(applications).where(eq(applications.id, result.applicationId));
+    expect(app?.jobId).toBe(job!.id);
+    expect(app?.state).toBe("DISCOVERED");
+
+    const events = await db.select().from(applicationEvents)
+      .where(eq(applicationEvents.applicationId, result.applicationId));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.trigger).toBe("user");
+    expect(events[0]?.toState).toBe("DISCOVERED");
+    expect(events[0]?.payload).toEqual({ promotedFrom: "discovery" });
+
+    const [updatedJob] = await db.select().from(jobs).where(eq(jobs.id, job!.id));
+    expect(updatedJob?.status).toBe("promoted");
+  });
+
+  it("promoteJob refuses a job that already has an application (already promoted)", async () => {
+    await upsertNormalizedJobs(db, workspaceId, [{ job: nj({ externalId: "promo-2" }), contentHash: "hp2" }]);
+    const [job] = await db.select().from(jobs).where(eq(jobs.externalId, "promo-2"));
+    const first = await promoteJob(db, workspaceId, job!.id);
+    expect(first.ok).toBe(true);
+
+    const second = await promoteJob(db, workspaceId, job!.id);
+    expect(second.ok).toBe(false);
+    if (second.ok) throw new Error("unreachable");
+    expect(second.reason.length).toBeGreaterThan(0);
+  });
+
+  it("promoteJob refuses a job that does not exist", async () => {
+    const result = await promoteJob(db, workspaceId, "00000000-0000-0000-0000-000000000000");
+    expect(result.ok).toBe(false);
+  });
+
+  it("dismissJob flips job status and removes it from the inbox", async () => {
+    await upsertNormalizedJobs(db, workspaceId, [{ job: nj({ externalId: "dismiss-1" }), contentHash: "hd1" }]);
+    const [job] = await db.select().from(jobs).where(eq(jobs.externalId, "dismiss-1"));
+    await dismissJob(db, workspaceId, job!.id);
+
+    const [updatedJob] = await db.select().from(jobs).where(eq(jobs.id, job!.id));
+    expect(updatedJob?.status).toBe("dismissed");
+
+    const inbox = await listInboxJobs(db, workspaceId);
+    expect(inbox.some((j) => j.id === job!.id)).toBe(false);
   });
 });

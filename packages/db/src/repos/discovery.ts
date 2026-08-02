@@ -3,12 +3,12 @@ import {
 } from "drizzle-orm";
 import {
   DEFAULT_SCORING_PROFILE, scoringProfileSchema,
-  type AtsType, type NormalizedJob, type RerankResult, type ScoringProfile,
+  type ApplicationState, type AtsType, type NormalizedJob, type RerankResult, type ScoringProfile,
 } from "@careerhq/contracts";
-import { scoreJob } from "@careerhq/core";
+import { computeNextAction, scoreJob } from "@careerhq/core";
 import type { Db } from "../client.js";
 import {
-  companies, ingestRuns, jobs, scoringProfiles, watchlistCompanies,
+  applicationEvents, applications, companies, ingestRuns, jobs, scoringProfiles, watchlistCompanies,
 } from "../schema/index.js";
 import type {
   IngestRun, Job, NewIngestRun, WatchlistCompany,
@@ -212,4 +212,49 @@ export async function getOrCreateCompany(db: Db, workspaceId: string, name: stri
   const [company] = await db.select({ id: companies.id }).from(companies)
     .where(and(eq(companies.workspaceId, workspaceId), eq(companies.name, name)));
   return company!.id;
+}
+
+export type PromoteJobOutcome = { ok: true; applicationId: string } | { ok: false; reason: string };
+
+/**
+ * Promotes an inbox job straight into the application pipeline. Unlike
+ * `createApplication` (which mints a brand-new manual job row), this links the
+ * new application to THIS job row — the company and job already exist from
+ * ingest, so there is nothing to recreate. Refuses when the job is missing,
+ * not in the inbox, or already has an application (covers "already promoted"
+ * and any other terminal/duplicate state) to keep promotion idempotent.
+ */
+export async function promoteJob(db: Db, workspaceId: string, jobId: string): Promise<PromoteJobOutcome> {
+  return db.transaction(async (tx) => {
+    const [job] = await tx.select().from(jobs)
+      .where(and(eq(jobs.id, jobId), eq(jobs.workspaceId, workspaceId)))
+      .for("update");
+    if (!job) return { ok: false, reason: "job not found" };
+    if (job.status !== "inbox") return { ok: false, reason: `job is not in the inbox (status: ${job.status})` };
+
+    const [existingApp] = await tx.select({ id: applications.id }).from(applications)
+      .where(eq(applications.jobId, jobId));
+    if (existingApp) return { ok: false, reason: "job already has an application" };
+
+    const state: ApplicationState = "DISCOVERED";
+    const next = computeNextAction({ state, submittedAt: null });
+    const [app] = await tx.insert(applications).values({
+      workspaceId, jobId, state,
+      nextAction: next?.label ?? null, nextActionDue: next?.due ?? null,
+    }).returning();
+
+    await tx.insert(applicationEvents).values({
+      applicationId: app!.id, fromState: null, toState: state, trigger: "user",
+      payload: { promotedFrom: "discovery" },
+    });
+
+    await tx.update(jobs).set({ status: "promoted" }).where(eq(jobs.id, jobId));
+
+    return { ok: true, applicationId: app!.id };
+  });
+}
+
+export async function dismissJob(db: Db, workspaceId: string, jobId: string): Promise<void> {
+  await db.update(jobs).set({ status: "dismissed" })
+    .where(and(eq(jobs.id, jobId), eq(jobs.workspaceId, workspaceId)));
 }

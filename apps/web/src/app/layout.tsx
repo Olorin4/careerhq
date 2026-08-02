@@ -12,6 +12,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <nav className="app-nav">
           <a href="/overview">Overview</a>
+          <a href="/jobs">Discovery</a>
           <a href="/applications">Applications</a>
           <a href="/facts">Facts</a>
           <a href="/cvs">CVs</a>
