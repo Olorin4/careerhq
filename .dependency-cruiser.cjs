@@ -8,6 +8,13 @@ module.exports = {
       to: { path: "^(packages/(db|ai|ingest|email|autoapply|config)|apps)" },
     },
     {
+      name: "ingest-and-ai-purity",
+      comment: "ingest and ai are consumed by the worker/apps but must not reach into db or apps themselves",
+      severity: "error",
+      from: { path: "^packages/(ingest|ai)" },
+      to: { path: "^(packages/db|apps)" },
+    },
+    {
       name: "contracts-zero-deps",
       severity: "error",
       from: { path: "^packages/contracts" },
