@@ -12,15 +12,22 @@ export interface RerankSummary {
   reranked: number;
 }
 
-/** Reads `meetsMinimums` out of the full `JobScore` object persisted in `keyword_breakdown`. */
-function meetsMinimums(keywordBreakdown: unknown): boolean {
-  return (keywordBreakdown as JobScore | null)?.meetsMinimums === true;
+/**
+ * Reads the gates out of the full `JobScore` object persisted in
+ * `keyword_breakdown`. Spec §5.4: an excluded job is never shown scored, and a
+ * remote-filtered one is not a candidate either — so neither belongs in the
+ * LLM batch. They would otherwise burn tokens on listings the inbox will not
+ * display and crowd genuinely eligible jobs out of `topNForLlm`.
+ */
+function isRerankCandidate(keywordBreakdown: unknown): boolean {
+  const score = keywordBreakdown as JobScore | null;
+  return score?.meetsMinimums === true && score.excluded !== true && score.remoteFiltered !== true;
 }
 
 /**
  * Re-ranks the workspace's inbox via the LLM, layered on top of the deterministic keyword
  * score: no key configured keeps AI off entirely (`skipped_no_key`); no candidate clears the
- * keyword-scoring minimums (`skipped_empty`) — critically, this check runs *before* calling
+ * keyword-scoring gates (`skipped_empty`) — critically, this check runs *before* calling
  * `rerankJobs`, since handing it an empty job list would burn through every fallback model
  * for nothing. A model failure leaves the keyword order standing (`failed`) rather than
  * retrying inline — the next cron pass tries again.
@@ -32,7 +39,7 @@ export async function runRerankOnce(db: Db, workspaceId: string, config: AppConf
   const inbox = await listInboxJobs(db, workspaceId);
 
   const candidates = inbox
-    .filter((job) => meetsMinimums(job.keywordBreakdown))
+    .filter((job) => isRerankCandidate(job.keywordBreakdown))
     .sort((a, b) => (b.keywordScore ?? 0) - (a.keywordScore ?? 0))
     .slice(0, profile.topNForLlm);
 

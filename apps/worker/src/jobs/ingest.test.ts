@@ -1,10 +1,21 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb, ingestRuns, jobs, workspaces, type Db } from "@careerhq/db";
 import type { AppConfig } from "@careerhq/config";
+import type { JobScore } from "@careerhq/core";
 import type { FetchContext, JobFetcher } from "@careerhq/ingest";
+import type * as AiModule from "@careerhq/ai";
 import { runIngestOnce } from "./ingest.js";
 import { runRerankOnce } from "./rerank.js";
+
+// The candidate filter must decide *before* any model call, so the assertion
+// that matters is "rerankJobs was never reached" — which needs a stub, not a
+// network round-trip against a fake key.
+const { rerankJobsMock } = vi.hoisted(() => ({ rerankJobsMock: vi.fn() }));
+vi.mock("@careerhq/ai", async (importOriginal) => ({
+  ...await importOriginal<typeof AiModule>(),
+  rerankJobs: rerankJobsMock,
+}));
 
 const url = process.env.TEST_DATABASE_URL;
 const d = describe.skipIf(!url);
@@ -130,5 +141,91 @@ d("runRerankOnce", () => {
   it("returns skipped_no_key when no OpenRouter key is configured, without ever calling the LLM", async () => {
     const result = await runRerankOnce(db, workspaceId, baseConfig);
     expect(result).toEqual({ status: "skipped_no_key", reranked: 0 });
+    expect(rerankJobsMock).not.toHaveBeenCalled();
+  });
+});
+
+const keyedConfig: AppConfig = { ...baseConfig, openrouterApiKey: "sk-or-test" };
+
+/** A stored `JobScore` breakdown with every gate overridable per test. */
+function breakdown(over: Partial<JobScore>): JobScore {
+  return {
+    score: 10, excluded: false, excludedBy: [], remoteFiltered: false,
+    meetsMinimums: true, breakdown: [], ...over,
+  };
+}
+
+// Spec §5.4: excluded jobs are never shown scored, and a remote-filtered job is
+// not a candidate either. Sending them to the LLM burns tokens on listings the
+// inbox will not display and can push genuinely eligible jobs out of topNForLlm.
+d("runRerankOnce candidate filter", () => {
+  let filterWorkspaceId: string;
+
+  beforeAll(async () => {
+    if (!url) return;
+    const [ws] = await db.insert(workspaces)
+      .values({ name: `worker-filter-t-${Date.now()}`, kind: "personal" }).returning();
+    filterWorkspaceId = ws!.id;
+  });
+
+  afterAll(async () => {
+    if (!url) return;
+    await db.delete(workspaces).where(eq(workspaces.id, filterWorkspaceId));
+  });
+
+  beforeEach(async () => {
+    rerankJobsMock.mockReset();
+    if (!url) return;
+    await db.delete(jobs).where(eq(jobs.workspaceId, filterWorkspaceId));
+  });
+
+  async function seedJob(externalId: string, keywordBreakdown: JobScore): Promise<string> {
+    const [row] = await db.insert(jobs).values({
+      workspaceId: filterWorkspaceId, source: "stub-filter", externalId,
+      url: `https://example.test/${externalId}`, title: "Backend Engineer",
+      remoteMode: "remote", descriptionMd: "TypeScript on Postgres.",
+      keywordScore: keywordBreakdown.score, keywordBreakdown, status: "inbox",
+    }).returning({ id: jobs.id });
+    return row!.id;
+  }
+
+  it("skips jobs the keyword scorer excluded, even when they meet the minimums", async () => {
+    await seedJob("excluded-1", breakdown({ excluded: true, excludedBy: ["clearance"], score: 0 }));
+
+    const result = await runRerankOnce(db, filterWorkspaceId, keyedConfig);
+
+    expect(result).toEqual({ status: "skipped_empty", reranked: 0 });
+    expect(rerankJobsMock).not.toHaveBeenCalled();
+  });
+
+  it("skips remote-filtered jobs, even when they meet the minimums", async () => {
+    await seedJob("onsite-1", breakdown({ remoteFiltered: true, score: 0 }));
+
+    const result = await runRerankOnce(db, filterWorkspaceId, keyedConfig);
+
+    expect(result).toEqual({ status: "skipped_empty", reranked: 0 });
+    expect(rerankJobsMock).not.toHaveBeenCalled();
+  });
+
+  it("sends only the eligible job when excluded and remote-filtered ones sit alongside it", async () => {
+    await seedJob("excluded-2", breakdown({ excluded: true, excludedBy: ["clearance"], score: 0 }));
+    await seedJob("onsite-2", breakdown({ remoteFiltered: true, score: 0 }));
+    await seedJob("minimums-2", breakdown({ meetsMinimums: false }));
+    const eligibleId = await seedJob("eligible-2", breakdown({ score: 14 }));
+
+    rerankJobsMock.mockResolvedValue({
+      ok: true, model: "test/fast-model", latencyMs: 1, status: 200, error: null, attempts: [],
+      value: { results: [{ jobId: eligibleId, score: 91, rationale: "strong fit", redFlags: [] }] },
+    });
+
+    const result = await runRerankOnce(db, filterWorkspaceId, keyedConfig);
+
+    expect(result).toEqual({ status: "ok", reranked: 1 });
+    expect(rerankJobsMock).toHaveBeenCalledTimes(1);
+    const sentIds = (rerankJobsMock.mock.calls[0]?.[0] as AiModule.RerankJobInput[]).map((job) => job.id);
+    expect(sentIds).toEqual([eligibleId]);
+
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, eligibleId));
+    expect(row?.llmScore).toBe(91);
   });
 });
