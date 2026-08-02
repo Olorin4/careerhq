@@ -1,0 +1,77 @@
+[
+  {
+    "additionalPlain": "you will never find a job better than this one!!!\n\n\nLever builds modern recruiting software for teams to source, interview, and hire top talent. Our team strives to set a new bar for enterprise software with modern, well-designed, real-time apps. We participated in Y Combinator in summer 2012, and since then have raised $73 million. As the applicant tracking system of choice for Netflix, Eventbrit... [trimmed for fixture]",
+    "additional": "<div>you will never find a job better than this one!!!</div><div><br></div><div>Lever builds modern recruiting software for teams to source, interview, and hire top talent. Our team strives to set a new bar for enterprise software with modern, well-designed, real-time apps. We participated in Y Combinator in summer 2012, and since then have raised $73 million. As the applicant tracking system of c... [trimmed for fixture]",
+    "categories": {
+      "commitment": "Regular Full Time (Salary)",
+      "department": "Customer Success",
+      "location": "Arlington, TX",
+      "team": "Professional Services",
+      "allLocations": [
+        "Arlington, TX"
+      ]
+    },
+    "createdAt": 1553186035299,
+    "descriptionPlain": "Welcome to the Demo Job Listing for Lever! This is a fictional job created solely for demonstration purposes and is not an actual open position. We\u2019ve crafted this listing to showcase the functionality of our ATS platform, including job descriptions, application processes, and more.\n\nWhile you can explore the application process and features here, please note that applications submitted to this jo... [trimmed for fixture]",
+    "description": "<div>Welcome to the <b>Demo Job Listing</b> for Lever! This is a fictional job created solely for demonstration purposes and is <b>not an actual open position</b>. We\u2019ve crafted this listing to showcase the functionality of our ATS platform, including job descriptions, application processes, and more.</div><div><br></div><div>While you can explore the application process and features here, please ... [trimmed for fixture]",
+    "id": "33538a2f-d27d-4a96-8f05-fa4b0e4d940e",
+    "lists": [
+      {
+        "text": "Qualifications",
+        "content": "<li>be smart</li><li>be very smart</li>"
+      },
+      {
+        "text": "Duties",
+        "content": "<li>work hard</li><li>work VERY hard</li><li><b>bold text</b></li><li><i>italic text</i></li><li><s>strikethrough text</s></li><li><u>underline text</u></li><li><a rel=\"noopener noreferrer\" class=\"pos..."
+      }
+    ],
+    "text": "AbelsonTaylor Writer",
+    "country": "US",
+    "workplaceType": "hybrid",
+    "opening": "<div>Welcome to the <b>Demo Job Listing</b> for Lever! This is a fictional job created solely for demonstration purposes and is <b>not an actual open position</b>. We\u2019ve crafted this listing to showcase the functionality of our ATS platform, including job descriptions, application processes, and more.</div><div><br></div><div>While you can explore the application process and features here, please note that <b>applications submitted to this job will not be reviewed or responded to</b> as it\u2019s for demonstration only. </div>",
+    "openingPlain": "Welcome to the Demo Job Listing for Lever! This is a fictional job created solely for demonstration purposes and is not an actual open position. We\u2019ve crafted this listing to showcase the functionality of our ATS platform, including job descriptions, application processes, and more.\n\nWhile you can explore the application process and features here, please note that applications submitted to this job will not be reviewed or responded to as it\u2019s for demonstration only. \n",
+    "descriptionBody": "<div>this job is AMAAAAAAAAAAAAZING!</div>",
+    "descriptionBodyPlain": "this job is AMAAAAAAAAAAAAZING!\n",
+    "hostedUrl": "https://jobs.lever.co/leverdemo/33538a2f-d27d-4a96-8f05-fa4b0e4d940e",
+    "applyUrl": "https://jobs.lever.co/leverdemo/33538a2f-d27d-4a96-8f05-fa4b0e4d940e/apply"
+  },
+  {
+    "additionalPlain": "afafeafd\n",
+    "additional": "<div>afafeafd</div>",
+    "categories": {
+      "department": "Business Development",
+      "location": "Amsterdam, Netherlands",
+      "team": "Customer Success",
+      "allLocations": [
+        "Amsterdam, Netherlands"
+      ]
+    },
+    "createdAt": 1574697610709,
+    "descriptionPlain": "aegaegdagdag\n",
+    "description": "<div>aegaegdagdag</div>",
+    "id": "c559265a-55ec-4f75-ac56-78290081f6e7",
+    "lists": [
+      {
+        "text": "",
+        "content": "\n<li>1</li>\n<li>2</li>\n<li>3</li>\n<li>&nbsp;</li>\n"
+      }
+    ],
+    "salaryRange": {
+      "min": 10000,
+      "max": 125000,
+      "currency": "USD",
+      "interval": "per-year-salary"
+    },
+    "salaryDescription": "<div>afaf</div>",
+    "salaryDescriptionPlain": "afaf\n",
+    "text": "Account Executive",
+    "country": "NL",
+    "workplaceType": "remote",
+    "opening": "",
+    "openingPlain": "",
+    "descriptionBody": "<div>aegaegdagdag</div>",
+    "descriptionBodyPlain": "aegaegdagdag\n",
+    "hostedUrl": "https://jobs.lever.co/leverdemo/c559265a-55ec-4f75-ac56-78290081f6e7",
+    "applyUrl": "https://jobs.lever.co/leverdemo/c559265a-55ec-4f75-ac56-78290081f6e7/apply"
+  }
+]

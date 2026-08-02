@@ -1,0 +1,76 @@
+{
+  "jobs": [
+    {
+      "id": "86a60834-ba64-484d-9658-afa1bc97a957",
+      "title": "Mid Market Account Executive - EMEA (French Speaking)",
+      "department": "Sales",
+      "team": "Sales",
+      "employmentType": "FullTime",
+      "location": "France",
+      "secondaryLocations": [
+        {
+          "location": "United Kingdom",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "",
+              "addressCountry": "United Kingdom",
+              "addressLocality": ""
+            }
+          }
+        }
+      ],
+      "publishedAt": "2026-07-17T17:45:27.827+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "address": {
+        "postalAddress": {
+          "addressRegion": "",
+          "addressCountry": "France",
+          "addressLocality": ""
+        }
+      },
+      "jobUrl": "https://jobs.ashbyhq.com/ashby/86a60834-ba64-484d-9658-afa1bc97a957",
+      "applyUrl": "https://jobs.ashbyhq.com/ashby/86a60834-ba64-484d-9658-afa1bc97a957/application",
+      "descriptionHtml": "<h2><strong>About Ashby</strong></h2><ul style=\"min-height:1.5em\"><li><p style=\"min-height:1.5em\">We\u2019re building the next generation of enterprise software, starting with products that help talent leaders, recruiters, and managers unlock hiring excellence</p></li><li><p style=\"min-height:1.5em\">Series D raised in 2025, and growing ARR &gt;100% YoY</p></li><li><p style=\"min-height:1.5em\">Have thousands of amazing customers including OpenAI, Deliveroo, Lemonade &amp; Alan</p></li><li><p style=\"min... [trimmed for fixture]",
+      "descriptionPlain": "ABOUT ASHBY\n\n - We\u2019re building the next generation of enterprise software, starting with products that help talent leaders, recruiters, and managers unlock hiring excellence\n\n - Series D raised in 2025, and growing ARR >100% YoY\n\n - Have thousands of amazing customers including OpenAI, Deliveroo, Lemonade & Alan\n\n - Multiple products to win both land-and-expand and material new business deals\n\n - Rapidly moving up-market with no signs of slowing down\n\n - Implemented assistive AI https://www.ashb... [trimmed for fixture]"
+    },
+    {
+      "id": "7458d4e9-da2e-47bd-98cb-adfda43d42b2",
+      "title": "Engineering Manager - EU",
+      "department": "Engineering",
+      "team": "EMEA Engineering",
+      "employmentType": "FullTime",
+      "location": "Remote - European Union",
+      "secondaryLocations": [
+        {
+          "location": "Spain",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "Spain",
+              "addressCountry": "Spain",
+              "addressLocality": "Spain"
+            }
+          }
+        }
+      ],
+      "publishedAt": "2024-03-04T14:29:08.532+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "address": {
+        "postalAddress": {
+          "postalCode": "",
+          "addressRegion": "",
+          "addressCountry": "European Union",
+          "addressLocality": ""
+        }
+      },
+      "jobUrl": "https://jobs.ashbyhq.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2",
+      "applyUrl": "https://jobs.ashbyhq.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application",
+      "descriptionHtml": "<p style=\"min-height:1.5em\">Hi \ud83d\udc4b I\u2019m <a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://uk.linkedin.com/in/colinhoweuk\"><u>Colin</u></a>, Director of Engineering, Europe. How do you feel about software engineers writing product specs, making product decisions, and not breaking down projects into individual tickets? If that sounds exciting (even if a bit scary), read on because I\u2019m looking for an engineering manager to help us build a different type of engineering team and cultur... [trimmed for fixture]",
+      "descriptionPlain": "Hi \ud83d\udc4b I\u2019m Colin https://uk.linkedin.com/in/colinhoweuk, Director of Engineering, Europe. How do you feel about software engineers writing product specs, making product decisions, and not breaking down projects into individual tickets? If that sounds exciting (even if a bit scary), read on because I\u2019m looking for an engineering manager to help us build a different type of engineering team and culture at Ashby.\n\nTo start, why do we need to be different? Time and again, I have witnessed engineers kn... [trimmed for fixture]"
+    }
+  ],
+  "apiVersion": "1"
+}

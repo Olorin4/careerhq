@@ -6,3 +6,4 @@ export * from "./fetchers/remoteok.js";
 export * from "./fetchers/arbeitnow.js";
 export * from "./fetchers/wwr.js";
 export * from "./fetchers/themuse.js";
+export * from "./fetchers/ats-boards.js";
