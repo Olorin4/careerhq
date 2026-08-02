@@ -41,6 +41,8 @@ The headline AI demo.
 
 **Demo:** grounded generation with citations — including a deliberate on-camera block when no supporting fact exists.
 
+Carried from the P2 final review (fix during P3): clear stale `llm_score` for inbox jobs outside the latest rerank batch so old reranks stop dominating ordering; surface duplicates whose canonical job expired or was dismissed; persist `salaryRaw`/`postedAt` (fetchers already map them — schema v3 columns); replace the dead `#` link when a job has no URL; extract `getOrCreateCompany` into a shared companies repo.
+
 ## P4 — Email channel
 
 First live external mutation — the gate framework becomes real.
