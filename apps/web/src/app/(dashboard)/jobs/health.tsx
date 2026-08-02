@@ -2,8 +2,8 @@ import { listIngestRuns } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
 import { timeAgo } from "../../../lib/time.js";
 
-interface ErrorsRecord {
-  [key: string]: string | string[] | undefined;
+interface ErrorItem {
+  message: string;
 }
 
 export async function IngestHealth({ workspaceId }: { workspaceId: string }) {
@@ -38,6 +38,9 @@ export async function IngestHealth({ workspaceId }: { workspaceId: string }) {
             ? `${Math.round((run.finishedAt.getTime() - run.startedAt.getTime()) / 1000)}s`
             : "—";
 
+          // Defensively coerce errors to array; handle both array and non-array shapes
+          const errorsList = Array.isArray(run.errors) ? run.errors : [];
+
           return (
             <tr key={run.id}>
               <td>{run.source}</td>
@@ -48,28 +51,23 @@ export async function IngestHealth({ workspaceId }: { workspaceId: string }) {
               <td>{run.updated}</td>
               <td>{run.duplicates}</td>
               <td>
-                {run.errors ? (
+                {errorsList.length > 0 ? (
                   <details className="ingest-error-details">
                     <summary className="badge badge-error">
-                      {Object.keys(run.errors).length}
+                      {errorsList.length}
                       {" "}
                       error
-                      {Object.keys(run.errors).length > 1 ? "s" : ""}
+                      {errorsList.length > 1 ? "s" : ""}
                     </summary>
                     <div className="ingest-error-messages">
-                      {Object.entries(run.errors as ErrorsRecord).map(([key, value]) => {
-                        const messages = Array.isArray(value) ? value : [value];
-                        return (
-                          <div key={key}>
-                            <strong>{key}:</strong>
-                            <ul>
-                              {messages.map((msg, idx) => (
-                                <li key={idx}>{msg}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        );
-                      })}
+                      <ul>
+                        {errorsList.map((item, idx) => {
+                          const message = (item as ErrorItem)?.message ?? String(item);
+                          return (
+                            <li key={idx}>{message}</li>
+                          );
+                        })}
+                      </ul>
                     </div>
                   </details>
                 ) : (
