@@ -1,0 +1,29 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: { POSTGRES_USER: careerhq, POSTGRES_PASSWORD: careerhq, POSTGRES_DB: careerhq }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U careerhq" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgres://careerhq:careerhq@localhost:5432/careerhq
+      TEST_DATABASE_URL: postgres://careerhq:careerhq@localhost:5432/careerhq
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm depcruise
+      - run: pnpm --filter @careerhq/db db:migrate
+      - run: pnpm typecheck
+      - run: pnpm test
