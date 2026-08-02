@@ -5,6 +5,7 @@ import {
 import { getDb } from "../../../lib/db.js";
 import { getActiveWorkspace } from "../../../lib/workspace.js";
 import { JobRow, type JobRowData, type ScoreBreakdownRow } from "./job-row.js";
+import { IngestHealth } from "./health.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -71,6 +72,11 @@ export default async function JobsPage() {
         {inbox.length} in inbox
         {duplicateCount > 0 ? ` · ${duplicateCount} hidden duplicates` : ""}
       </p>
+
+      <details className="ingest-health-details">
+        <summary>Pipeline health</summary>
+        <IngestHealth workspaceId={ws.id} />
+      </details>
 
       {ranked.length === 0 ? (
         <p>No ranked jobs in the inbox.</p>

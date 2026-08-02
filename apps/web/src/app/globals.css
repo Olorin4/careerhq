@@ -497,3 +497,44 @@ body {
   margin: 0;
   font-size: 0.85rem;
 }
+
+.ingest-health-details {
+  margin: 1.5rem 0;
+}
+
+.ingest-health-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.ingest-health-table th,
+.ingest-health-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.ingest-health-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #666;
+}
+
+.ingest-error-details {
+  display: inline;
+}
+
+.badge-error {
+  background: #b00020;
+  color: #fff;
+}
+
+.ingest-error-messages {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #fff5f5;
+  border-left: 3px solid #b00020;
+  font-size: 0.85rem;
+}
