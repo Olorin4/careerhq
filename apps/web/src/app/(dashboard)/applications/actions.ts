@@ -29,7 +29,9 @@ export async function createApplicationAction(formData: FormData): Promise<void>
 
 const transitionSchema = z.object({ applicationId: z.string().uuid(), to: applicationStateSchema });
 
-export async function transitionApplicationAction(raw: { applicationId: string; to: string }) {
+export async function transitionApplicationAction(
+  raw: { applicationId: string; to: string },
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   const args = transitionSchema.parse(raw);
   const db = getDb();
   const result = await transitionApplication(db, {
