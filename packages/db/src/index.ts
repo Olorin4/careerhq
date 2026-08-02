@@ -1,6 +1,8 @@
 export * from "./client.js";
 export * from "./schema/index.js";
 export * from "./repos/applications.js";
+export * from "./repos/facts.js";
+export * from "./repos/cv-variants.js";
 import type {
   applicationAttempts, applicationEvents, applications, candidateFacts, cvVariants, jobs, workspaces,
 } from "./schema/index.js";
