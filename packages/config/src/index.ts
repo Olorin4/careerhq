@@ -35,6 +35,19 @@ const boolFromEnv = z
   .default("false")
   .transform((v) => v === "true");
 
+const DEFAULT_AI_FAST_MODELS = [
+  "google/gemini-2.0-flash-exp:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+];
+
+/** Splits a comma-separated env value into trimmed, non-empty entries. */
+function parseCommaList(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 const envSchema = z.object({
   DATABASE_URL: z
     .string({
@@ -50,6 +63,13 @@ const envSchema = z.object({
   SANDBOX_FORCE_SAFE: boolFromEnv,
   FOLLOW_UP_DAYS: z.coerce.number().int().positive().default(7),
   FILE_STORAGE_DIR: z.string().default("var/files").transform(resolveStorageDir),
+  // AI features are off by default (deterministic floor) until a key is provisioned.
+  OPENROUTER_API_KEY: z.string().optional(),
+  AI_FAST_MODELS: z
+    .string()
+    .default(DEFAULT_AI_FAST_MODELS.join(","))
+    .transform(parseCommaList),
+  INGEST_CRON: z.string().default("0 */6 * * *"),
 });
 
 export interface AppConfig {
@@ -60,6 +80,10 @@ export interface AppConfig {
   followUpDays: number;
   /** Always absolute: relative FILE_STORAGE_DIR values resolve against the repo root. */
   fileStorageDir: string;
+  /** null (default) keeps AI features off — the deterministic floor when no key is provisioned. */
+  openrouterApiKey: string | null;
+  aiFastModels: string[];
+  ingestCron: string;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
@@ -78,5 +102,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sandboxForceSafe: parsed.SANDBOX_FORCE_SAFE,
     followUpDays: parsed.FOLLOW_UP_DAYS,
     fileStorageDir: parsed.FILE_STORAGE_DIR,
+    openrouterApiKey: parsed.OPENROUTER_API_KEY ?? null,
+    aiFastModels: parsed.AI_FAST_MODELS,
+    ingestCron: parsed.INGEST_CRON,
   };
 }

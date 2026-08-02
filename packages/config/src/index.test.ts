@@ -37,4 +37,29 @@ describe("loadConfig", () => {
   it("keeps an absolute FILE_STORAGE_DIR as given (the Docker volume path)", () => {
     expect(loadConfig({ ...BASE, FILE_STORAGE_DIR: "/app/var/files" }).fileStorageDir).toBe("/app/var/files");
   });
+
+  it("defaults AI features off: no OPENROUTER_API_KEY → null", () => {
+    expect(loadConfig(BASE).openrouterApiKey).toBeNull();
+  });
+  it("passes through OPENROUTER_API_KEY when set", () => {
+    expect(loadConfig({ ...BASE, OPENROUTER_API_KEY: "sk-or-123" }).openrouterApiKey).toBe("sk-or-123");
+  });
+  it("defaults aiFastModels to the free-tier fallback list", () => {
+    expect(loadConfig(BASE).aiFastModels).toEqual([
+      "google/gemini-2.0-flash-exp:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+    ]);
+  });
+  it("parses AI_FAST_MODELS as a comma list, trimming whitespace and dropping empties", () => {
+    expect(loadConfig({ ...BASE, AI_FAST_MODELS: "a,b , c" }).aiFastModels).toEqual(["a", "b", "c"]);
+  });
+  it("drops empty entries from AI_FAST_MODELS (trailing comma, blank segments)", () => {
+    expect(loadConfig({ ...BASE, AI_FAST_MODELS: "a,,b," }).aiFastModels).toEqual(["a", "b"]);
+  });
+  it("defaults ingestCron to every 6 hours", () => {
+    expect(loadConfig(BASE).ingestCron).toBe("0 */6 * * *");
+  });
+  it("passes through a custom INGEST_CRON", () => {
+    expect(loadConfig({ ...BASE, INGEST_CRON: "*/15 * * * *" }).ingestCron).toBe("*/15 * * * *");
+  });
 });
