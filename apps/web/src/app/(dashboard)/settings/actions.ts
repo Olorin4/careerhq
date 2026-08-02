@@ -51,7 +51,11 @@ export async function saveScoringProfileAction(
 const watchlistEntrySchema = z.object({
   companyName: z.string().trim().min(1),
   atsType: atsTypeSchema,
-  boardSlug: z.string().trim().min(1),
+  // The slug is interpolated straight into the ATS board URL by the fetchers,
+  // so anything outside this set could reshape the request path.
+  boardSlug: z.string().trim().min(1).regex(/^[A-Za-z0-9._-]+$/, {
+    message: "board slug: letters, digits, dots, dashes, underscores only",
+  }),
 });
 
 /**

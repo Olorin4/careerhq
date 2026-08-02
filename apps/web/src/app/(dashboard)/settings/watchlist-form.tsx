@@ -46,7 +46,12 @@ export function WatchlistForm() {
       </label>
       <label>
         Board slug
-        <input name="boardSlug" type="text" placeholder="e.g. stripe" required />
+        {/* Mirrors the server-side regex in actions.ts; the action still validates. */}
+        <input
+          name="boardSlug" type="text" placeholder="e.g. stripe" required
+          pattern="[A-Za-z0-9._\-]+"
+          title="Letters, digits, dots, dashes, underscores only"
+        />
       </label>
       <p className="watchlist-form-help">
         The slug from the company&apos;s public job board URL: boards.greenhouse.io/&lt;slug&gt;,
