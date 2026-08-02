@@ -1,4 +1,5 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { createDb, type Db, workspaces } from "../index.js";
 import { createApplication, transitionApplication, getApplicationDetail } from "./applications.js";
 
@@ -9,9 +10,19 @@ let db: Db;
 let workspaceId: string;
 
 beforeAll(async () => {
-  db = createDb(url!);
+  if (!url) return;
+  db = createDb(url);
   const [ws] = await db.insert(workspaces).values({ name: `t-${Date.now()}`, kind: "personal" }).returning();
   workspaceId = ws!.id;
+});
+
+// The throwaway workspace would otherwise accumulate in the dev database and
+// compete with the seeded one for `getActiveWorkspace`. Deleting it cascades
+// to everything these tests created.
+afterAll(async () => {
+  if (!url) return;
+  await db.delete(workspaces).where(eq(workspaces.id, workspaceId));
+  await db.$client.end();
 });
 
 d("applications repo", () => {
