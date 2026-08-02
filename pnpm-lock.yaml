@@ -121,6 +121,9 @@ importers:
       '@careerhq/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@careerhq/core':
+        specifier: workspace:*
+        version: link:../core
       drizzle-orm:
         specifier: ^0.44.0
         version: 0.44.7(pg@8.22.0)(postgres@3.4.9)

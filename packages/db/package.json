@@ -16,7 +16,8 @@
   "dependencies": {
     "drizzle-orm": "^0.44.0",
     "postgres": "^3.4.0",
-    "@careerhq/contracts": "workspace:*"
+    "@careerhq/contracts": "workspace:*",
+    "@careerhq/core": "workspace:*"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.0",

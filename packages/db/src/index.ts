@@ -1,5 +1,6 @@
 export * from "./client.js";
 export * from "./schema/index.js";
+export * from "./repos/applications.js";
 import type {
   applicationAttempts, applicationEvents, applications, candidateFacts, cvVariants, jobs, workspaces,
 } from "./schema/index.js";
