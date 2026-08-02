@@ -6,18 +6,24 @@ This is a portfolio project built to demonstrate full-stack product engineering 
 
 ## Current status
 
-**P1 — Foundation, tracker, and Fact Bank — is complete.** Shipped so far:
+**P1 (Foundation, tracker, Fact Bank) and P2 (discovery ingestion and scoring) are complete.** Shipped so far:
 
 - Monorepo scaffold (pnpm workspaces + Turborepo), strict TypeScript, ESLint.
 - Compose stack (`postgres`, `mailpit`, `web`, `worker`) with a parameterized Postgres host port.
-- `packages/contracts` (shared Zod schemas/enums), `packages/core` (pure application + attempt state machines with guards), `packages/config` (validated env, submission gates default **off**), `packages/db` (Drizzle schema, migrations, repositories).
+- `packages/contracts` (shared Zod schemas/enums), `packages/core` (pure application + attempt state machines with guards, plus the deterministic keyword scorer), `packages/config` (validated env, submission gates default **off**), `packages/db` (Drizzle schema, migrations, repositories).
 - Tracker UI: Kanban board with guarded state transitions (illegal moves show the guard's reason in the UI), application detail page with a genuine append-only event timeline, and an overview panel that surfaces the one computed next action and any overdue follow-ups.
 - Candidate Fact Bank: CRUD across categories with sensitivity levels, verification/review dates, and stale-fact flagging.
 - CV variant upload (designed + ATS-safe formats) with SHA-256 hashes on the file volume.
 - Idempotent "Alex Demo" seed (`pnpm seed`) — ~15 facts, 2 CV variants, ~10 applications spread across states with real event history.
+- **Job discovery ingestion** (`packages/ingest`): keyless-public fetchers for Remotive, RemoteOK, Arbeitnow, We Work Remotely, and The Muse, plus a Greenhouse/Lever/Ashby public-board fetcher over a user-maintained watchlist. `(source, external_id)` + content-hash dedup, 21-day expiry detection. No scraping, no credentials — see [ADR-0006](docs/adr/0006-scraping-and-tos-boundaries.md).
+- **Scheduled pipeline** (`apps/worker`): a pg-boss `discovery.ingest` queue on a configurable cron (`INGEST_CRON`, default every 6 hours) runs every fetcher, marks expired jobs, and scores the inbox; a `discovery.rerank` queue follows behind it. Every run is recorded (`ingest_runs`) and visible in the `/jobs` pipeline-health panel.
+- **Deterministic keyword scoring** (`packages/core`), always on: a per-workspace profile of role/stack/boost/exclude terms and a remote requirement produces a score with a persisted per-term breakdown, editable from `/settings`.
+- **Optional LLM re-rank** (`packages/ai`): an OpenRouter `chatJson` client (JSON mode, tolerant extraction, Zod validation, never throws) with sequential model fallback and per-model 429 cooldown — see [ADR-0003](docs/adr/0003-openrouter-sequential-fallback.md). Re-ranks the top N keyword-scored jobs with a rationale and red flags, and never deletes or hides anything. With no `OPENROUTER_API_KEY`, the keyword order stands as-is and re-rank reports `skipped_no_key` — the whole feature works with zero AI configuration.
+- **`/jobs` discovery inbox**: ranked listings with score breakdown chips and LLM rationale where available, promote-to-application (links the discovery job onto the P1 tracker board), dismiss, collapsed duplicates, and the pipeline-health panel.
+- **`/settings`**: scoring-profile editor (roles/stack/boost/exclude/remote-only) and the ATS watchlist (add/remove companies the board fetcher polls next run).
 - CI (GitHub Actions): lint, typecheck, dependency-cruiser import-boundary checks, and the test suite against a real Postgres service container.
 
-Everything past this point — job discovery ingestion, AI-assisted material generation, the live email channel, assisted auto-apply, the hosted demo, and the restricted-source connector — is **planned**, not built. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan (P2–P7) and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
+Everything past this point — AI-assisted material generation, the live email channel, assisted auto-apply, the hosted demo, and the restricted-source connector — is **planned**, not built. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan (P3–P7) and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
 
 ## Quickstart
 
@@ -35,6 +41,14 @@ pnpm --filter @careerhq/web dev   # http://localhost:3000
 ```
 
 Mailpit's web UI is at `http://localhost:8025` (dev/demo SMTP sink — nothing is wired to send through it yet in P1).
+
+`apps/worker` (P2 onward) needs `pnpm --filter @careerhq/worker dev` (or the Compose `worker` service) running for scheduled discovery ingestion; without it, `/jobs` stays empty until you trigger ingestion some other way (e.g. the smoke-test pattern in `apps/worker/src/jobs/ingest.test.ts`, calling `runIngestOnce` directly).
+
+**Discovery/AI env vars (all optional — every default keeps the deterministic floor working):**
+
+- `OPENROUTER_API_KEY` — unset by default. Without it, the keyword-score order stands as-is and the worker's re-rank pass reports `skipped_no_key`; nothing in discovery requires it to function.
+- `AI_FAST_MODELS` — comma-separated OpenRouter model ids tried in order for re-rank (and later fast-tier tasks), e.g. `google/gemini-2.0-flash-exp:free,meta-llama/llama-3.3-70b-instruct:free`. Defaults to two free-tier models; see [ADR-0003](docs/adr/0003-openrouter-sequential-fallback.md) for why fallback is sequential rather than raced.
+- `INGEST_CRON` — cron expression for the worker's `discovery.ingest` schedule. Defaults to `0 */6 * * *` (every 6 hours).
 
 **One `.env`, at the repo root.** Nothing in this repo auto-loads it: `drizzle-kit`, the seed (`tsx`), `next dev` (which would only look inside `apps/web`), and the worker each load `<repo root>/.env` explicitly at startup. Variables already exported in your shell win over the file, which is Node's own `--env-file` rule. Copying `.env.example` is therefore enough — no `export DATABASE_URL=…` needed. In Docker, no `.env` exists and Compose supplies the environment instead.
 
@@ -89,15 +103,17 @@ flowchart LR
     restricted -->|"proxy pool only"| boards["Restricted boards\nLinkedIn, Indeed, Glassdoor,\nGoogle Jobs, ZipRecruiter"]
 ```
 
-In P1, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, and the file volume — everything else (feeds, OpenRouter, live SMTP/IMAP, live company-site submission, the restricted connector) is architected for but not yet wired up.
+As of P2, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, the file volume, the keyless job **feeds** (Remotive, RemoteOK, Arbeitnow, WWR, The Muse, and watchlisted Greenhouse/Lever/Ashby boards), and, if `OPENROUTER_API_KEY` is set, **OpenRouter** for re-rank — everything else (live SMTP/IMAP, live company-site submission, the restricted connector) is architected for but not yet wired up.
 
 ## Documentation
 
 - [`career-hq-product-spec.md`](career-hq-product-spec.md) — the normative product specification (v0.3).
 - [`docs/architecture.md`](docs/architecture.md) — system diagram, data model, monorepo layout, gated-submission sequence.
-- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1 (done) through P7.
+- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P2 (done) through P7.
 - [`docs/adr/0001-postgres-and-pg-boss.md`](docs/adr/0001-postgres-and-pg-boss.md) — why Postgres + pg-boss over SQLite/Redis.
 - [`docs/adr/0002-gated-mutation-protocol.md`](docs/adr/0002-gated-mutation-protocol.md) — the three-layer gated-mutation design (state machine shipped in P1, enforcement lands in P4).
+- [`docs/adr/0003-openrouter-sequential-fallback.md`](docs/adr/0003-openrouter-sequential-fallback.md) — the ported `chat-json` pattern and why fallback is sequential, not raced.
+- [`docs/adr/0006-scraping-and-tos-boundaries.md`](docs/adr/0006-scraping-and-tos-boundaries.md) — the keyless-only core boundary and the isolated, opt-in restricted-source connector.
 
 ## Screenshots
 
