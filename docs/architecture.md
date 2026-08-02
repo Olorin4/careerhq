@@ -14,7 +14,7 @@ flowchart LR
         demoats["apps/demo-ats\n(demo compose only)"]
         vol[/"file volume\nCVs, screenshots, bodies"/]
     end
-    feeds["Job feeds\nRemotive, RemoteOK, Arbeitnow,\nWWR, TheMuse, GH/Lever boards"]
+    feeds["Job feeds\nRemotive, RemoteOK, Arbeitnow, WWR,\nTheMuse, GH/Lever/Ashby boards,\noptional BYO-key: Adzuna/Reed/USAJobs"]
     or["OpenRouter"]
     smtp["User SMTP/IMAP\n(personal mode, gated)"]
     sites["Company career sites\n(personal mode, gated)"]

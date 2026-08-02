@@ -53,8 +53,9 @@ Details: `docs/architecture.md`. Delivery order: `docs/roadmap.md`.
 Keyless public feeds and endpoints only, fetched politely (honest User-Agent, per-source rate limits, conditional requests where supported):
 
 - Remotive, RemoteOK, Arbeitnow, We Work Remotely, The Muse (public APIs/feeds).
-- Public Greenhouse (`boards-api.greenhouse.io`) and Lever (`api.lever.co/v0/postings`) boards for companies on a user-maintained watchlist.
+- Public ATS boards for companies on a user-maintained watchlist: Greenhouse (`boards-api.greenhouse.io`), Lever (`api.lever.co/v0/postings`), and Ashby (`api.ashbyhq.com/posting-api/job-board`).
 - Hacker News "Who is hiring" threads (stretch goal — noisiest source).
+- Optional bring-your-own-key sources — Adzuna, Reed.co.uk, USAJobs — all offering free developer keys; their fetchers run only when the user configures a key. The keyless-first principle stands: no core feature depends on them.
 - Manual URL/paste capture for anything else.
 
 Scraping sites that prohibit it, and any credentialed job-board access, are out of scope.

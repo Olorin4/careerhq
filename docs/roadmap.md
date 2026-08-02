@@ -18,7 +18,7 @@ The skeleton that proves the architecture.
 
 ## P2 — Discovery ingestion and scoring
 
-- `packages/ingest`: normalizer, `(source, external_id)` + content-hash dedupe, expiry detection; fetchers for Remotive, RemoteOK, Arbeitnow, We Work Remotely, The Muse, and Greenhouse/Lever board polling from a watchlist. HN "Who is hiring" as stretch.
+- `packages/ingest`: normalizer, `(source, external_id)` + content-hash dedupe, expiry detection; fetchers for Remotive, RemoteOK, Arbeitnow, We Work Remotely, The Muse, and Greenhouse/Lever/Ashby board polling from a watchlist. Stretch: HN "Who is hiring", and bring-your-own-key fetchers (Adzuna, Reed.co.uk, USAJobs).
 - pg-boss scheduled ingestion; `ingest_runs` + pipeline-health panel.
 - Deterministic keyword scorer in `core` with persisted per-term breakdown; scoring-profile settings UI.
 - `packages/ai`: chatJson client, sequential fallback, model-tier config; `rerank` task over top-25 with rationale and red flags.
