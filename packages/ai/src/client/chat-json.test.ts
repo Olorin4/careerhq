@@ -80,6 +80,17 @@ describe("chatJson", () => {
     expect(r.error).toBe("no_json");
   });
 
+  it("non-JSON 200 response body → no_json with status preserved (not indistinguishable from a network failure)", async () => {
+    const r = await chatJson({
+      ...base,
+      fetchImpl: (async () =>
+        new Response("not json at all", { status: 200 })) as unknown as typeof fetch,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(200);
+    expect(r.error).toBe("no_json");
+  });
+
   it("sends the expected headers and body shape, using default url and timeout", async () => {
     let capturedUrl: string | undefined;
     let capturedInit: RequestInit | undefined;

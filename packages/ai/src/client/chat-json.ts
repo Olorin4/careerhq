@@ -117,7 +117,20 @@ export async function chatJson<T>(req: ChatJsonRequest<T>): Promise<ChatJsonResu
       };
     }
 
-    const payload = (await response.json()) as ChatCompletionResponse;
+    let payload: ChatCompletionResponse;
+    try {
+      payload = (await response.json()) as ChatCompletionResponse;
+    } catch {
+      return {
+        ok: false,
+        value: null,
+        model,
+        latencyMs,
+        status: response.status,
+        error: "no_json",
+      };
+    }
+
     const rawContent = payload?.choices?.[0]?.message?.content;
     const json = extractContentValue(rawContent);
 
