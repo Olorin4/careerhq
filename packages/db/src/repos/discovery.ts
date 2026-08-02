@@ -6,7 +6,7 @@ import {
   type ApplicationState, type AtsType, type NormalizedJob, type RerankResult, type ScoringProfile,
 } from "@careerhq/contracts";
 import { computeNextAction, scoreJob } from "@careerhq/core";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import {
   applicationEvents, applications, companies, ingestRuns, jobs, scoringProfiles, watchlistCompanies,
 } from "../schema/index.js";
@@ -206,7 +206,12 @@ export async function removeWatchlistEntry(db: Db, id: string): Promise<void> {
   await db.delete(watchlistCompanies).where(eq(watchlistCompanies.id, id));
 }
 
-export async function getOrCreateCompany(db: Db, workspaceId: string, name: string): Promise<string> {
+/**
+ * Insert-or-select against `companies_workspace_name` (migration 0001). Takes
+ * `DbOrTx` so callers already inside a transaction — `createApplication` — get
+ * the same conflict-safe semantics without opening a nested one.
+ */
+export async function getOrCreateCompany(db: DbOrTx, workspaceId: string, name: string): Promise<string> {
   await db.insert(companies).values({ workspaceId, name })
     .onConflictDoNothing({ target: [companies.workspaceId, companies.name] });
   const [company] = await db.select({ id: companies.id }).from(companies)

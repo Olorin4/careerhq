@@ -3,9 +3,10 @@ import type { ApplicationState, TransitionTrigger } from "@careerhq/contracts";
 import { canTransition, computeNextAction, type TransitionContext } from "@careerhq/core";
 import type { Db } from "../client.js";
 import {
-  applicationAttempts, applicationEvents, applications, companies, jobs,
+  applicationAttempts, applicationEvents, applications, jobs,
 } from "../schema/index.js";
 import type { Application, ApplicationEvent, Job } from "../index.js";
+import { getOrCreateCompany } from "./discovery.js";
 
 export interface CreateApplicationInput {
   workspaceId: string; companyName: string; jobTitle: string;
@@ -15,10 +16,12 @@ export interface CreateApplicationInput {
 
 export async function createApplication(db: Db, input: CreateApplicationInput): Promise<Application> {
   return db.transaction(async (tx) => {
-    const [company] = await tx.insert(companies)
-      .values({ workspaceId: input.workspaceId, name: input.companyName }).returning();
+    // Companies are UNIQUE(workspace_id, name) since migration 0001 and discovery
+    // ingest fills that table en masse, so a bare insert here would 23505 the
+    // moment the user files against a company the inbox already knows.
+    const companyId = await getOrCreateCompany(tx, input.workspaceId, input.companyName);
     const [job] = await tx.insert(jobs).values({
-      workspaceId: input.workspaceId, companyId: company!.id,
+      workspaceId: input.workspaceId, companyId,
       title: input.jobTitle, url: input.jobUrl, source: "manual", status: "promoted",
     }).returning();
 

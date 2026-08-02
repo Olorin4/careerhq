@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
-import { createDb, type Db, workspaces } from "../index.js";
+import { and, eq } from "drizzle-orm";
+import { companies, createDb, type Db, workspaces } from "../index.js";
 import { createApplication, transitionApplication, getApplicationDetail } from "./applications.js";
+import { getOrCreateCompany } from "./discovery.js";
 
 const url = process.env.TEST_DATABASE_URL;
 const d = describe.skipIf(!url);
@@ -63,5 +64,33 @@ d("applications repo", () => {
     expect(app.state).toBe("SUBMITTED");
     expect(app.nextAction).toBe("Follow up");
     expect(app.nextActionDue?.toISOString()).toBe("2026-08-08T00:00:00.000Z");
+  });
+
+  // Migration 0001 added UNIQUE(workspace_id, name) on companies, and discovery
+  // ingest populates that table en masse. A bare insert here would raise
+  // SQLSTATE 23505 the moment someone files a manual application against a
+  // company discovery already knows about.
+  it("reuses an existing company row instead of violating companies_workspace_name", async () => {
+    const companyId = await getOrCreateCompany(db, workspaceId, "Epsilon");
+
+    const app = await createApplication(db, { workspaceId, companyName: "Epsilon", jobTitle: "Dev" });
+
+    const detail = await getApplicationDetail(db, app.id);
+    expect(detail?.job.companyId).toBe(companyId);
+    const rows = await db.select().from(companies)
+      .where(and(eq(companies.workspaceId, workspaceId), eq(companies.name, "Epsilon")));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("creates the company on first use and reuses it on a second application", async () => {
+    const first = await createApplication(db, { workspaceId, companyName: "Zeta", jobTitle: "Dev" });
+    const second = await createApplication(db, { workspaceId, companyName: "Zeta", jobTitle: "Staff Dev" });
+
+    const firstDetail = await getApplicationDetail(db, first.id);
+    const secondDetail = await getApplicationDetail(db, second.id);
+    expect(firstDetail?.job.companyId).toBe(secondDetail?.job.companyId);
+    const rows = await db.select().from(companies)
+      .where(and(eq(companies.workspaceId, workspaceId), eq(companies.name, "Zeta")));
+    expect(rows).toHaveLength(1);
   });
 });

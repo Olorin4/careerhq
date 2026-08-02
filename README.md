@@ -58,6 +58,14 @@ Mailpit's web UI is at `http://localhost:8025` (dev/demo SMTP sink — nothing i
 
 **Port already in use?** If `5432` is taken on your host, set `CAREERHQ_PG_PORT` (e.g. `CAREERHQ_PG_PORT=5433`) before `docker compose up`, and update `DATABASE_URL` in `.env` to match. The compose file reads this variable to remap the Postgres host port; the container's internal port and `web`/`worker`'s in-network `DATABASE_URL` are unaffected.
 
+**Upgrading a pre-P2 database.** Migration `0001` adds `UNIQUE(workspace_id, name)` on `companies` — P1 allowed duplicates, so a database seeded before P2 may fail the migration on existing rows. Check and dedupe first:
+
+```sql
+select workspace_id, name, count(*) from companies group by 1, 2 having count(*) > 1;
+```
+
+For each group, repoint `jobs.company_id` at the row you keep and delete the rest, then run `db:migrate`.
+
 **Resetting the database.** `drizzle-kit migrate` does not drop existing objects. To fully reset (e.g. after a schema change that doesn't cleanly migrate), connect with `psql` and run:
 
 ```sql
