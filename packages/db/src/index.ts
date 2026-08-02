@@ -1,0 +1,19 @@
+export * from "./client.js";
+export * from "./schema/index.js";
+import type {
+  applicationAttempts, applicationEvents, applications, candidateFacts, cvVariants, jobs, workspaces,
+} from "./schema/index.js";
+export type Application = typeof applications.$inferSelect;
+export type NewApplication = typeof applications.$inferInsert;
+export type ApplicationEvent = typeof applicationEvents.$inferSelect;
+export type NewApplicationEvent = typeof applicationEvents.$inferInsert;
+export type ApplicationAttempt = typeof applicationAttempts.$inferSelect;
+export type NewApplicationAttempt = typeof applicationAttempts.$inferInsert;
+export type CandidateFact = typeof candidateFacts.$inferSelect;
+export type NewCandidateFact = typeof candidateFacts.$inferInsert;
+export type CvVariant = typeof cvVariants.$inferSelect;
+export type NewCvVariant = typeof cvVariants.$inferInsert;
+export type Job = typeof jobs.$inferSelect;
+export type NewJob = typeof jobs.$inferInsert;
+export type Workspace = typeof workspaces.$inferSelect;
+export type NewWorkspace = typeof workspaces.$inferInsert;
