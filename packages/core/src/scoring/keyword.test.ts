@@ -48,6 +48,14 @@ describe("keyword scorer (spec §5.4)", () => {
     expect(scoreJob({ title: "Full-Stack", remoteMode: "onsite" },
       { ...profile, requireRemote: false }).remoteFiltered).toBe(false);
   });
+  // "hybrid" means on-site some of the week, so requireRemote must filter it
+  // exactly like "onsite". No fetcher emits "hybrid" yet (a better Lever
+  // mapping will), so this locks the semantics in ahead of the mapping.
+  it("remote filtering: hybrid is filtered under requireRemote, kept without it", () => {
+    expect(scoreJob({ title: "Full-Stack", remoteMode: "hybrid" }, profile).remoteFiltered).toBe(true);
+    expect(scoreJob({ title: "Full-Stack", remoteMode: "hybrid" },
+      { ...profile, requireRemote: false }).remoteFiltered).toBe(false);
+  });
   it("meetsMinimums false when role hits below minimum", () => {
     const s = scoreJob({ title: "Backend dev", descriptionMd: "typescript", remoteMode: "remote" }, profile);
     expect(s.meetsMinimums).toBe(false);

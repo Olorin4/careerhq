@@ -48,8 +48,11 @@ export function scoreJob(
   const excluded = excludedBy.length > 0;
 
   const mode = job.remoteMode ?? "unknown";
+  // "hybrid" still requires being on site part of the week, so requireRemote
+  // filters it exactly like "onsite".
   const remoteFiltered = profile.requireRemote &&
-    (mode === "onsite" || ((mode === "unknown") && !profile.includeUnknownRemote));
+    (mode === "onsite" || mode === "hybrid"
+      || ((mode === "unknown") && !profile.includeUnknownRemote));
 
   return {
     score: excluded || remoteFiltered ? 0 : score,
