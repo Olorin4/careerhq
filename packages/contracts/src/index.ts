@@ -40,3 +40,53 @@ export const cvFormatSchema = z.enum(CV_FORMATS);
 export const WORKSPACE_KINDS = ["personal", "sandbox"] as const;
 export type WorkspaceKind = (typeof WORKSPACE_KINDS)[number];
 export const workspaceKindSchema = z.enum(WORKSPACE_KINDS);
+
+export const JOB_STATUSES = ["inbox", "promoted", "dismissed"] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+export const jobStatusSchema = z.enum(JOB_STATUSES);
+
+export const REMOTE_MODES = ["remote", "hybrid", "onsite", "unknown"] as const;
+export type RemoteMode = (typeof REMOTE_MODES)[number];
+export const remoteModeSchema = z.enum(REMOTE_MODES);
+
+export const ATS_TYPES = ["greenhouse", "lever", "ashby"] as const;
+export type AtsType = (typeof ATS_TYPES)[number];
+export const atsTypeSchema = z.enum(ATS_TYPES);
+
+export const normalizedJobSchema = z.object({
+  source: z.string().min(1),
+  externalId: z.string().min(1),
+  url: z.string().url(),
+  title: z.string().min(1),
+  companyName: z.string().min(1),
+  location: z.string().optional(),
+  remoteMode: remoteModeSchema.default("unknown"),
+  salaryRaw: z.string().optional(),
+  descriptionMd: z.string().optional(),
+  postedAt: z.coerce.date().optional(),
+});
+export type NormalizedJob = z.infer<typeof normalizedJobSchema>;
+
+export const scoringProfileSchema = z.object({
+  roles: z.array(z.string()).default([]),
+  stack: z.array(z.string()).default([]),
+  boost: z.array(z.string()).default([]),
+  exclude: z.array(z.string()).default([]),
+  requireRemote: z.boolean().default(true),
+  includeUnknownRemote: z.boolean().default(true),
+  minRoleHits: z.number().int().min(0).default(1),
+  minStackHits: z.number().int().min(0).default(1),
+  topNForLlm: z.number().int().positive().default(25),
+});
+export type ScoringProfile = z.infer<typeof scoringProfileSchema>;
+export const DEFAULT_SCORING_PROFILE: ScoringProfile = scoringProfileSchema.parse({});
+
+export const rerankResultSchema = z.object({
+  results: z.array(z.object({
+    jobId: z.string(),
+    score: z.number().min(0).max(100),
+    rationale: z.string().min(1),
+    redFlags: z.array(z.string()).default([]),
+  })),
+});
+export type RerankResult = z.infer<typeof rerankResultSchema>;
