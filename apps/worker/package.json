@@ -17,6 +17,7 @@
     "@careerhq/db": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "tsx": "^4.20.0",
     "vitest": "^3.2.0"
   }

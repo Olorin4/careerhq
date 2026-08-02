@@ -5,6 +5,12 @@ import { getActiveWorkspace } from "../../../lib/workspace.js";
 import { Board } from "./board.js";
 import { NewApplicationForm } from "./new-application-form.js";
 
+// Every render reads the database, so there is nothing to prerender: without
+// this Next would build these pages statically (baking in build-time data and
+// requiring a reachable database at build time, which the container image has
+// no reason to have).
+export const dynamic = "force-dynamic";
+
 export default async function ApplicationsPage() {
   const db = getDb();
   const ws = await getActiveWorkspace(db);

@@ -1,9 +1,8 @@
 FROM node:22-alpine AS base
 RUN corepack enable
 WORKDIR /app
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
-COPY packages ./packages
-COPY apps/worker ./apps/worker
+# See Dockerfile.web: a partial workspace copy fails `--frozen-lockfile`.
+COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @careerhq/worker... build
 CMD ["node", "apps/worker/dist/main.js"]

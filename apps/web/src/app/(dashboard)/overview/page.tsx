@@ -3,6 +3,12 @@ import { listApplications, jobs as jobsTable, companies as companiesTable } from
 import { getDb } from "../../../lib/db.js";
 import { getActiveWorkspace } from "../../../lib/workspace.js";
 
+// Every render reads the database, so there is nothing to prerender: without
+// this Next would build these pages statically (baking in build-time data and
+// requiring a reachable database at build time, which the container image has
+// no reason to have).
+export const dynamic = "force-dynamic";
+
 function humanize(state: string): string {
   return state.charAt(0) + state.slice(1).toLowerCase().replace(/_/g, " ");
 }

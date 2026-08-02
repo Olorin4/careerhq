@@ -1,9 +1,11 @@
 FROM node:22-alpine AS base
 RUN corepack enable
 WORKDIR /app
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
-COPY packages ./packages
-COPY apps/web ./apps/web
+# The lockfile has an importer entry for every workspace package, so copying
+# only some of them fails `--frozen-lockfile` (ERR_PNPM_OUTDATED_LOCKFILE).
+# Copy the whole workspace; .dockerignore keeps node_modules, build output and
+# the file volume out of the context.
+COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @careerhq/web... build
 CMD ["pnpm", "--filter", "@careerhq/web", "start"]

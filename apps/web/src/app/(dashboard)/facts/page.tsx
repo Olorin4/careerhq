@@ -5,6 +5,12 @@ import { getActiveWorkspace } from "../../../lib/workspace.js";
 import { FactForm } from "./fact-form.js";
 import { reverifyFactAction, archiveFactAction } from "./actions.js";
 
+// Every render reads the database, so there is nothing to prerender: without
+// this Next would build these pages statically (baking in build-time data and
+// requiring a reachable database at build time, which the container image has
+// no reason to have).
+export const dynamic = "force-dynamic";
+
 function humanize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
 }
