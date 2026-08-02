@@ -5,7 +5,7 @@ export const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 export interface ChatJsonRequest<T> {
   system: string;
   user: string;
-  schema: z.ZodType<T>;
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   model: string;
   apiKey: string;
   url?: string;
