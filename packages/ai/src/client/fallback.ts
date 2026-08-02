@@ -43,8 +43,9 @@ function isCooling(model: string, nowMs: number): boolean {
  * Tries `models` in order via `chatJson`, skipping any model still cooling
  * down from a prior 429. Returns on the first ok result; a 429 puts that
  * model into cooldown and moves on; other failures (5xx, timeout, no_json,
- * schema_invalid, not_useful) move on without a cooldown. If every model is
- * cooling down, returns `{ ok: false, error: "all_models_cooling_down" }`
+ * schema_invalid, not_useful) move on without a cooldown. An empty `models`
+ * list returns `{ ok: false, error: "no_models_configured" }`; if every model
+ * is cooling down, returns `{ ok: false, error: "all_models_cooling_down" }`
  * with attempts recording the skips. If the list is exhausted without an ok
  * result, returns the last attempted result with the full attempts array.
  */
@@ -65,6 +66,16 @@ export async function chatJsonWithFallback<T>(
   } = opts;
 
   const attempts: FallbackAttempt[] = [];
+
+  if (models.length === 0) {
+    // Distinct from all_models_cooling_down: nothing was ever configured to
+    // try, so there is no 429 to wait out.
+    return {
+      ok: false, value: null, model: "", latencyMs: 0, status: null,
+      error: "no_models_configured", attempts,
+    };
+  }
+
   let lastResult: ChatJsonResult<T> | null = null;
   let triedAny = false;
 

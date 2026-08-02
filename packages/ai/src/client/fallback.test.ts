@@ -131,6 +131,22 @@ describe("chatJsonWithFallback", () => {
     expect(second.attempts[1]).toMatchObject({ model: "b", skippedCooldown: true });
   });
 
+  // An empty list is a configuration problem, not a rate-limit one; reporting
+  // it as all_models_cooling_down sends whoever reads the log hunting a 429
+  // that never happened.
+  it("returns no_models_configured for an empty model list, without calling fetch", async () => {
+    const fetchImpl = sequenceFetch([]);
+    const result = await chatJsonWithFallback(base, {
+      models: [],
+      apiKey: "k",
+      fetchImpl,
+      sleep: async () => {},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("no_models_configured");
+    expect(result.attempts).toHaveLength(0);
+  });
+
   it("continues past schema_invalid to a valid model", async () => {
     const fetchImpl = sequenceFetch([
       okResponse('{"wrong":"shape"}'),

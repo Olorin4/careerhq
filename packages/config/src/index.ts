@@ -40,12 +40,26 @@ const DEFAULT_AI_FAST_MODELS = [
   "meta-llama/llama-3.3-70b-instruct:free",
 ];
 
-/** Splits a comma-separated env value into trimmed, non-empty entries. */
-function parseCommaList(value: string): string[] {
-  return value
+/**
+ * Splits a comma-separated env value into trimmed, non-empty entries, falling
+ * back to `DEFAULT_AI_FAST_MODELS` when nothing survives. An explicitly empty
+ * value bypasses zod's `.default()`, and Compose passes exactly that with
+ * `AI_FAST_MODELS: ${AI_FAST_MODELS:-}` — an empty list would leave the
+ * fallback client with no model to try and report it as "all models cooling
+ * down", which is not what happened.
+ */
+function parseModelList(value: string): string[] {
+  const entries = value
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+  return entries.length > 0 ? entries : [...DEFAULT_AI_FAST_MODELS];
+}
+
+/** Empty and whitespace-only env values mean "unset" — see `parseModelList`. */
+function optionalString(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 const envSchema = z.object({
@@ -68,7 +82,7 @@ const envSchema = z.object({
   AI_FAST_MODELS: z
     .string()
     .default(DEFAULT_AI_FAST_MODELS.join(","))
-    .transform(parseCommaList),
+    .transform(parseModelList),
   INGEST_CRON: z.string().default("0 */6 * * *"),
 });
 
@@ -82,6 +96,7 @@ export interface AppConfig {
   fileStorageDir: string;
   /** null (default) keeps AI features off — the deterministic floor when no key is provisioned. */
   openrouterApiKey: string | null;
+  /** Never empty: an unset or blank AI_FAST_MODELS yields the default list. */
   aiFastModels: string[];
   ingestCron: string;
 }
@@ -102,7 +117,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sandboxForceSafe: parsed.SANDBOX_FORCE_SAFE,
     followUpDays: parsed.FOLLOW_UP_DAYS,
     fileStorageDir: parsed.FILE_STORAGE_DIR,
-    openrouterApiKey: parsed.OPENROUTER_API_KEY ?? null,
+    openrouterApiKey: optionalString(parsed.OPENROUTER_API_KEY),
     aiFastModels: parsed.AI_FAST_MODELS,
     ingestCron: parsed.INGEST_CRON,
   };

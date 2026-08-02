@@ -44,6 +44,14 @@ describe("loadConfig", () => {
   it("passes through OPENROUTER_API_KEY when set", () => {
     expect(loadConfig({ ...BASE, OPENROUTER_API_KEY: "sk-or-123" }).openrouterApiKey).toBe("sk-or-123");
   });
+  // Compose sets `OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}`, so "" is the
+  // live default in containers — it must mean "off", exactly like unset.
+  it("treats an empty OPENROUTER_API_KEY as unset", () => {
+    expect(loadConfig({ ...BASE, OPENROUTER_API_KEY: "" }).openrouterApiKey).toBeNull();
+  });
+  it("treats a whitespace-only OPENROUTER_API_KEY as unset", () => {
+    expect(loadConfig({ ...BASE, OPENROUTER_API_KEY: "  " }).openrouterApiKey).toBeNull();
+  });
   it("defaults aiFastModels to the free-tier fallback list", () => {
     expect(loadConfig(BASE).aiFastModels).toEqual([
       "google/gemini-2.0-flash-exp:free",
@@ -55,6 +63,24 @@ describe("loadConfig", () => {
   });
   it("drops empty entries from AI_FAST_MODELS (trailing comma, blank segments)", () => {
     expect(loadConfig({ ...BASE, AI_FAST_MODELS: "a,,b," }).aiFastModels).toEqual(["a", "b"]);
+  });
+  // Compose sets `AI_FAST_MODELS: ${AI_FAST_MODELS:-}`, so "" is the live
+  // default in containers. An explicit "" bypasses zod's .default(), and an
+  // empty model list would leave the fallback client with nothing to try.
+  it("falls back to the default model list when AI_FAST_MODELS is empty", () => {
+    expect(loadConfig({ ...BASE, AI_FAST_MODELS: "" }).aiFastModels).toEqual([
+      "google/gemini-2.0-flash-exp:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+    ]);
+  });
+  it("falls back to the default model list when AI_FAST_MODELS holds only separators", () => {
+    expect(loadConfig({ ...BASE, AI_FAST_MODELS: " , ," }).aiFastModels).toEqual([
+      "google/gemini-2.0-flash-exp:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+    ]);
+  });
+  it("never returns an empty aiFastModels list", () => {
+    expect(loadConfig({ ...BASE, AI_FAST_MODELS: "" }).aiFastModels.length).toBeGreaterThan(0);
   });
   it("defaults ingestCron to every 6 hours", () => {
     expect(loadConfig(BASE).ingestCron).toBe("0 */6 * * *");
