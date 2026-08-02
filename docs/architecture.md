@@ -12,6 +12,7 @@ flowchart LR
         pg[("Postgres")]
         mailpit["Mailpit\n(dev/demo SMTP sink)"]
         demoats["apps/demo-ats\n(demo compose only)"]
+        restricted["services/restricted-ingest\n(opt-in profile only)"]
         vol[/"file volume\nCVs, screenshots, bodies"/]
     end
     feeds["Job feeds\nRemotive, RemoteOK, Arbeitnow, WWR,\nTheMuse, GH/Lever/Ashby boards,\noptional BYO-key: Adzuna/Reed/USAJobs"]
@@ -30,12 +31,15 @@ flowchart LR
     worker -->|"live gate"| sites
     worker -->|"sandbox"| mailpit
     worker -->|"sandbox"| demoats
+    worker <-->|"consent gate"| restricted
+    restricted -->|"proxy pool only"| boards["Restricted boards\nLinkedIn, Indeed, Glassdoor,\nGoogle Jobs, ZipRecruiter"]
 ```
 
 - `apps/web` — UI, server actions, route handlers. Enqueues work; never performs external mutations itself except LLM calls for interactive generation.
 - `apps/worker` — long-lived Node process consuming pg-boss queues: `ingest`, `rerank`, `imap-sync`, `classify`, `autoapply`, `demo-reset`. Runs Playwright (image based on `mcr.microsoft.com/playwright`).
 - `apps/demo-ats` — small Hono/Express server with a fictional company careers page: one Greenhouse-style multi-step form and one Lever-style single-page form. Serves two purposes: Playwright e2e target in CI, and the only allowed auto-apply destination for the hosted demo.
-- Postgres is the single store for structured data; large artifacts live on the file volume with hashes in the DB. pg-boss uses the same Postgres — no Redis, keeping the stack at four services.
+- `services/restricted-ingest` — optional Python service wrapping JobSpy for restricted-board discovery (LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter). Own container under a dedicated Compose profile, absent from the default stack and the demo. Narrow JSON contract (bounded search matrix in, normalized listings out); mandatory user-supplied proxy pool, per-board circuit breakers, bounded runs. The worker calls it only when the spec §5.3 consent gate is fully satisfied (profile deployed + env flag + recorded in-app consent). Discovery only — no credentials, no applying.
+- Postgres is the single store for structured data; large artifacts live on the file volume with hashes in the DB. pg-boss uses the same Postgres — no Redis, keeping the default stack at four services.
 
 ## 2. Monorepo layout
 
@@ -61,6 +65,8 @@ careerHQ-app/
 │   ├── docker-compose.yml        # web, worker, postgres, mailpit
 │   ├── docker-compose.demo.yml   # + demo-ats, sandbox env, reset schedule
 │   └── Dockerfile.{web,worker}
+├── services/
+│   └── restricted-ingest/        # optional JobSpy connector; own profile, never in demo
 ├── docs/{adr,architecture.md,roadmap.md}
 └── .github/workflows/ci.yml
 ```
@@ -213,5 +219,5 @@ Design notes:
 | 0003 | OpenRouter sequential fallback; why not a parallel race router |
 | 0004 | Grounding contract and sensitive-answer policy |
 | 0005 | App-level credential encryption vs OS keyring |
-| 0006 | Scraping/ToS boundaries; permanent exclusions |
+| 0006 | Scraping/ToS boundaries; restricted-source connector isolation and consent lane |
 | 0007 | Canonical form schema — selectors are not the data model |

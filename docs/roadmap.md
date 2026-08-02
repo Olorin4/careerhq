@@ -1,6 +1,6 @@
 # Career HQ — Delivery Roadmap
 
-Six phases. Each ends with green CI, a working demo, and an updated README — the repository is presentable to a prospective client at every point after P1. Spec references: [`career-hq-product-spec.md`](../career-hq-product-spec.md); structure: [`architecture.md`](architecture.md).
+Six core phases plus an optional seventh. Each ends with green CI, a working demo, and an updated README — the repository is presentable to a prospective client at every point after P1. Spec references: [`career-hq-product-spec.md`](../career-hq-product-spec.md); structure: [`architecture.md`](architecture.md).
 
 ## P1 — Foundation, tracker, Fact Bank
 
@@ -76,6 +76,18 @@ First live external mutation — the gate framework becomes real.
 - README final: screenshot gallery, 2–3 minute demo video, one-command quickstart, backup/restore procedure.
 
 **Demo:** the public URL, and `git clone && docker compose up`.
+
+## P7 — Restricted-source connector (optional, post-core)
+
+Spec §5.3. Deliberately last: it must never jeopardize the core portfolio, and it is excluded from the hosted demo entirely.
+
+- `services/restricted-ingest`: Python service wrapping JobSpy (LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter) under a dedicated Compose profile; narrow JSON contract to the worker.
+- Consent flow in settings: risk disclosure, typed acknowledgment, versioned consent record, revocation; UI hides restricted sources until consent exists.
+- Safeguards: mandatory proxy pool (refuses host IP), per-board circuit breakers, bounded runs; `RESTRICTED_SOURCES_ENABLED` env gate; sandbox can never reach it.
+- Restricted-source provenance labels in the inbox; standard dedup and scoring.
+- ADR-0006 updated with the isolation/consent design.
+
+**Demo:** local-only walkthrough (screenshots/video, not the hosted demo): consent flow → bounded run → labeled listings in the inbox.
 
 ## Sequencing rationale
 

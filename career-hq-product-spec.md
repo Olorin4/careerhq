@@ -16,12 +16,12 @@
 4. **Every AI feature has a deterministic floor.** The application remains fully functional when the LLM is unavailable: keyword scoring stands without re-rank, replies match by headers without classification, answers can be written manually without generation.
 5. **Review-first, gated mutations.** No email is sent and no form is submitted without a preview, an explicit per-application confirmation bound to the previewed payload, and server-side safety gates. Uncertain outcomes are never retried automatically.
 6. **Public repo, fictional data.** The repository and hosted demo use a fictional persona ("Alex Demo"). The demo sandbox cannot reach any real external target.
-7. **Restricted-platform automation is out of scope.** LinkedIn Easy Apply, Indeed Apply, Glassdoor, CAPTCHA bypass, anti-bot circumvention, and unattended account automation are permanently excluded from this project.
+7. **Restricted-platform application automation is out of scope.** LinkedIn Easy Apply, Indeed Apply, Glassdoor submission flows, CAPTCHA bypass, anti-bot circumvention, and unattended account automation are permanently excluded. *Discovery* from restricted boards exists only as an isolated, opt-in connector (§5.3) that the user must explicitly enable after accepting the risks and responsibility; the core product never depends on it.
 
 ## 2. Architecture overview
 
 - **Stack:** Next.js (App Router) + TypeScript monorepo (pnpm + Turborepo). Postgres via Drizzle ORM. pg-boss for background jobs (no Redis). Playwright for form automation. OpenRouter for LLM access.
-- **Apps:** `apps/web` (UI + server actions), `apps/worker` (long-running job consumers: ingestion, IMAP sync, classification, auto-apply, demo reset), `apps/demo-ats` (a small fictional ATS serving Greenhouse-style and Lever-style application forms; the e2e test target and the hosted demo's only auto-apply destination).
+- **Apps:** `apps/web` (UI + server actions), `apps/worker` (long-running job consumers: ingestion, IMAP sync, classification, auto-apply, demo reset), `apps/demo-ats` (a small fictional ATS serving Greenhouse-style and Lever-style application forms; the e2e test target and the hosted demo's only auto-apply destination). Optionally `services/restricted-ingest`, the isolated restricted-source connector (§5.3), deployed only under its own Compose profile.
 - **Packages:** `contracts` (shared Zod schemas/types), `core` (pure domain logic: state machines, scoring, gates, grounding validation — no IO), `db`, `ai`, `ingest`, `email`, `autoapply`, `config`.
 - **Deployment:** `docker compose up` runs web, worker, postgres, and Mailpit. A demo compose file adds `demo-ats`, forces sandbox safe mode, and schedules periodic resets.
 - **Files:** CV PDFs, submission screenshots, and message bodies are stored on a Docker volume; the database stores metadata and SHA-256 hashes.
@@ -68,10 +68,23 @@ Scraping sites that prohibit it, and any credentialed job-board access, are out 
 - A job absent from its source for a configurable window (default 21 days) is marked expired; expiry suggests `EXPIRED` for applications still in `DISCOVERED`/`SHORTLISTED`.
 - Every ingest run records counts and errors (`IngestRun`) and is visible in a pipeline-health panel.
 
-### 5.3 Scoring
+### 5.3 Restricted-source connector (opt-in, isolated)
+
+Discovery from **LinkedIn, Indeed, Glassdoor, Google Jobs, and ZipRecruiter** is available only through a separately-packaged scraping connector (wrapping the JobSpy library). These boards prohibit scraping: using the connector may violate their terms of service and can result in IP or account blocks. Career HQ therefore treats it as an external hazard, not a core feature.
+
+- **Isolation.** The connector is its own service (`services/restricted-ingest`, Python, own container) under a dedicated Compose profile. It is not part of the default stack, is never present in the demo deployment, and communicates with the worker only over the internal network through a narrow JSON contract: bounded search matrix in, normalized listings out. No credentials ever pass to or through it.
+- **Consent gate.** The connector runs only when all three hold: (1) the operator deployed the `restricted` Compose profile; (2) `RESTRICTED_SOURCES_ENABLED=true` is set; (3) the user completed the in-app consent flow — a full risk disclosure (ToS violation, IP/account blocking, sole user responsibility) acknowledged by typing a confirmation phrase, recorded with timestamp and disclosure version, and revocable at any time. The UI hides restricted sources entirely until consent exists.
+- **Operational safeguards** (inherited from the predecessor's hardened design): a user-supplied proxy pool is mandatory — the connector refuses to run from the host IP; per-board circuit breakers stop a source after blocking is detected; runs are bounded (max searches per run, per-run timeout ceiling, result caps).
+- **Discovery only.** Listings merge into the normal inbox with visible "restricted source" provenance and standard dedup. Applying remains manual — the listing links out to the board; §10 auto-apply and §19 exclusions are unaffected.
+- **Sandbox workspaces can never enable, configure, or reach the connector.**
+- The core product is fully functional without the connector installed.
+
+### 5.4 Scoring
 
 - **Deterministic score (always on):** configurable profile of role keywords, stack keywords, boost terms, exclude terms, and remote requirements produces a numeric score with a persisted per-term breakdown shown in the UI.
 - **LLM re-rank (optional layer):** the top N (default 25) unscreened jobs are sent to the `fast` model tier, which returns `{score 0–100, rationale, redFlags[]}` per job. Re-rank annotates and reorders; it never deletes or hides jobs. If the LLM is unavailable, the keyword order stands.
+
+Scoring applies uniformly to all sources, including restricted-connector listings.
 
 ## 6. Application tracking
 
@@ -124,7 +137,7 @@ Terminal/side states: `REJECTED`, `WITHDRAWN`, `EXPIRED`.
 - **Model tiers as configuration data** (free offerings churn; lists live in env/db, not code):
   - `fast` — re-rank, reply classification, field interpretation, sensitivity tie-break.
   - `writing` — cover letters and narrative answers; last-resort entry may be a paid-but-cheap model.
-- **Tasks:** `rerank` (§5.3), `generate` (§7.2), `classifyReply` (§9.5), `interpretField` (§10.4).
+- **Tasks:** `rerank` (§5.4), `generate` (§7.2), `classifyReply` (§9.5), `interpretField` (§10.4).
 - **Record/replay:** a development flag records `(task, promptHash) → response` fixtures; CI and the hosted demo run in replay mode. Live responses may be cached by prompt hash.
 - **Cost posture:** free tiers first; the system must degrade gracefully (deterministic floor, §1.4) rather than queue-block on provider failures.
 
@@ -260,7 +273,7 @@ Funnel and response-rate analytics over the event log: applications by state, re
 
 ## 18. Delivery phases
 
-Six phases, each independently shippable and demoable (full detail in `docs/roadmap.md`):
+Six core phases, each independently shippable and demoable, plus an optional seventh (full detail in `docs/roadmap.md`):
 
 - **P1** Foundation: scaffold, tracker with state machine and event log, Fact Bank, CV variants, seed, CI.
 - **P2** Discovery: feed ingestion, dedup, deterministic scoring, LLM re-rank, discovery inbox.
@@ -268,10 +281,11 @@ Six phases, each independently shippable and demoable (full detail in `docs/road
 - **P4** Email channel: credentials, gates go live, SMTP send with receipts, IMAP sync, reply classification.
 - **P5** Auto-apply: canonical form schema, `demo-ats`, Greenhouse + Lever adapters, review screen, gated submit.
 - **P6** Hosted demo and portfolio polish: sandbox deployment, resets, docs, video.
+- **P7** (optional, post-core) Restricted-source connector: isolated JobSpy service with consent gate (§5.3); never in the hosted demo.
 
 ## 19. Out of scope
 
-- Restricted job-board automation (LinkedIn, Indeed, Glassdoor), CAPTCHA/anti-bot circumvention, unattended account automation — permanently, not "later".
+- Restricted job-board **application** automation (LinkedIn Easy Apply, Indeed Apply, Glassdoor), CAPTCHA/anti-bot circumvention, unattended account automation — permanently, not "later". (Restricted-board *discovery* exists only as the isolated, consent-gated connector of §5.3 and is never part of the core product or demo.)
 - Multi-tenant SaaS features: billing, teams, per-user plans.
 - Automatic outbound replies to recruiters.
 - Machine learning on outcomes beyond the read-only analytics of §15.
