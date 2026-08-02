@@ -124,6 +124,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@careerhq/config':
+        specifier: workspace:*
+        version: link:../config
       '@careerhq/contracts':
         specifier: workspace:*
         version: link:../contracts

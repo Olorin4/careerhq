@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import type { ApplicationState, CvFormat, FactCategory, Sensitivity, TransitionTrigger } from "@careerhq/contracts";
 import type { TransitionContext } from "@careerhq/core";
+import { loadConfig } from "@careerhq/config";
 import { createApplication, createCvVariant, createDb, createFact, transitionApplication, workspaces } from "./index.js";
 import type { Application, Db } from "./index.js";
 
@@ -111,8 +112,10 @@ async function seedFacts(db: Db, workspaceId: string): Promise<void> {
 }
 
 async function seedCvVariants(db: Db, workspaceId: string): Promise<void> {
-  const storageDir = process.env.FILE_STORAGE_DIR ?? "var/files";
-  const cvDir = path.join(REPO_ROOT, storageDir, "cvs");
+  // loadConfig resolves FILE_STORAGE_DIR to an absolute path, so the seed and
+  // the web upload action write to the same directory (and to the mounted
+  // volume in the container) even though they run from different cwds.
+  const cvDir = path.join(loadConfig().fileStorageDir, "cvs");
   await mkdir(cvDir, { recursive: true });
 
   // Minimal valid PDF literal — enough to satisfy "is a real PDF" checks.

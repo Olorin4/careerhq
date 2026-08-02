@@ -1,4 +1,34 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { z } from "zod";
+
+/**
+ * The repo root — the directory holding pnpm-workspace.yaml — found by walking
+ * up from the current working directory. Processes run from all over the
+ * workspace (`next dev` from apps/web, the seed from packages/db, the worker
+ * from /app in the container), so cwd alone is not a stable base for relative
+ * paths. Falls back to cwd outside a workspace checkout.
+ */
+function findRepoRoot(): string {
+  const cwd = process.cwd();
+  let dir = cwd;
+  for (;;) {
+    if (existsSync(path.join(dir, "pnpm-workspace.yaml"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return cwd;
+    dir = parent;
+  }
+}
+
+/**
+ * FILE_STORAGE_DIR must name one directory for every process — the seed writes
+ * CVs there and the web upload action reads/writes the same tree, and in the
+ * container it is the mounted volume. Absolute values are used as given;
+ * relative ones resolve against the repo root, never against cwd.
+ */
+function resolveStorageDir(value: string): string {
+  return path.isAbsolute(value) ? value : path.resolve(findRepoRoot(), value);
+}
 
 const boolFromEnv = z
   .enum(["true", "false"])
@@ -19,7 +49,7 @@ const envSchema = z.object({
   SUBMISSIONS_LIVE_COMPANY_SITE: boolFromEnv,
   SANDBOX_FORCE_SAFE: boolFromEnv,
   FOLLOW_UP_DAYS: z.coerce.number().int().positive().default(7),
-  FILE_STORAGE_DIR: z.string().default("var/files"),
+  FILE_STORAGE_DIR: z.string().default("var/files").transform(resolveStorageDir),
 });
 
 export interface AppConfig {
@@ -28,6 +58,7 @@ export interface AppConfig {
   submissionsLiveCompanySite: boolean;
   sandboxForceSafe: boolean;
   followUpDays: number;
+  /** Always absolute: relative FILE_STORAGE_DIR values resolve against the repo root. */
   fileStorageDir: string;
 }
 

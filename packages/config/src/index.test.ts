@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./index.js";
 
@@ -25,5 +26,15 @@ describe("loadConfig", () => {
   });
   it("rejects non-numeric FOLLOW_UP_DAYS", () => {
     expect(() => loadConfig({ ...BASE, FOLLOW_UP_DAYS: "soon" })).toThrow();
+  });
+  it("resolves a relative FILE_STORAGE_DIR against the repo root, not cwd", () => {
+    // vitest runs with cwd = packages/config; the shared file tree is at the
+    // repo root, so seed and web must agree on the same absolute directory.
+    const dir = loadConfig(BASE).fileStorageDir;
+    expect(path.isAbsolute(dir)).toBe(true);
+    expect(dir).toBe(path.resolve(process.cwd(), "../..", "var/files"));
+  });
+  it("keeps an absolute FILE_STORAGE_DIR as given (the Docker volume path)", () => {
+    expect(loadConfig({ ...BASE, FILE_STORAGE_DIR: "/app/var/files" }).fileStorageDir).toBe("/app/var/files");
   });
 });

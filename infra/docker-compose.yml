@@ -20,6 +20,8 @@ services:
     build: { context: .., dockerfile: infra/Dockerfile.web }
     environment:
       DATABASE_URL: postgres://careerhq:careerhq@postgres:5432/careerhq
+      # Must match the volume mount below; web and worker share one file tree.
+      FILE_STORAGE_DIR: /app/var/files
     ports: ["3000:3000"]
     volumes: [files:/app/var/files]
     depends_on:
@@ -28,6 +30,7 @@ services:
     build: { context: .., dockerfile: infra/Dockerfile.worker }
     environment:
       DATABASE_URL: postgres://careerhq:careerhq@postgres:5432/careerhq
+      FILE_STORAGE_DIR: /app/var/files
     volumes: [files:/app/var/files]
     depends_on:
       postgres: { condition: service_healthy }
