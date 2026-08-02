@@ -403,3 +403,97 @@ body {
   font-size: 0.8rem;
   margin: 0.2rem 0 0;
 }
+
+.settings-section {
+  margin-bottom: 2rem;
+}
+
+.settings-empty {
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 480px;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.settings-form-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+}
+
+.settings-form-success {
+  color: #1a7f37;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.settings-form-error {
+  color: #b00020;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.watchlist-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.watchlist-table th,
+.watchlist-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.watchlist-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #666;
+}
+
+.watchlist-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 480px;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.watchlist-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.watchlist-form-help {
+  color: #777;
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.watchlist-form-error {
+  color: #b00020;
+  margin: 0;
+  font-size: 0.85rem;
+}
