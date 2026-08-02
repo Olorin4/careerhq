@@ -3,6 +3,7 @@ export * from "./schema/index.js";
 export * from "./repos/applications.js";
 export * from "./repos/facts.js";
 export * from "./repos/cv-variants.js";
+export * from "./repos/discovery.js";
 import type {
   applicationAttempts, applicationEvents, applications, candidateFacts, cvVariants, ingestRuns,
   jobs, scoringProfiles, watchlistCompanies, workspaces,
