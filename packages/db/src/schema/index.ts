@@ -1,9 +1,9 @@
 import { sql } from "drizzle-orm";
 import {
-  index, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex, uuid,
+  index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
 import {
-  APPLICATION_STATES, ATTEMPT_STATUSES, CHANNELS, CV_FORMATS,
+  APPLICATION_STATES, ATS_TYPES, ATTEMPT_STATUSES, CHANNELS, CV_FORMATS,
   FACT_CATEGORIES, SENSITIVITIES, TRANSITION_TRIGGERS, WORKSPACE_KINDS,
 } from "@careerhq/contracts";
 
@@ -16,6 +16,7 @@ export const factCategory = pgEnum("fact_category", FACT_CATEGORIES);
 export const sensitivity = pgEnum("sensitivity", SENSITIVITIES);
 export const cvFormat = pgEnum("cv_format", CV_FORMATS);
 export const attemptOrigin = pgEnum("attempt_origin", ["app", "manual"]);
+export const atsType = pgEnum("ats_type", ATS_TYPES);
 
 export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -30,7 +31,7 @@ export const companies = pgTable("companies", {
   name: text("name").notNull(),
   domain: text("domain"),
   atsHint: text("ats_hint"),
-});
+}, (t) => [uniqueIndex("companies_workspace_name").on(t.workspaceId, t.name)]);
 
 export const jobs = pgTable("jobs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -50,6 +51,10 @@ export const jobs = pgTable("jobs", {
   keywordScore: real("keyword_score"),
   keywordBreakdown: jsonb("keyword_breakdown"),
   status: text("status").notNull().default("inbox"),
+  llmScore: real("llm_score"),
+  llmRationale: text("llm_rationale"),
+  llmRedFlags: jsonb("llm_red_flags"),
+  duplicateOfJobId: uuid("duplicate_of_job_id"),
 }, (t) => [
   uniqueIndex("jobs_workspace_source_external").on(t.workspaceId, t.source, t.externalId),
 ]);
@@ -122,3 +127,32 @@ export const cvVariants = pgTable("cv_variants", {
   sha256: text("sha256").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const ingestRuns = pgTable("ingest_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  source: text("source").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  fetched: integer("fetched").notNull().default(0),
+  inserted: integer("inserted").notNull().default(0),
+  updated: integer("updated").notNull().default(0),
+  duplicates: integer("duplicates").notNull().default(0),
+  errors: jsonb("errors"),
+}, (t) => [index("ingest_runs_workspace_started").on(t.workspaceId, t.startedAt)]);
+
+export const scoringProfiles = pgTable("scoring_profiles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  profile: jsonb("profile").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("scoring_profiles_workspace").on(t.workspaceId)]);
+
+export const watchlistCompanies = pgTable("watchlist_companies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  companyName: text("company_name").notNull(),
+  atsType: atsType("ats_type").notNull(),
+  boardSlug: text("board_slug").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("watchlist_workspace_ats_slug").on(t.workspaceId, t.atsType, t.boardSlug)]);

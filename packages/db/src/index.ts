@@ -4,7 +4,8 @@ export * from "./repos/applications.js";
 export * from "./repos/facts.js";
 export * from "./repos/cv-variants.js";
 import type {
-  applicationAttempts, applicationEvents, applications, candidateFacts, cvVariants, jobs, workspaces,
+  applicationAttempts, applicationEvents, applications, candidateFacts, cvVariants, ingestRuns,
+  jobs, scoringProfiles, watchlistCompanies, workspaces,
 } from "./schema/index.js";
 export type Application = typeof applications.$inferSelect;
 export type NewApplication = typeof applications.$inferInsert;
@@ -20,3 +21,9 @@ export type Job = typeof jobs.$inferSelect;
 export type NewJob = typeof jobs.$inferInsert;
 export type Workspace = typeof workspaces.$inferSelect;
 export type NewWorkspace = typeof workspaces.$inferInsert;
+export type IngestRun = typeof ingestRuns.$inferSelect;
+export type NewIngestRun = typeof ingestRuns.$inferInsert;
+export type ScoringProfile = typeof scoringProfiles.$inferSelect;
+export type NewScoringProfile = typeof scoringProfiles.$inferInsert;
+export type WatchlistCompany = typeof watchlistCompanies.$inferSelect;
+export type NewWatchlistCompany = typeof watchlistCompanies.$inferInsert;
