@@ -28,12 +28,15 @@ git clone <repo-url> && cd careerHQ-app
 docker compose -f infra/docker-compose.yml up -d postgres mailpit
 cp .env.example .env
 pnpm install
+pnpm build                        # apps consume the workspace packages from dist/
 pnpm --filter @careerhq/db db:migrate
 pnpm seed
 pnpm --filter @careerhq/web dev   # http://localhost:3000
 ```
 
 Mailpit's web UI is at `http://localhost:8025` (dev/demo SMTP sink — nothing is wired to send through it yet in P1).
+
+**One `.env`, at the repo root.** Nothing in this repo auto-loads it: `drizzle-kit`, the seed (`tsx`), `next dev` (which would only look inside `apps/web`), and the worker each load `<repo root>/.env` explicitly at startup. Variables already exported in your shell win over the file, which is Node's own `--env-file` rule. Copying `.env.example` is therefore enough — no `export DATABASE_URL=…` needed. In Docker, no `.env` exists and Compose supplies the environment instead.
 
 **Port already in use?** If `5432` is taken on your host, set `CAREERHQ_PG_PORT` (e.g. `CAREERHQ_PG_PORT=5433`) before `docker compose up`, and update `DATABASE_URL` in `.env` to match. The compose file reads this variable to remap the Postgres host port; the container's internal port and `web`/`worker`'s in-network `DATABASE_URL` are unaffected.
 

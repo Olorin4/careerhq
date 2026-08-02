@@ -7,9 +7,11 @@
  * exclusively by replaying real `transitionApplication` calls (never by
  * writing `state` directly) so the resulting event log is genuine.
  *
- * Run with: DATABASE_URL=postgres://... pnpm --filter @careerhq/db seed
+ * Reads DATABASE_URL from the repo-root .env (or the environment).
+ * Run with: pnpm seed
  */
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +20,18 @@ import type { ApplicationState, CvFormat, FactCategory, Sensitivity, TransitionT
 import type { TransitionContext } from "@careerhq/core";
 import { createApplication, createCvVariant, createDb, createFact, transitionApplication, workspaces } from "./index.js";
 import type { Application, Db } from "./index.js";
+
+/** Repo root, resolved from this module rather than from cwd (which is packages/db). */
+const REPO_ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../../..");
+
+/**
+ * tsx/node load no .env of their own, and the repo keeps a single .env at the
+ * root. Variables already exported in the shell win over the file.
+ */
+function loadRootEnv(): void {
+  const envFile = path.join(REPO_ROOT, ".env");
+  if (existsSync(envFile)) process.loadEnvFile(envFile);
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 function daysAgo(n: number): Date {
@@ -97,13 +111,8 @@ async function seedFacts(db: Db, workspaceId: string): Promise<void> {
 }
 
 async function seedCvVariants(db: Db, workspaceId: string): Promise<void> {
-  // The seed runs from packages/db (pnpm --filter runs scripts in the
-  // package's own directory), but files should live under the repo root's
-  // shared file-storage volume, not inside packages/db. Resolve the repo
-  // root from this module's own location rather than trusting cwd.
-  const repoRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../../..");
   const storageDir = process.env.FILE_STORAGE_DIR ?? "var/files";
-  const cvDir = path.join(repoRoot, storageDir, "cvs");
+  const cvDir = path.join(REPO_ROOT, storageDir, "cvs");
   await mkdir(cvDir, { recursive: true });
 
   // Minimal valid PDF literal — enough to satisfy "is a real PDF" checks.
@@ -226,10 +235,12 @@ async function seedApplications(db: Db, workspaceId: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  loadRootEnv();
   const url = process.env.DATABASE_URL;
   if (!url) {
-    console.error("DATABASE_URL is not set. Refusing to seed. Example:");
-    console.error('  DATABASE_URL=postgres://careerhq:careerhq@localhost:5432/careerhq pnpm seed');
+    console.error("DATABASE_URL is not set. Refusing to seed.");
+    console.error("  copy .env.example to .env in the repo root (see the README quickstart),");
+    console.error("  or export it: DATABASE_URL=postgres://careerhq:careerhq@localhost:5432/careerhq pnpm seed");
     process.exitCode = 1;
     return;
   }
