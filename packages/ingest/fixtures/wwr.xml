@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss">
+  <channel>
+    <title>We Work Remotely: Remote jobs in design, programming, marketing and more</title>
+    <link>https://weworkremotely.com/remote-jobs.rss</link>
+    <description>We Work Remotely: Remote jobs in design, programming, marketing and more</description>
+    <language>en-US</language>
+    <ttl>60</ttl>
+    <item>
+      <title>Doximity: Data Engineering Manager</title>
+      <region>Anywhere in the World</region>
+      <country></country>
+      <state></state>
+      <skills></skills>
+      <category>Full-Stack Programming</category>
+      <type>Full-Time</type>
+      <description>
+
+&lt;p&gt;
+  &lt;strong&gt;Headquarters:&lt;/strong&gt; San Francisco or Remote (U.S.)
+&lt;/p&gt;
+
+&lt;p&gt;Doximity is transforming the healthcare industry. Join our mission to help every physician be more productive and provide better care for their patients. As medicine's largest network in the United States, there's an elevated level of responsibility in everything we do. We don't take that responsibility lightly and are committed to building diverse teams with an inclusive culture that can make a direct impact on the healthcare system.&lt;/p&gt;
+&lt;p&gt;One of Doximity's&lt;a href="https://work.doximity.com/"&gt; core values&lt;/a&gt; is stretching ourselves. Even if you don't check off all the boxes below we encourage you to apply. Doximity is full of exceptional people who bring their own unique experiences to work everyday and make us all better for it!&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;This role can be filled in our San Francisco headquarters OR remotely in the US or Canada.&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;&lt;em&gt;About you&lt;/em&gt;&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;em&gt;Foremost an engineer&lt;/em&gt;&lt;/strong&gt;&lt;em&gt;.&lt;/em&gt; You exemplify high code quality and guide others, and have at least &lt;strong&gt;5 years&lt;/strong&gt; of industry experience as a data engineer or similar role.&lt;/li&gt;
+&lt;ul&gt;
+&lt;li&gt;You are experienced in creating automated testing, applying design patterns, and other engineering best practices.&lt;/li&gt;
+&lt;li&gt;You are an expert in Python and possess fluency in SQL and have developed maintainable data pipelines with each.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;em&gt;Experienced People Manager.&lt;/em&gt;&lt;/strong&gt; You have experience managing 3 or more people whereby you were accountable for their growth and success as individuals and team members.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;em&gt;Communication Extraordinaire.&lt;/em&gt;&lt;/strong&gt; You excel at communicating to both technical and non-technical people, with an ability to explain complex concepts simply.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;em&gt;Player Coach&lt;/em&gt;&lt;/strong&gt;&lt;em&gt;.&lt;/em&gt; You are able to contribute individually, outside of your reports or team, balancing priorities between being a player (i.e. individual contributor) and a coach (i.e. manager or mentor).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;em&gt;See a project from end-to-end&lt;/em&gt;&lt;/strong&gt;&lt;em&gt;.&lt;/em&gt; You have led several projects, your own ideas and other's. This means from idea generation to planning, execution, through delivering.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;em&gt;ML/AI–aware. &lt;/em&gt;&lt;/strong&gt;You have working knowledge of how ML/AI applications are deployed and monitored, and you’re motivated to use this awareness to advance data-driven initiatives.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;&lt;em&gt;Here's How You Will Make an Impact&lt;/em&gt;&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;em&gt;Collaborate with product managers, data analysts, and machine learning engineers to develop pipelines and ETL tasks in order to facilitate the extraction of insights.&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Establish data architecture processes and practices that can be scheduled, automated, replicated and serve as standards for other teams to leverage.&lt;/em&gt;&lt;em&gt;Inform data team strategy by working with the product leaders and managers. &lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Actively participate in execution and some planning of organizational data team strategy. &lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Collaborate with Doximity’s Data Leadership team to ensure alignment and success across the entire Data Organization.&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Manage individual Data Engineers to foster learning, growth and success at Doximity.&lt;/em&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;&lt;em&gt;About Us&lt;/em&gt;&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;em&gt;&lt;a href="https://technology.doximity.com/technology-stack"&gt;Explore our stack&lt;/a&gt;&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;We have over 500 private repositories in Github containing our pipelines, our own internal multi-functional tools, and&lt;a href="https://github.com/doximity"&gt; open-source projects&lt;/a&gt;&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;We have worked as a distributed team for a long time;&lt;a href="https://blog.brunomiranda.com/building-a-distributed-engineering-team-85d281b9b1c"&gt; we're currently about 65% distributed&lt;/a&gt;&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Find out more information &lt;/em&gt;&lt;em&gt;on the&lt;a href="https://engineering.doximity.com/"&gt; Doximity engineering blog&lt;/a&gt;&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Our&lt;a href="https://work.doximity.com/"&gt; company core values&lt;/a&gt;&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Our&lt;a href="https://engineering.doximity.com/articles/engineering-recruitment-process-doximity"&gt; recruiting process&lt;/a&gt;&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Our&lt;a href="https://engineering.doximity.com/articles/mofo-driven-product-development"&gt; product development cycle&lt;/a&gt;&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Our&lt;a href="https://engineering.doximity.com/articles/software-engineering-on-boarding-at-doximity"&gt; on-boarding &amp;amp; mentorship process&lt;/a&gt;&lt;/em&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;&lt;em&gt;Compensation&lt;/em&gt;&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;The US total compensation range for this full-time position is $172,000 - $254,000 (i&lt;/em&gt;&lt;em&gt;nclusive of salary + equity). Our ranges are determined by role and level. The range displayed on each job posting reflects the approximate total target compensation for the position across the US. Within the range, individual pay is determined by factors including relevant skills, experience, and education/training. Please note that the compensation listed does not include benefits.&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;&lt;em&gt;More on /Benefits/Perks&amp;nbsp;&lt;/em&gt;&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;Doximity is proud to offer industry-leading benefits to our full time employees. Some of our offerings include:&amp;nbsp;&lt;/em&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;em&gt;Medical, dental, vision offerings for you and your family&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;4&lt;/em&gt;&lt;em&gt;01k with matching program&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Employee stock purchase plan&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Family planning support, Childcare FSA, and parental leave&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Life, AD&amp;amp;D, and Disability&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Generous time off, holidays and paid company trips&lt;/em&gt;&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;Wellness benefits…plus many more!&lt;/em&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;&lt;em&gt;More About Doximity…&lt;/em&gt;&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;For the past decade, it’s been our mission to help every physician be more productive so they can provide better care for their patients. We believe that when doctors are connected, the healthcare system works better and patients benefit. Doximity enables our verified clinician members to collaborate with colleagues, stay up-to-date with the latest medical news and research, manage their careers, and conduct virtual patient visits. Today, Doximity is the leading digital platform for U.S. medical professionals, with over 85% of physicians, 50% of all nurse practitioners and physician assistants, and 90% of graduating medical students as members.&amp;nbsp;&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;Joining Doximity means being part of an incredibly talented and humble team passionate about improving inefficiencies in our $4.3 trillion U.S. healthcare system. We are a team of doers who solve problems everyday by treating obstacles like an adventure, and we love creating technology that has a real, meaningful impact on people’s lives. Doxers are committed to working towards a more equitable world both within and beyond our office walls. This starts by fostering an inclusive and diverse work environment where differences are valued and all employees are encouraged to bring their full, authentic selves to work daily. To learn more about our team, culture, and users, check out our&lt;/em&gt;&lt;a href="https://workat.doximity.com/"&gt;&lt;em&gt; &lt;/em&gt;&lt;em&gt;careers page&lt;/em&gt;&lt;/a&gt;&lt;em&gt;,&lt;/em&gt;&lt;a href="https://blog.doximity.com/"&gt;&lt;em&gt; &lt;/em&gt;&lt;em&gt;company blog&lt;/em&gt;&lt;/a&gt;&lt;em&gt;, and&lt;/em&gt;&lt;a href="https://engineering.doximity.com/"&gt;&lt;em&gt; &lt;/em&gt;&lt;em&gt;engineering blog&lt;/em&gt;&lt;/a&gt;&lt;em&gt;. We’re growing fast, and there’s plenty of opportunity for you to make an impact—join us! For more information, visit&lt;/em&gt;&lt;a href="http://www.doximity.com/"&gt;&lt;em&gt; Doximity.com&lt;/em&gt;&lt;/a&gt;&lt;em&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;____________________________________________&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;&lt;em&gt;EEOC Statement&lt;/em&gt;&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;Doximity is proud to be an equal opportunity employer, and committed to providing employment opportunities regardless of race, religious creed, color, national origin, ancestry, physical disability, mental disability, medical condition, genetic information, marital status, sex, gender, gender identity, gender expression, pregnancy, childbirth and breastfeeding, age, sexual orientation, military or veteran status, or any other protected classification. We also consider qualified applicants with criminal histories, consistent with applicable federal, state and local law.&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;&amp;nbsp;&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;To apply:&lt;/strong&gt; &lt;a href="https://weworkremotely.com/remote-jobs/doximity-data-engineering-manager"&gt;https://weworkremotely.com/remote-jobs/doximity-data-engineering-manager&lt;/a&gt;&lt;/p&gt;
+</description>
+      <pubDate>Sun, 02 Aug 2026 07:31:05 +0000</pubDate>
+      <expires_at>Tue, 01 Sep 2026 07:31:05 +0000</expires_at>
+      <guid>https://weworkremotely.com/remote-jobs/doximity-data-engineering-manager</guid>
+      <link>https://weworkremotely.com/remote-jobs/doximity-data-engineering-manager</link>
+    </item>
+<item>
+      <title>EBANX: Product Manager | South Cone</title>
+      <region>Anywhere in the World</region>
+      <country></country>
+      <state></state>
+      <skills></skills>
+      <category>Product</category>
+      <type>Full-Time</type>
+      <description>
+
+&lt;p&gt;
+  &lt;strong&gt;Headquarters:&lt;/strong&gt; Buenos Aires | Remote 
+&lt;/p&gt;
+
+&lt;div class="p-rich_text_section"&gt;
+&lt;p&gt;At &lt;strong&gt;EBANX&lt;/strong&gt;, we believe barriers were made to be broken. We started our story in Curitiba, Brazil, and today we are a global company, present in more than &lt;strong&gt;29 countries, with offices in Curitiba, São Paulo, Shanghai, Singapore, and Johannesburg&lt;/strong&gt;. In total, we are &lt;strong&gt;700+ &lt;/strong&gt;ebankers spread across the world, connecting companies like &lt;strong&gt;Uber, Netflix, Spotify, TikTok, Canva, Shopee, Meta, and Shein&lt;/strong&gt; to millions of consumers in emerging markets—creating new opportunities and revolutionizing the future of digital payments.&lt;/p&gt;
+&lt;p&gt;Our mission is clear: &lt;strong&gt;to give global access to everyone&lt;/strong&gt;. We are guided by the motto &lt;strong&gt;#TamoJunto&lt;/strong&gt;, which translates into four key pillars: &lt;strong&gt;Shape Tomorrow, Evolve Fast, Make It Happen, and Unlock The World.&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;If you want to be part of a global company with accelerated growth that is shaping the future of digital payments, EBANX is the place for you.&lt;/p&gt;
+&lt;p&gt;At EBANX’s Product team you don’t just create features. You develop user-centered solutions that transform the experience of millions of consumers and global companies. Every product decision you make has a real impact on the future of digital payments, combining strategic vision, innovation, and collaboration to make our work truly &lt;strong&gt;Out Of The Ordinary&lt;/strong&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class="p-rich_text_section"&gt;As a &lt;strong&gt;Product Manager&lt;/strong&gt; you will be responsible for the strategy, performance, and evolution of EBANX’s local payment solutions in the South Cone region. You will act as the owner of the product — defining its vision, driving its adoption, and ensuring its success in the market. This is a high-impact role that combines product strategy, commercial alignment, discovery, and delivery execution.You'll lead the expansion and optimization of our local payment solutions in Argentina, Chile, Uruguay, Paraguay, and Bolivia, connecting the dots between merchant needs, business priorities, and market opportunities. You will work at the intersection of strategy and execution, owning the product from discovery to adoption, ensuring EBANX continues to lead in the digital payments landscape.&lt;/div&gt;
+&lt;div class="p-rich_text_section"&gt;&amp;nbsp;&lt;/div&gt;
+&lt;div class="p-rich_text_section"&gt;&lt;strong&gt;Your day-to-day impact:&lt;/strong&gt;&lt;/div&gt;
+&lt;ul class="p-rich_text_list p-rich_text_list__bullet p-rich_text_list--nested"&gt;
+&lt;li&gt;Define the product vision and long-term strategy for payment solutions in the South Cone region, aligned with merchant needs and EBANX’s strategic goals;&lt;/li&gt;
+&lt;li&gt;Act as the voice of the product across the organization, connecting local market dynamics with global product direction;&lt;/li&gt;
+&lt;li&gt;Lead product discoveries to deeply understand customer pain points, competitive landscape, and opportunities for innovation;&lt;/li&gt;
+&lt;li&gt;Partner with commercial, operations, finance, marketing, legal, and engineering to develop and deliver scalable, compliant and high-impact solutions;&lt;/li&gt;
+&lt;li&gt;Manage the full product lifecycle, from ideation and discovery to go-to-market, enablement, and post-launch iteration;&lt;/li&gt;
+&lt;li&gt;Develop the go-to-market strategy for new features or payment methods, including training, positioning, and performance tracking;&lt;/li&gt;
+&lt;li&gt;Monitor product performance (TPV, revenue, costs, margins) and identify levers for growth, optimization, and differentiation;&lt;/li&gt;
+&lt;li&gt;Build business cases to prioritize initiatives and support strategic decision-making;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="p-rich_text_section"&gt;&lt;strong&gt;Must-haves to shine in this role:&lt;/strong&gt;&lt;/div&gt;
+&lt;ul class="p-rich_text_list p-rich_text_list__bullet p-rich_text_list--nested"&gt;
+&lt;li&gt;Proven experience in&amp;nbsp;&lt;strong&gt;product management or product strategy&lt;/strong&gt;, ideally in&amp;nbsp;&lt;strong&gt;payments, fintech, or high-growth tech companies&lt;/strong&gt;;&lt;/li&gt;
+&lt;li&gt;Solid understanding of the&amp;nbsp;&lt;strong&gt;payment ecosystem&lt;/strong&gt;&amp;nbsp;(issuers, acquirers, APMs, schemes, PSPs, settlement, FX, regulations);&lt;/li&gt;
+&lt;li&gt;Strong business acumen — ability to connect product decisions to revenue, cost efficiency, and market impact;&lt;/li&gt;
+&lt;li&gt;Fluent in English and Spanish; Portuguese is a plus;&lt;/li&gt;
+&lt;li&gt;Experience working cross-functionally in a global and multicultural environment;&lt;/li&gt;
+&lt;li&gt;Hands-on experience with product discovery, market research, stakeholder alignment, and backlog management;&lt;/li&gt;
+&lt;li&gt;Excellent communication and collaboration skills to drive consensus and influence across teams;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="p-rich_text_section"&gt;&lt;strong&gt;Bonus points if you have:&lt;/strong&gt;&lt;/div&gt;
+&lt;ul class="p-rich_text_list p-rich_text_list__bullet p-rich_text_list--nested"&gt;
+&lt;li&gt;Experience leading local payment strategy in Latin American markets, especially in the South Cone region;&lt;/li&gt;
+&lt;li&gt;Deep knowledge of payments ecosystem in LATAM;&lt;/li&gt;
+&lt;li&gt;Ability to translate complexity into clarity — whether in a sales pitch, a product doc, or a roadmap update;&lt;/li&gt;
+&lt;li&gt;Track record of successfully launching and scaling payment solutions;&lt;/li&gt;
+&lt;li&gt;Passion for digital commerce, innovation, and building products that solve real merchant problems;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&amp;nbsp;&lt;/p&gt;
+&lt;h3&gt;&lt;strong&gt;EBANX offers:&lt;/strong&gt;&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Performance Bonus: &lt;/strong&gt;Annual bonus program based on company results.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;EBANX Education:&lt;/strong&gt; Financial assistance for undergraduate, graduate, and MBA programs to support your professional growth.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;EBANX Skills:&lt;/strong&gt; Dedicated budget for courses, certifications, and workshops to encourage continuous learning.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Language Classes:&lt;/strong&gt; Language classes to support your personal and professional development.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Health &amp;amp; Well-being: &lt;/strong&gt;Medical and dental plans with extensive coverage, including support for dependents and wellness programs.&lt;br&gt;&lt;strong&gt;Flexible Work Culture:&lt;/strong&gt; Semi-flexible hours, additional day off on your birthday, and year-end break to support work-life balance.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Well-being Program: &lt;/strong&gt;Access to activities and resources that promote physical and mental health.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;span&gt;#LI-TC1&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;Learn more about our &lt;strong&gt;#ebanxlife&lt;/strong&gt; on&amp;nbsp;&lt;a href="https://www.linkedin.com/company/ebanx/mycompany/?viewAsMember=true"&gt;LinkedIn&lt;/a&gt; and &lt;a href="https://www.instagram.com/ebanxlife/"&gt;Instagram&lt;/a&gt;, and see what it’s like to be part of a global team that breaks barriers, creates opportunities, and celebrates every achievement together.&lt;/p&gt;
+&lt;p&gt; An &lt;strong&gt;Out Of The Ordinary&lt;/strong&gt; career is waiting for you here!&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;To apply:&lt;/strong&gt; &lt;a href="https://weworkremotely.com/remote-jobs/ebanx-product-manager-south-cone"&gt;https://weworkremotely.com/remote-jobs/ebanx-product-manager-south-cone&lt;/a&gt;&lt;/p&gt;
+</description>
+      <pubDate>Sun, 02 Aug 2026 07:30:49 +0000</pubDate>
+      <expires_at>Tue, 01 Sep 2026 07:30:49 +0000</expires_at>
+      <guid>https://weworkremotely.com/remote-jobs/ebanx-product-manager-south-cone</guid>
+      <link>https://weworkremotely.com/remote-jobs/ebanx-product-manager-south-cone</link>
+    </item>
+<item>
+      <title>Doximity: Data Analyst, Reporting Partnerships</title>
+      <region>Anywhere in the World</region>
+      <country></country>
+      <state></state>
+      <skills></skills>
+      <category>Full-Stack Programming</category>
+      <type>Full-Time</type>
+      <description>
+
+&lt;p&gt;
+  &lt;strong&gt;Headquarters:&lt;/strong&gt; San Francisco, CA or Remote (U.S.)
+&lt;/p&gt;
+
+&lt;p&gt;Doximity is transforming the healthcare industry. Join our mission to help every physician be more productive and provide better care for their patients. As medicine's largest network in the United States, there's an elevated level of responsibility in everything we do. We don't take that responsibility lightly and are committed to building diverse teams with an inclusive culture that can make a direct impact on the healthcare system.&amp;nbsp;&lt;br&gt;One of Doximity's core values is stretching ourselves. Even if you don't check off all the boxes below we encourage you to apply. Doximity is full of exceptional people who bring their own unique experiences to work every day and make us all better for it!&lt;/p&gt;
+&lt;p&gt;As a &lt;strong&gt;Data Analyst&lt;/strong&gt; on the &lt;strong&gt;Reporting Partnerships team&lt;/strong&gt;, you will be an integral part of our &lt;strong&gt;Commercial Data and Analytics organization&lt;/strong&gt;, working to generate physician-level reporting that powers client measurement and analysis.&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;&lt;strong&gt;This role can be filled in our San Francisco headquarters OR remotely in the U.S.&lt;/strong&gt;&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;How you’ll make an impact&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Generate and maintain Python-based client reporting used to power client measurement.&lt;/li&gt;
+&lt;li&gt;Deliver new Python scripts for reporting use cases, from adapting existing client templates to building custom client scripts end-to-end.&lt;/li&gt;
+&lt;li&gt;Conduct daily QA and act as a point-of-contact for teammates’ SQL and Python questions, helping raise the overall bar for code quality and consistency.&lt;/li&gt;
+&lt;li&gt;Create and maintain both Python and SQL-based aggregate reports as needed.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;What we’re looking for&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;At least &lt;strong&gt;2 years of professional experience&lt;/strong&gt; working in business analytics or performance reporting.&lt;/li&gt;
+&lt;li&gt;Excellent &lt;strong&gt;SQL&lt;/strong&gt; skills to create and evaluate complex statements involving numerous tables and data relationships.&lt;/li&gt;
+&lt;li&gt;Fluency in &lt;strong&gt;Python&lt;/strong&gt;, with hands-on experience building, maintaining, and debugging scripts for data processing or reporting.&lt;/li&gt;
+&lt;li&gt;Experience stepping into&lt;strong&gt; client-facing&lt;/strong&gt; roles, especially to translate technical solutions for non-technical audiences.&lt;/li&gt;
+&lt;li&gt;Strong organizational skills and &lt;strong&gt;attention to detail&lt;/strong&gt;; ability to stay ahead of multiple deadlines at once.&lt;/li&gt;
+&lt;li&gt;A &lt;strong&gt;proactive&lt;/strong&gt;, ownership-oriented mindset: comfortable working through scripting updates largely on your own, escalating questions or issues when necessary.&lt;/li&gt;
+&lt;li&gt;A &lt;strong&gt;continuous-improvement &lt;/strong&gt;focus, always looking to automate operational processes, elevate code quality, and deliver faster, more accurate reporting while strengthening value to clients.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;More about the Reporting Partnerships team&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;Below are additional core values specific to the Reporting Partnerships Team.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Precision&lt;/strong&gt;: Our team's deliverables power client analysis and inform real-world decisions. A successful candidate will triple check their work and their teammates' work, holding all of us to the highest data quality standards.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Curiosity&lt;/strong&gt;: Continuous learning is a cornerstone at Doximity and curious individuals thrive here. We're looking for someone who is never satisfied with the status quo.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Accountability&lt;/strong&gt;: Challenges are opportunities. &amp;nbsp;We face them head-on, learn from them, and come out stronger. Successful candidates will be solutions-oriented with a drive to keep improving.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Better Together&lt;/strong&gt;: We strongly value partnership and mutual respect among colleagues. We find our best outcomes come from collaboration and thoughtful input toward our shared goals.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Cutting-Edge Tech&lt;/strong&gt;: We are passionate about developing industry-leading solutions, defining best practices, and setting the gold standard for the data we provide. We embrace the best tools for the job, including AI-assisted coding and emerging technologies that help us work smarter.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Compensation&lt;/strong&gt;&lt;br&gt;The US total compensation range for this full-time position is $77,000 - $134,000 (inclusive of salary + equity). Our ranges are determined by role and level. The range displayed on each job posting reflects the approximate total target compensation for the position across the US. Within the range, individual pay is determined by factors including relevant skills, experience, and education/training. Please note that the compensation listed does not include benefits.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;More on Benefits/Perks&lt;/strong&gt;&lt;br&gt;Doximity is proud to offer industry-leading benefits to our full time employees. Some of our offerings include:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Medical, dental, vision offerings for you and your family&lt;/li&gt;
+&lt;li&gt;401k with matching program&lt;/li&gt;
+&lt;li&gt;Employee stock purchase plan&lt;/li&gt;
+&lt;li&gt;Family planning support, Childcare FSA, and parental leave&lt;/li&gt;
+&lt;li&gt;Life, AD&amp;amp;D, and Disability&lt;/li&gt;
+&lt;li&gt;Generous time off, holidays and paid company trips&lt;/li&gt;
+&lt;li&gt;Wellness benefits…plus many more!&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;More About Doximity…&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;For the past decade, it’s been our mission to help every physician be more productive so they can provide better care for their patients. We believe that when doctors are connected, the healthcare system works better and patients benefit. Doximity enables our verified clinician members to collaborate with colleagues, stay up-to-date with the latest medical news and research, manage their careers, and conduct virtual patient visits.&lt;/p&gt;
+&lt;p&gt;Today, Doximity is the leading digital platform for U.S. medical professionals, with over 85% of physicians, 50% of all nurse practitioners and physician assistants, and 90% of graduating medical students as members. Joining Doximity means being part of an incredibly talented and humble team passionate about improving inefficiencies in our $4.3 trillion U.S. healthcare system. We are a team of doers who solve problems every day by treating obstacles like an adventure, and we love creating technology that has a real, meaningful impact on people’s lives. Doxers are committed to working towards a more equitable world both within and beyond our office walls. This starts by fostering an inclusive and diverse work environment where differences are valued and all employees are encouraged to bring their full, authentic selves to work daily. To learn more about our team, culture, and users, check out our careers page, company blog, and engineering blog. We’re growing fast, and there’s plenty of opportunity for you to make an impact—join us! For more information, visit&amp;nbsp;&lt;a href="http://www.doximity.com/"&gt;Doximity.com&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;____________________________________________&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;&lt;strong&gt;EEOC Statement&lt;/strong&gt;&lt;/em&gt;&lt;br&gt;&lt;em&gt;Doximity is proud to be an equal opportunity employer, and committed to providing employment opportunities regardless of race, religious creed, color, national origin, ancestry, physical disability, mental disability, medical condition, genetic information, marital status, sex, gender, gender identity, gender expression, pregnancy, childbirth and breastfeeding, age, sexual orientation, military or veteran status, or any other protected classification. We also consider qualified applicants with criminal histories, consistent with applicable federal, state and local law.&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;To apply:&lt;/strong&gt; &lt;a href="https://weworkremotely.com/remote-jobs/doximity-data-analyst-reporting-partnerships"&gt;https://weworkremotely.com/remote-jobs/doximity-data-analyst-reporting-partnerships&lt;/a&gt;&lt;/p&gt;
+</description>
+      <pubDate>Sun, 02 Aug 2026 07:30:48 +0000</pubDate>
+      <expires_at>Tue, 01 Sep 2026 07:30:48 +0000</expires_at>
+      <guid>https://weworkremotely.com/remote-jobs/doximity-data-analyst-reporting-partnerships</guid>
+      <link>https://weworkremotely.com/remote-jobs/doximity-data-analyst-reporting-partnerships</link>
+    </item>
+<item>
+      <title>Flexport: Account Executive, Enterprise</title>
+      <region>Anywhere in the World</region>
+      <country></country>
+      <state></state>
+      <skills></skills>
+      <category>Sales and Marketing</category>
+      <type>Full-Time</type>
+      <description>
+
+&lt;p&gt;
+  &lt;strong&gt;Headquarters:&lt;/strong&gt; Germany Remote
+&lt;/p&gt;
+
+&lt;div class="content-intro"&gt;&lt;h2&gt;&lt;strong&gt;About Flexport:&amp;nbsp;&lt;/strong&gt;&lt;/h2&gt;
+&lt;p&gt;At Flexport, we believe global trade can move the human race forward. That’s why it’s our mission to make global commerce so easy there will be more of it. We’re shaping the future of a $10T industry with solutions powered by innovative technology and exceptional people. Today, companies of all sizes—from emerging brands to Fortune 500s—use Flexport technology to move more than $19B of merchandise across 112 countries a year.&amp;nbsp;&lt;/p&gt;
+&lt;p&gt;The recent global supply chain crisis has put Flexport center stage as we continue to play a pivotal role in how goods move around the world. We are proud to have the support of the best investors in the game who believe in our mission, solutions and people. Ready to tackle global challenges that impact business, society, and the environment? Come join us.&lt;/p&gt;&lt;/div&gt;&lt;p&gt;&lt;strong&gt;Build and grow with us! Join Flexport Germany as an Account Executive and supercharge your career!&lt;/strong&gt;&lt;/p&gt;
+&lt;h4&gt;&lt;strong&gt;The opportunity:&lt;/strong&gt;&lt;/h4&gt;
+&lt;p&gt;The Enterprise Account Executive (ENT) is responsible for driving complex, high-value enterprise deals and establishing long-term strategic partnerships with large customers. This role owns advanced, multi-stakeholder sales cycles that often span regions, business units, and decision layers. The ENT AE operates with a high degree of autonomy, shaping deal strategy, influencing executive stakeholders, and orchestrating cross-functional teams to deliver differentiated, value-driven solutions.&lt;/p&gt;
+&lt;p&gt;Your responsibilities as an&lt;strong&gt; Account Executive, ENT &lt;/strong&gt;include, but are not limited to the following:&lt;/p&gt;
+&lt;p&gt;Pipeline &amp;amp; Opportunity Ownership&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Own and close high-value, complex enterprise opportunities, consistently meeting or exceeding individual quotas.&lt;/li&gt;
+&lt;li&gt;Build a strategic pipeline through self-prospecting, account planning, and SDR partnership.&lt;/li&gt;
+&lt;li&gt;Proactively identify whitespace, expansion potential, and multi-entity opportunities within target accounts.&lt;/li&gt;
+&lt;li&gt;Maintain forecasting, opportunity hygiene, and deal governance in Salesforce (SFDC).&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Strategic Discovery &amp;amp; Solution Architecture&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Lead executive-level discovery to understand enterprise supply chain strategy, risk posture, and long-term business objectives.&lt;/li&gt;
+&lt;li&gt;Navigate complex buying groups across procurement, ops, finance, IT, and senior leadership.&lt;/li&gt;
+&lt;li&gt;Design integrated, multi-product Flexport solutions aligned to customer priorities and business outcomes.&lt;/li&gt;
+&lt;li&gt;Position Flexport as a strategic partner through compelling value narratives, business cases, and solution roadmaps.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Deal Strategy, Negotiation &amp;amp; Closing&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Own end-to-end deal strategy for complex opportunities, including stakeholder mapping, decision criteria, and close plans.&lt;/li&gt;
+&lt;li&gt;Lead advanced commercial negotiation, pricing, contracts, and non-standard deal structures.&lt;/li&gt;
+&lt;li&gt;Orchestrate internal stakeholders (Ops, Finance, Legal, Product) to progress deals efficiently&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Onboarding, Expansion &amp;amp; Relationship Leadership&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Own the onboarding motion, ensuring enterprise customers are set up for scalable success.&lt;/li&gt;
+&lt;li&gt;Establish and maintain trusted relationships with senior and executive customer stakeholders.&lt;/li&gt;
+&lt;li&gt;Identify expansion opportunities together with Account Management to drive sustained growth.&lt;/li&gt;
+&lt;li&gt;Serve as a point of escalation and strategic advisor during the customer lifecycle.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Enterprise Leadership &amp;amp; Market Impact&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Act as a senior commercial voice in enterprise pursuits, sharing market insight and customer feedback internally.&lt;/li&gt;
+&lt;li&gt;Contribute to enterprise sales best practices, deal reviews, and peer coaching.&lt;/li&gt;
+&lt;li&gt;Represent Flexport with credibility and confidence in high-stakes customer interactions.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h4&gt;&lt;strong&gt;You should have:&lt;br&gt;&lt;/strong&gt;&lt;/h4&gt;
+&lt;ul&gt;
+&lt;li&gt;5+ years of experience managing complex, enterprise-level sales cycles with consistent quota attainment.&lt;/li&gt;
+&lt;li&gt;Proven ability to close large, multi-stakeholder deals with long sales cycles and high deal complexity.&lt;/li&gt;
+&lt;li&gt;Strong executive presence with the ability to influence senior decision-makers.&lt;/li&gt;
+&lt;li&gt;Advanced discovery, negotiation, and value-based selling skills.&lt;/li&gt;
+&lt;li&gt;High degree of autonomy, strategic thinking, and commercial judgment.&lt;/li&gt;
+&lt;li&gt;Strong logistics, freight forwarding, or supply chain industry experience preferred.&lt;/li&gt;
+&lt;li&gt;Intermediate in English; additional languages are a plus depending on region.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;We kindly ask our candidates to apply with a CV in English!&amp;nbsp;&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;What's in there for you:&lt;/strong&gt;&amp;nbsp;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;An opportunity to contribute to one of the fastest-growing companies, where you’ll have the chance to create a global impact while being a part of a&amp;nbsp; thriving multinational environment&amp;nbsp;&lt;/li&gt;
+&lt;li&gt;Lunch food delivery 4 days a week incl. vegetarian options, a salad bar and special menu options, plus breakfast options, snacks, soft drinks and barista coffee.&lt;/li&gt;
+&lt;li&gt;Health insurance:&amp;nbsp; employee contribution part is covered by Flexport&lt;/li&gt;
+&lt;li&gt;25 paid vacation days&amp;nbsp;&lt;/li&gt;
+&lt;li&gt;Equity program: every team member becomes a shareholder, aligning our success with yours. As a private company in a multi-trillion dollar industry, you have a direct stake in our collective growth and success.&lt;/li&gt;
+&lt;li&gt;Employee Assistance Program through Aetna Resources for Living: Flexport provides an employer-sponsored program at no cost to you and your household members&lt;/li&gt;
+&lt;li&gt;Parental leave benefit: Flexport is here to support you and your families in one of the most important times in life – the birth of a child! Our parental leave program allows both mothers and partners to take time off from work for pregnancy, childbirth, and to bond with your new child.&amp;nbsp;&lt;/li&gt;
+&lt;li&gt;Monthly reimbursement of mobile phone expenses.&lt;/li&gt;
+&lt;li&gt;Car allowance: Flexport offers its sales team a monthly car allowance, allowing you to rent or lease a vehicle for both personal and professional use. This approach provides you flexibility and personalization, letting you choose a car that suits your needs.&amp;nbsp;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div&gt;&amp;nbsp;&lt;/div&gt;
+&lt;p&gt;&amp;nbsp;&lt;/p&gt;
+&lt;p&gt;&amp;nbsp;&lt;/p&gt;&lt;div class="content-conclusion"&gt;&lt;div class="c-virtual_list__item"&gt;
+&lt;div class="c-message_kit__background p-message_pane_message__message c-message_kit__message"&gt;
+&lt;div class="c-message_kit__hover"&gt;
+&lt;div class="c-message_kit__actions c-message_kit__actions--default"&gt;
+&lt;div class="c-message_kit__gutter"&gt;
+&lt;div class="c-message_kit__gutter__right"&gt;
+&lt;div class="c-message_kit__blocks c-message_kit__blocks--rich_text"&gt;
+&lt;div class="c-message__message_blocks c-message__message_blocks--rich_text"&gt;
+&lt;div class="p-block_kit_renderer"&gt;
+&lt;div class="p-block_kit_renderer__block_wrapper p-block_kit_renderer__block_wrapper--first"&gt;
+&lt;div class="p-rich_text_block"&gt;
+&lt;h4&gt;Commitment to Equal Opportunity&lt;/h4&gt;
+&lt;p&gt;At Flexport, our ability to fulfill our mission of making global commerce easy and accessible relies on having a diverse, dedicated and engaged workforce. All qualified applicants will receive consideration for employment regardless of race, color, religion, sex, national origin, age, physical and mental disability, health status, marital and family status, sexual orientation, gender identity and expression, military and veteran status, and any other characteristic protected by applicable law.&lt;/p&gt;
+&lt;h4&gt;Global Data Privacy Notice for Job Candidates and Applicants&lt;/h4&gt;
+&lt;p&gt;Depending on your location, the General Data Protection Regulation (GDPR) and California Consumer Privacy Act (CCPA) may regulate the way we manage the data of job applicants.&amp;nbsp;By submitting your application, you are agreeing to our use and processing of your data as required. Please see our Privacy Notice available at&amp;nbsp;&lt;a href="http://www.flexport.com/privacy"&gt;www.flexport.com/privacy&lt;/a&gt;&amp;nbsp;for additional information.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;strong&gt;To apply:&lt;/strong&gt; &lt;a href="https://weworkremotely.com/remote-jobs/flexport-account-executive-enterprise"&gt;https://weworkremotely.com/remote-jobs/flexport-account-executive-enterprise&lt;/a&gt;&lt;/p&gt;
+</description>
+      <pubDate>Sun, 02 Aug 2026 07:30:47 +0000</pubDate>
+      <expires_at>Tue, 01 Sep 2026 07:30:47 +0000</expires_at>
+      <guid>https://weworkremotely.com/remote-jobs/flexport-account-executive-enterprise</guid>
+      <link>https://weworkremotely.com/remote-jobs/flexport-account-executive-enterprise</link>
+    </item>
+  </channel>
+</rss>

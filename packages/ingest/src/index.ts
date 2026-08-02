@@ -4,3 +4,5 @@ export * from "./fetchers/types.js";
 export * from "./fetchers/remotive.js";
 export * from "./fetchers/remoteok.js";
 export * from "./fetchers/arbeitnow.js";
+export * from "./fetchers/wwr.js";
+export * from "./fetchers/themuse.js";
