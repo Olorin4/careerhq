@@ -29,6 +29,7 @@ describe("application state machine (spec §6.2)", () => {
   it("classification may never set INTERVIEW/OFFER/REJECTED (user-confirmed only)", () => {
     expect(canTransition("SUBMITTED", "INTERVIEW", "classification", { classificationConfidence: 1 }).ok).toBe(false);
     expect(canTransition("INTERVIEW", "OFFER", "classification", { classificationConfidence: 1 }).ok).toBe(false);
+    expect(canTransition("SUBMITTED", "REJECTED", "classification", { classificationConfidence: 1 }).ok).toBe(false);
   });
   it("any active state can be REJECTED or WITHDRAWN by the user", () => {
     for (const from of ["DISCOVERED", "PREPARING", "SUBMITTED", "INTERVIEW", "OFFER"] as const) {
