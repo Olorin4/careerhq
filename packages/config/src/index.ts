@@ -6,7 +6,15 @@ const boolFromEnv = z
   .transform((v) => v === "true");
 
 const envSchema = z.object({
-  DATABASE_URL: z.string().url({ message: "DATABASE_URL must be a valid postgres URL" }),
+  DATABASE_URL: z
+    .string({
+      required_error:
+        "DATABASE_URL is not set — copy .env.example to .env in the repo root (see the README quickstart)",
+    })
+    .url({ message: "DATABASE_URL must be a valid postgres URL" })
+    .refine((v) => v.startsWith("postgres://") || v.startsWith("postgresql://"), {
+      message: "DATABASE_URL must use the postgres:// scheme, e.g. postgres://careerhq:careerhq@localhost:5432/careerhq",
+    }),
   SUBMISSIONS_LIVE_EMAIL: boolFromEnv,
   SUBMISSIONS_LIVE_COMPANY_SITE: boolFromEnv,
   SANDBOX_FORCE_SAFE: boolFromEnv,
@@ -24,7 +32,14 @@ export interface AppConfig {
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
-  const parsed = envSchema.parse(env);
+  const result = envSchema.safeParse(env);
+  if (!result.success) {
+    // A raw ZodError is unreadable in a browser error overlay or a container
+    // log, and a missing .env is the single most likely first-run failure.
+    const details = result.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
+    throw new Error(`Invalid environment configuration:\n${details}`);
+  }
+  const parsed = result.data;
   return {
     databaseUrl: parsed.DATABASE_URL,
     submissionsLiveEmail: parsed.SUBMISSIONS_LIVE_EMAIL,
