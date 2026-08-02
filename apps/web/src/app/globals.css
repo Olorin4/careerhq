@@ -134,3 +134,34 @@ body {
   margin: 0;
   font-size: 0.8rem;
 }
+
+.detail-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-left: 1.25rem;
+  font-size: 0.9rem;
+}
+
+.overview-due-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-left: 1.25rem;
+}
+
+.overview-due-list a {
+  color: inherit;
+}
+
+.overview-due-overdue a {
+  color: #b00020;
+  font-weight: 600;
+}
+
+.overview-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  padding-left: 1.25rem;
+}

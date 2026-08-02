@@ -11,6 +11,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <nav className="app-nav">
+          <a href="/overview">Overview</a>
           <a href="/applications">Applications</a>
           <a href="/facts">Facts</a>
           <a href="/cvs">CVs</a>
