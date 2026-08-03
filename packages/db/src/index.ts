@@ -5,6 +5,8 @@ export * from "./repos/companies.js";
 export * from "./repos/facts.js";
 export * from "./repos/cv-variants.js";
 export * from "./repos/discovery.js";
+export * from "./repos/documents.js";
+export * from "./repos/answers.js";
 import type {
   applicationAnswers, applicationAttempts, applicationEvents, applications, candidateFacts,
   cvVariants, generatedDocuments, ingestRuns, jobs, scoringProfiles, watchlistCompanies, workspaces,
