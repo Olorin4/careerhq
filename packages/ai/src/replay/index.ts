@@ -1,0 +1,124 @@
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import type { AiMode } from "@careerhq/contracts";
+import type { FallbackResult } from "../client/fallback.js";
+
+/**
+ * Persistence for recorded AI calls, keyed by `replayKey`. The default
+ * implementation is filesystem-backed (see `makeFsReplayStore`); tests inject
+ * an in-memory stub instead.
+ */
+export interface ReplayStore {
+  read(key: string): Promise<string | null>;
+  write(key: string, value: string): Promise<void>;
+}
+
+/**
+ * Filesystem-backed `ReplayStore` rooted at `dir`. Each key is stored as
+ * `${dir}/${key}.json`. `write` creates `dir` (and any missing parents) on
+ * demand so callers never need to provision the fixtures directory up front.
+ * `read` treats every failure — missing file, missing directory, a `dir` that
+ * is actually a file, permission errors — as a cache miss (`null`) rather
+ * than surfacing the underlying error, since a corrupt or absent fixture
+ * should fall through to `replay_miss`, not crash the caller.
+ */
+export function makeFsReplayStore(dir: string): ReplayStore {
+  const filePath = (key: string): string => path.join(dir, `${key}.json`);
+  return {
+    async read(key) {
+      try {
+        return await readFile(filePath(key), "utf8");
+      } catch {
+        return null;
+      }
+    },
+    async write(key, value) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(filePath(key), value, "utf8");
+    },
+  };
+}
+
+/**
+ * Deterministic cache key for a prompt under a given task: the task id plus
+ * the first 16 hex characters of the sha256 of `system + "\n" + user`. Stable
+ * across runs for the same prompt, distinct across tasks and across prompt
+ * variations, so recordings can be replayed byte-for-byte in CI/dev without a
+ * live API key.
+ */
+export function replayKey(taskId: string, prompt: { system: string; user: string }): string {
+  const hash = createHash("sha256")
+    .update(`${prompt.system}\n${prompt.user}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `${taskId}-${hash}`;
+}
+
+/** Shape persisted to the store on a successful `record` run. */
+interface RecordedCall<T> {
+  value: T;
+  model: string;
+}
+
+/**
+ * Wraps an AI call with record/replay semantics driven by `mode`:
+ * - `live`: runs `run()` and returns its result untouched.
+ * - `record`: runs `run()` and, only when it succeeds, persists
+ *   `{value, model}` under `replayKey(taskId, prompt)` for later replay.
+ *   Failures pass through without being recorded.
+ * - `replay`: never calls `run()`. A stored hit is returned as an ok result
+ *   with `model` prefixed `"replay:"` and zeroed-out timing/attempt fields
+ *   (a replay isn't a live call, so those fields have no truthful value). A
+ *   miss returns `error: "replay_miss"` rather than throwing, so a missing
+ *   fixture degrades to a normal failure result instead of crashing whatever
+ *   is running the replay suite.
+ */
+export async function withReplay<T>(args: {
+  mode: AiMode;
+  store: ReplayStore;
+  taskId: string;
+  prompt: { system: string; user: string };
+  run: () => Promise<FallbackResult<T>>;
+}): Promise<FallbackResult<T>> {
+  const { mode, store, taskId, prompt, run } = args;
+
+  if (mode === "live") {
+    return run();
+  }
+
+  if (mode === "record") {
+    const result = await run();
+    if (result.ok) {
+      const key = replayKey(taskId, prompt);
+      await store.write(key, JSON.stringify({ value: result.value, model: result.model }));
+    }
+    return result;
+  }
+
+  // mode === "replay": run() must never be called.
+  const key = replayKey(taskId, prompt);
+  const raw = await store.read(key);
+  if (raw === null) {
+    return {
+      ok: false,
+      value: null,
+      model: "",
+      latencyMs: 0,
+      status: null,
+      error: "replay_miss",
+      attempts: [],
+    };
+  }
+
+  const recorded = JSON.parse(raw) as RecordedCall<T>;
+  return {
+    ok: true,
+    value: recorded.value,
+    model: `replay:${recorded.model}`,
+    latencyMs: 0,
+    status: null,
+    error: null,
+    attempts: [],
+  };
+}

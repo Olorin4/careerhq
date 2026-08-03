@@ -88,4 +88,43 @@ describe("loadConfig", () => {
   it("passes through a custom INGEST_CRON", () => {
     expect(loadConfig({ ...BASE, INGEST_CRON: "*/15 * * * *" }).ingestCron).toBe("*/15 * * * *");
   });
+
+  it("defaults aiMode to live", () => {
+    expect(loadConfig(BASE).aiMode).toBe("live");
+  });
+  it("accepts record and replay as valid AI_MODE values", () => {
+    expect(loadConfig({ ...BASE, AI_MODE: "record" }).aiMode).toBe("record");
+    expect(loadConfig({ ...BASE, AI_MODE: "replay" }).aiMode).toBe("replay");
+  });
+  it("throws a prose error for an invalid AI_MODE", () => {
+    expect(() => loadConfig({ ...BASE, AI_MODE: "bogus" })).toThrow(/AI_MODE/);
+  });
+
+  it("defaults aiWritingModels to the free-tier writing-tier fallback list", () => {
+    expect(loadConfig(BASE).aiWritingModels).toEqual([
+      "deepseek/deepseek-chat:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemini-2.0-flash-001",
+    ]);
+  });
+  it("parses AI_WRITING_MODELS as a comma list, trimming whitespace and dropping empties", () => {
+    expect(loadConfig({ ...BASE, AI_WRITING_MODELS: "a,b , c" }).aiWritingModels).toEqual(["a", "b", "c"]);
+  });
+  it("falls back to the default writing model list when AI_WRITING_MODELS is empty", () => {
+    expect(loadConfig({ ...BASE, AI_WRITING_MODELS: "" }).aiWritingModels).toEqual([
+      "deepseek/deepseek-chat:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemini-2.0-flash-001",
+    ]);
+  });
+  it("falls back to the default writing model list when AI_WRITING_MODELS holds only separators", () => {
+    expect(loadConfig({ ...BASE, AI_WRITING_MODELS: " , ," }).aiWritingModels).toEqual([
+      "deepseek/deepseek-chat:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemini-2.0-flash-001",
+    ]);
+  });
+  it("never returns an empty aiWritingModels list", () => {
+    expect(loadConfig({ ...BASE, AI_WRITING_MODELS: "" }).aiWritingModels.length).toBeGreaterThan(0);
+  });
 });

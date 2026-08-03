@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { AI_MODES, type AiMode } from "@careerhq/contracts";
 import { z } from "zod";
 
 /**
@@ -40,20 +41,26 @@ const DEFAULT_AI_FAST_MODELS = [
   "meta-llama/llama-3.3-70b-instruct:free",
 ];
 
+const DEFAULT_AI_WRITING_MODELS = [
+  "deepseek/deepseek-chat:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "google/gemini-2.0-flash-001",
+];
+
 /**
  * Splits a comma-separated env value into trimmed, non-empty entries, falling
- * back to `DEFAULT_AI_FAST_MODELS` when nothing survives. An explicitly empty
- * value bypasses zod's `.default()`, and Compose passes exactly that with
- * `AI_FAST_MODELS: ${AI_FAST_MODELS:-}` — an empty list would leave the
- * fallback client with no model to try and report it as "all models cooling
- * down", which is not what happened.
+ * back to `fallback` when nothing survives. An explicitly empty value bypasses
+ * zod's `.default()`, and Compose passes exactly that with
+ * `AI_FAST_MODELS: ${AI_FAST_MODELS:-}` (and the same for AI_WRITING_MODELS) —
+ * an empty list would leave the fallback client with no model to try and
+ * report it as "all models cooling down", which is not what happened.
  */
-function parseModelList(value: string): string[] {
+function parseModelList(value: string, fallback: readonly string[]): string[] {
   const entries = value
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
-  return entries.length > 0 ? entries : [...DEFAULT_AI_FAST_MODELS];
+  return entries.length > 0 ? entries : [...fallback];
 }
 
 /** Empty and whitespace-only env values mean "unset" — see `parseModelList`. */
@@ -82,8 +89,17 @@ const envSchema = z.object({
   AI_FAST_MODELS: z
     .string()
     .default(DEFAULT_AI_FAST_MODELS.join(","))
-    .transform(parseModelList),
+    .transform((value) => parseModelList(value, DEFAULT_AI_FAST_MODELS)),
+  AI_WRITING_MODELS: z
+    .string()
+    .default(DEFAULT_AI_WRITING_MODELS.join(","))
+    .transform((value) => parseModelList(value, DEFAULT_AI_WRITING_MODELS)),
   INGEST_CRON: z.string().default("0 */6 * * *"),
+  AI_MODE: z.enum(AI_MODES, {
+    errorMap: () => ({
+      message: `AI_MODE must be one of: ${AI_MODES.join(", ")}`,
+    }),
+  }).default("live"),
 });
 
 export interface AppConfig {
@@ -98,7 +114,11 @@ export interface AppConfig {
   openrouterApiKey: string | null;
   /** Never empty: an unset or blank AI_FAST_MODELS yields the default list. */
   aiFastModels: string[];
+  /** Never empty: an unset or blank AI_WRITING_MODELS yields the default list. */
+  aiWritingModels: string[];
   ingestCron: string;
+  /** Controls the AI record/replay layer; default "live" makes real calls. */
+  aiMode: AiMode;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
@@ -119,6 +139,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     fileStorageDir: parsed.FILE_STORAGE_DIR,
     openrouterApiKey: optionalString(parsed.OPENROUTER_API_KEY),
     aiFastModels: parsed.AI_FAST_MODELS,
+    aiWritingModels: parsed.AI_WRITING_MODELS,
     ingestCron: parsed.INGEST_CRON,
+    aiMode: parsed.AI_MODE,
   };
 }

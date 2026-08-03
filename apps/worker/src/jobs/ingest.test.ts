@@ -106,7 +106,9 @@ const baseConfig: AppConfig = {
   fileStorageDir: "/tmp/careerhq-worker-test",
   openrouterApiKey: null,
   aiFastModels: ["test/fast-model"],
+  aiWritingModels: ["test/writing-model"],
   ingestCron: "0 */6 * * *",
+  aiMode: "live",
 };
 
 d("runIngestOnce", () => {
