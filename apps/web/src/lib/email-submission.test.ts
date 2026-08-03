@@ -8,7 +8,7 @@ import { loadConfig, type AppConfig } from "@careerhq/config";
 import type { EmailDraft, SmtpConfig } from "@careerhq/contracts";
 import { hashConfirmationToken } from "@careerhq/core/gates";
 import {
-  beginSubmission, completeSubmission, createApplication, createCvVariant, createDb,
+  applications, beginSubmission, completeSubmission, createApplication, createCvVariant, createDb,
   createEmailAttempt, createEmailConnection, generateMasterKeyB64, getActiveConfirmation,
   getApplicationDetail, getEmailAttempt, listMessagesForApplication, transitionApplication,
   updateEmailDraft, workspaces, type Db,
@@ -283,6 +283,34 @@ d("email submission orchestrator", () => {
     if (outcome.status !== "blocked") return;
     expect(outcome.code).toBe("sandbox_blocked");
     expect((await getEmailAttempt(db, fixture.attemptId))?.status).toBe("PENDING_CONFIRMATION");
+  });
+
+  it("blocks a confirm when the application has drifted out of READY_FOR_REVIEW → application_not_ready, nothing sent, token unburned", async () => {
+    const fixture = await draftedAttempt("Drifted Co");
+    const token = await preview(fixture);
+
+    // Simulate the application having moved on (e.g. a human or another
+    // process walked it back to PREPARING) between preview and confirm —
+    // bypassing the guarded transition helper on purpose, since that's
+    // exactly the drift this check exists to catch.
+    await db.update(applications).set({ state: "PREPARING" }).where(eq(applications.id, fixture.applicationId));
+
+    const sent: SentMail[] = [];
+    const outcome = await confirmAndSend(
+      deps({ makeTransport: () => stubTransport({ kind: "sent" }, sent) }),
+      { workspaceId, attemptId: fixture.attemptId, presentedToken: token, retypedTarget: "careers@acme.test" },
+    );
+    expect(outcome.status).toBe("blocked");
+    if (outcome.status !== "blocked") return;
+    expect(outcome.code).toBe("application_not_ready");
+
+    // Nothing was sent, and the token/attempt are exactly as they were before the attempt.
+    expect(sent).toHaveLength(0);
+    const attempt = await getEmailAttempt(db, fixture.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect(attempt?.pendingReceipt).toBeNull();
+    const confirmation = await getActiveConfirmation(db, fixture.attemptId);
+    expect(confirmation?.consumedAt ?? null).toBeNull();
   });
 
   it("sends on a clean confirm: real CV bytes on the wire, receipts recorded, application SUBMITTED", async () => {

@@ -361,6 +361,12 @@ function ConfirmOutcomePane({
               workspace, <code>SANDBOX_SMTP_ALLOWED_HOST</code>) to enable sending.
             </p>
           )}
+          {outcome.code === "application_not_ready" && (
+            <p className="email-outcome-hint">
+              This application is no longer in a state that can be submitted from. Re-typing the address won&apos;t
+              fix this — use the transition buttons above to walk it back to Ready for review, then confirm again.
+            </p>
+          )}
         </div>
       );
     case "failed":

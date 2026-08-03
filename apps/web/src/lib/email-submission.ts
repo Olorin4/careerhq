@@ -4,7 +4,10 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { AppConfig } from "@careerhq/config";
-import { emailDraftSchema, smtpConfigSchema, type EmailDraft, type SmtpConfig } from "@careerhq/contracts";
+import { canTransition } from "@careerhq/core";
+import {
+  emailDraftSchema, smtpConfigSchema, type ApplicationState, type EmailDraft, type SmtpConfig,
+} from "@careerhq/contracts";
 import {
   CONFIRMATION_TTL_MS, evaluateSubmissionGates, generateConfirmationToken, hashConfirmationToken,
   payloadFingerprint, type EmailSubmissionPayload, type GateCheckInput,
@@ -82,6 +85,8 @@ const attemptDraftSchema = z.object({
 interface LoadedSubmission {
   attempt: ApplicationAttempt;
   applicationId: string;
+  /** Current state of the parent application — re-read fresh, never trusted from before the preview. */
+  applicationState: ApplicationState;
   draft: EmailDraft;
   connection: EmailConnection;
   smtp: SmtpConfig;
@@ -189,6 +194,7 @@ async function loadSubmission(deps: EmailSubmissionDeps, args: PreviewArgs): Pro
     value: {
       attempt,
       applicationId: attempt.applicationId,
+      applicationState: detail.application.state,
       draft,
       connection,
       smtp: smtp.data,
@@ -245,10 +251,11 @@ export async function previewSubmission(
  * after it.
  *
  * Order is load-bearing. Everything that can fail without touching the outside
- * world — loading, the gate matrix, opening the SMTP credential, building the
- * transport — happens before `beginSubmission`, so a blocked confirm leaves
- * the attempt PENDING_CONFIRMATION with its token unburned and the user can
- * simply fix the problem and confirm again.
+ * world — loading, the gate matrix, the application-readiness check, opening
+ * the SMTP credential, building the transport — happens before
+ * `beginSubmission`, so a blocked confirm leaves the attempt
+ * PENDING_CONFIRMATION with its token unburned and the user can simply fix
+ * the problem and confirm again.
  */
 export async function confirmAndSend(
   deps: EmailSubmissionDeps,
@@ -258,7 +265,9 @@ export async function confirmAndSend(
 
   const loaded = await loadSubmission(deps, { workspaceId: args.workspaceId, attemptId: args.attemptId });
   if (!loaded.ok) return { status: "blocked", code: loaded.code, reason: loaded.reason };
-  const { attempt, applicationId, draft, connection, smtp, attachment, payload, fingerprint } = loaded.value;
+  const {
+    attempt, applicationId, applicationState, draft, connection, smtp, attachment, payload, fingerprint,
+  } = loaded.value;
 
   const masterKey = config.masterKey;
   if (!masterKey) {
@@ -309,6 +318,20 @@ export async function confirmAndSend(
   // `allowed` implies a token record; this narrows it for the redemption below.
   if (!confirmation) {
     return { status: "blocked", code: "token_missing", reason: "no active confirmation token exists" };
+  }
+
+  // The application must still be exactly one guarded step from SUBMITTED.
+  // Without this, an application that drifted elsewhere (e.g. still
+  // PREPARING) could clear every gate above, really send, and only then have
+  // completeSubmission's own transition refuse — parking a genuinely sent
+  // email as NEEDS_RECONCILE for a problem the human can't resolve until they
+  // separately walk the application forward. Checked after the gate matrix
+  // (so an already-SUBMITTED application still reports duplicate_submission,
+  // not this) but before anything that burns the token or touches the
+  // network, so the fix (advance the application) and the retry both just work.
+  const readiness = canTransition(applicationState, "SUBMITTED", "attempt", { hasConfirmedAttempt: true });
+  if (!readiness.ok) {
+    return { status: "blocked", code: "application_not_ready", reason: readiness.reason };
   }
 
   // Opening the credential and building the transport are the last things that
