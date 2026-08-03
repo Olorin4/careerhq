@@ -1,10 +1,12 @@
 import { sql } from "drizzle-orm";
 import {
-  boolean, index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex, uuid,
+  boolean, customType, index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 import {
   ANSWER_ORIGINS, APPLICATION_STATES, APPROVAL_STATES, ATS_TYPES, ATTEMPT_STATUSES, CHANNELS,
-  CV_FORMATS, DOCUMENT_KINDS, FACT_CATEGORIES, SENSITIVITIES, TRANSITION_TRIGGERS, WORKSPACE_KINDS,
+  CV_FORMATS, DOCUMENT_KINDS, EMAIL_DIRECTIONS, FACT_CATEGORIES, MATCH_METHODS,
+  REPLY_CLASSIFICATIONS, SENSITIVITIES, SUGGESTION_STATES, TRANSITION_TRIGGERS, WORKSPACE_KINDS,
 } from "@careerhq/contracts";
 
 export const workspaceKind = pgEnum("workspace_kind", WORKSPACE_KINDS);
@@ -20,6 +22,16 @@ export const atsType = pgEnum("ats_type", ATS_TYPES);
 export const documentKind = pgEnum("document_kind", DOCUMENT_KINDS);
 export const approvalState = pgEnum("approval_state", APPROVAL_STATES);
 export const answerOrigin = pgEnum("answer_origin", ANSWER_ORIGINS);
+export const emailDirection = pgEnum("email_direction", EMAIL_DIRECTIONS);
+export const matchMethod = pgEnum("match_method", MATCH_METHODS);
+export const replyClassification = pgEnum("reply_classification", REPLY_CLASSIFICATIONS);
+export const suggestionState = pgEnum("suggestion_state", SUGGESTION_STATES);
+
+const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -98,6 +110,7 @@ export const applicationAttempts = pgTable("application_attempts", {
   status: attemptStatus("status").notNull().default("DRAFT"),
   targetFingerprint: text("target_fingerprint"),
   payloadFingerprint: text("payload_fingerprint"),
+  draftPayload: jsonb("draft_payload"),
   pendingReceipt: jsonb("pending_receipt"),
   confirmedReceipt: jsonb("confirmed_receipt"),
   failureReason: text("failure_reason"),
@@ -194,3 +207,66 @@ export const applicationAnswers = pgTable("application_answers", {
   index("application_answers_application").on(t.applicationId, t.createdAt),
   index("application_answers_reusable").on(t.reusable, t.questionNorm),
 ]);
+
+export const credentials = pgTable("credentials", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),                       // "smtp" | "imap" (free text; app-level)
+  ciphertext: bytea("ciphertext").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const emailConnections = pgTable("email_connections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  fromAddress: text("from_address").notNull(),
+  displayName: text("display_name"),
+  smtp: jsonb("smtp").notNull(),                      // SmtpConfig (no password)
+  imap: jsonb("imap"),                                // ImapConfig | null
+  retention: jsonb("retention").notNull(),            // RetentionSetting
+  smtpCredentialId: uuid("smtp_credential_id").notNull().references(() => credentials.id, { onDelete: "restrict" }),
+  imapCredentialId: uuid("imap_credential_id").references(() => credentials.id, { onDelete: "restrict" }),
+  health: text("health").notNull().default("untested"), // "untested" | "ok" | "error"
+  healthDetail: text("health_detail"),                // redacted reason
+  syncState: jsonb("sync_state"),                     // { [folder]: lastUid }
+  lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const emailMessages = pgTable("email_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  connectionId: uuid("connection_id").references(() => emailConnections.id, { onDelete: "set null" }),
+  direction: emailDirection("direction").notNull(),
+  messageId: text("message_id").notNull(),
+  inReplyTo: text("in_reply_to"),
+  referencesIds: text("references_ids").array().notNull().default(sql`'{}'::text[]`),
+  fromAddr: text("from_addr").notNull(),
+  toAddrs: text("to_addrs").array().notNull().default(sql`'{}'::text[]`),
+  subject: text("subject").notNull().default(""),
+  snippet: text("snippet").notNull().default(""),
+  bodyRef: text("body_ref"),
+  applicationId: uuid("application_id").references(() => applications.id, { onDelete: "set null" }),
+  matchMethod: matchMethod("match_method"),
+  classification: replyClassification("classification"),
+  classificationConfidence: real("classification_confidence"),
+  suggestedTransition: applicationState("suggested_transition"),
+  suggestionState: suggestionState("suggestion_state"),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("email_messages_workspace_message_id").on(t.workspaceId, t.messageId),
+  index("email_messages_application").on(t.applicationId, t.receivedAt),
+  index("email_messages_suggestions").on(t.suggestionState, t.receivedAt),
+]);
+
+export const attemptConfirmations = pgTable("attempt_confirmations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  attemptId: uuid("attempt_id").notNull().references(() => applicationAttempts.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  payloadFingerprint: text("payload_fingerprint").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("attempt_confirmations_attempt").on(t.attemptId, t.createdAt)]);

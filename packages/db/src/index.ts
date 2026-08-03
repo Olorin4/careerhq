@@ -8,8 +8,9 @@ export * from "./repos/discovery.js";
 export * from "./repos/documents.js";
 export * from "./repos/answers.js";
 import type {
-  applicationAnswers, applicationAttempts, applicationEvents, applications, candidateFacts,
-  cvVariants, generatedDocuments, ingestRuns, jobs, scoringProfiles, watchlistCompanies, workspaces,
+  applicationAnswers, applicationAttempts, applicationEvents, applications, attemptConfirmations,
+  candidateFacts, credentials, cvVariants, emailConnections, emailMessages, generatedDocuments,
+  ingestRuns, jobs, scoringProfiles, watchlistCompanies, workspaces,
 } from "./schema/index.js";
 export type Application = typeof applications.$inferSelect;
 export type NewApplication = typeof applications.$inferInsert;
@@ -35,3 +36,11 @@ export type GeneratedDocument = typeof generatedDocuments.$inferSelect;
 export type NewGeneratedDocument = typeof generatedDocuments.$inferInsert;
 export type ApplicationAnswer = typeof applicationAnswers.$inferSelect;
 export type NewApplicationAnswer = typeof applicationAnswers.$inferInsert;
+export type Credential = typeof credentials.$inferSelect;
+export type NewCredential = typeof credentials.$inferInsert;
+export type EmailConnection = typeof emailConnections.$inferSelect;
+export type NewEmailConnection = typeof emailConnections.$inferInsert;
+export type EmailMessage = typeof emailMessages.$inferSelect;
+export type NewEmailMessage = typeof emailMessages.$inferInsert;
+export type AttemptConfirmation = typeof attemptConfirmations.$inferSelect;
+export type NewAttemptConfirmation = typeof attemptConfirmations.$inferInsert;
