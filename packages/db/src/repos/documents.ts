@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { AnswerOrigin, ApprovalState, DocumentKind } from "@careerhq/contracts";
 import type { Db } from "../client.js";
 import { generatedDocuments } from "../schema/index.js";
@@ -41,4 +41,20 @@ export async function listDocuments(db: Db, applicationId: string): Promise<Gene
   return db.select().from(generatedDocuments)
     .where(eq(generatedDocuments.applicationId, applicationId))
     .orderBy(desc(generatedDocuments.createdAt));
+}
+
+/**
+ * Whether the application has at least one approved `generated_documents`
+ * row. This is the "materials exist" half of the READY_FOR_REVIEW gate (the
+ * other half — a selected CV variant — lives on the application row itself
+ * and is checked by the caller).
+ */
+export async function hasApprovedMaterials(db: Db, applicationId: string): Promise<boolean> {
+  const [row] = await db.select({ id: generatedDocuments.id }).from(generatedDocuments)
+    .where(and(
+      eq(generatedDocuments.applicationId, applicationId),
+      eq(generatedDocuments.approval, "approved"),
+    ))
+    .limit(1);
+  return row !== undefined;
 }

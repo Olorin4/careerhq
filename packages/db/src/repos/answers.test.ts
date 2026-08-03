@@ -91,4 +91,31 @@ d("answers repo", () => {
     const sorted = [...norms].sort();
     expect(norms).toEqual(sorted);
   });
+
+  it("scopes the reusable bank to its own workspace, never surfacing another workspace's reusable answers", async () => {
+    const [otherWs] = await db.insert(workspaces)
+      .values({ name: `t-other-${Date.now()}`, kind: "personal" }).returning();
+    const otherWorkspaceId = otherWs!.id;
+    const otherApplication = await createApplication(db, {
+      workspaceId: otherWorkspaceId, companyName: "Other Corp", jobTitle: "Other Engineer",
+    });
+    const otherAnswer = await createAnswer(db, {
+      applicationId: otherApplication.id, questionRaw: "Other workspace question?",
+      answer: "Other workspace answer", origin: "user",
+    });
+    await approveAnswer(db, otherAnswer.id, { reusable: true });
+
+    try {
+      const thisBank = await listReusableAnswers(db, workspaceId);
+      expect(thisBank.find((r) => r.id === otherAnswer.id)).toBeUndefined();
+
+      const otherBank = await listReusableAnswers(db, otherWorkspaceId);
+      expect(otherBank.find((r) => r.id === otherAnswer.id)).toBeDefined();
+      // And the inverse: the throwaway workspace must not see this suite's
+      // own reusable answers either — isolation cuts both ways.
+      expect(otherBank.some((r) => r.questionRaw !== "Other workspace question?")).toBe(false);
+    } finally {
+      await db.delete(workspaces).where(eq(workspaces.id, otherWorkspaceId));
+    }
+  });
 });

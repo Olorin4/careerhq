@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { AppConfig } from "@careerhq/config";
-import type { DocumentKind, GenerationResult } from "@careerhq/contracts";
+import { generationResultSchema, type DocumentKind, type GenerationResult } from "@careerhq/contracts";
 import {
   buildGeneratePrompt, classifySensitiveLlm, generateGrounded, makeFsReplayStore, withReplay,
   type GenerateInput,
@@ -90,6 +90,7 @@ export async function prepareGeneration(
   if (apiKey === null) return { ready: false, outcome: { status: "ai_unavailable" } };
 
   let question: string | undefined;
+  let ruleset: ReturnType<typeof classifyQuestionSensitivity> | undefined;
   if (args.kind === "question") {
     // generateGrounded degrades silently on a question-kind input with no
     // question (it just omits the line), which would produce a confident
@@ -97,14 +98,12 @@ export async function prepareGeneration(
     question = args.question?.trim();
     if (!question) return { ready: false, outcome: { status: "failed", error: "question_required" } };
 
-    // (2) Ruleset first; the fast-tier LLM only ever widens a clean verdict,
-    // so it is skipped entirely once the ruleset has already said "sensitive".
-    const ruleset = classifyQuestionSensitivity(question);
-    const classifySensitive = deps.classifySensitive ?? classifySensitiveLlm;
-    const llmRuling = ruleset.sensitive
-      ? null
-      : await classifySensitive(question, { models: config.aiFastModels, apiKey });
-    if (mergeSensitivityRulings(ruleset, llmRuling)) {
+    // (2) Ruleset first — it's a pure string match, free of cost, so it costs
+    // nothing to run before the application even loads. A ruleset hit is
+    // already a final verdict: the fast-tier LLM only ever widens a clean
+    // ruling, so there is nothing left for it to check.
+    ruleset = classifyQuestionSensitivity(question);
+    if (ruleset.sensitive) {
       // The writing model is never called for a sensitive question: the user
       // answers these themselves.
       return { ready: false, outcome: { status: "sensitive_blocked", matchedTerms: ruleset.matchedTerms } };
@@ -113,6 +112,9 @@ export async function prepareGeneration(
 
   // (3) Workspace scoping is enforced here, not by the caller: an application
   // id from another workspace must never reach the fact bank of this one.
+  // This runs before the fast-tier LLM tie-break below (unlike the ruleset
+  // check above, that call has a real cost), so an invalid applicationId is
+  // rejected before ever burning an LLM call on it.
   const detail = await getApplicationDetail(db, args.applicationId);
   if (!detail || detail.application.workspaceId !== args.workspaceId) {
     return { ready: false, outcome: { status: "failed", error: "application_not_found" } };
@@ -122,6 +124,19 @@ export async function prepareGeneration(
   // foreign key, but an undefined `job.title` further down is a far worse
   // failure mode than an explicit error here.
   if (!job) return { ready: false, outcome: { status: "failed", error: "job_not_found" } };
+
+  if (args.kind === "question" && ruleset) {
+    // (2b) The fast-tier tie-break itself: only reached once the ruleset
+    // came back clean AND the application is confirmed real and in-scope.
+    const classifySensitive = deps.classifySensitive ?? classifySensitiveLlm;
+    // `question` is guaranteed defined here: it's only unset when
+    // `args.kind !== "question"`, in which case `ruleset` (checked above) was
+    // never assigned either.
+    const llmRuling = await classifySensitive(question!, { models: config.aiFastModels, apiKey });
+    if (mergeSensitivityRulings(ruleset, llmRuling)) {
+      return { ready: false, outcome: { status: "sensitive_blocked", matchedTerms: ruleset.matchedTerms } };
+    }
+  }
 
   const companyName = job.companyId
     ? (await db.select().from(companiesTable).where(eq(companiesTable.id, job.companyId)))[0]?.name
@@ -235,6 +250,7 @@ export async function runGeneration(
     store: makeFsReplayStore(config.aiReplayDir),
     taskId: REPLAY_TASK_ID,
     prompt: prepared.prompt,
+    schema: generationResultSchema,
     run: () => generate(prepared.input, { models: config.aiWritingModels, apiKey }),
   });
 

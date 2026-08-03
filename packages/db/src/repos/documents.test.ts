@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createApplication, createDb, type Db, workspaces } from "../index.js";
-import { createDocument, listDocuments, setDocumentApproval } from "./documents.js";
+import { createDocument, hasApprovedMaterials, listDocuments, setDocumentApproval } from "./documents.js";
 
 const url = process.env.TEST_DATABASE_URL;
 const d = describe.skipIf(!url);
@@ -51,5 +51,38 @@ d("documents repo", () => {
     const firstIdx = docs.findIndex((doc) => doc.id === first.id);
     const secondIdx = docs.findIndex((doc) => doc.id === second.id);
     expect(secondIdx).toBeLessThan(firstIdx);
+  });
+
+  it("hasApprovedMaterials is false with no documents, and false while every document is still draft/rejected", async () => {
+    const app = await createApplication(db, { workspaceId, companyName: "Materials Co", jobTitle: "Eng" });
+    expect(await hasApprovedMaterials(db, app.id)).toBe(false);
+
+    const draft = await createDocument(db, {
+      applicationId: app.id, kind: "cover_letter", contentMd: "Draft", sourceFactIds: [],
+    });
+    expect(await hasApprovedMaterials(db, app.id)).toBe(false);
+
+    await setDocumentApproval(db, draft.id, "rejected");
+    expect(await hasApprovedMaterials(db, app.id)).toBe(false);
+  });
+
+  it("hasApprovedMaterials is true once at least one document for the application is approved", async () => {
+    const app = await createApplication(db, { workspaceId, companyName: "Materials Co Two", jobTitle: "Eng" });
+    const doc = await createDocument(db, {
+      applicationId: app.id, kind: "email_body", contentMd: "Draft", sourceFactIds: [],
+    });
+    await setDocumentApproval(db, doc.id, "approved");
+    expect(await hasApprovedMaterials(db, app.id)).toBe(true);
+  });
+
+  it("hasApprovedMaterials does not leak an approved document from a different application", async () => {
+    const appA = await createApplication(db, { workspaceId, companyName: "Iso A", jobTitle: "Eng" });
+    const appB = await createApplication(db, { workspaceId, companyName: "Iso B", jobTitle: "Eng" });
+    const doc = await createDocument(db, {
+      applicationId: appA.id, kind: "cover_letter", contentMd: "Draft", sourceFactIds: [],
+    });
+    await setDocumentApproval(db, doc.id, "approved");
+    expect(await hasApprovedMaterials(db, appA.id)).toBe(true);
+    expect(await hasApprovedMaterials(db, appB.id)).toBe(false);
   });
 });

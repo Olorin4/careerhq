@@ -87,6 +87,24 @@ export async function listApplications(db: Db, workspaceId: string): Promise<App
     .orderBy(asc(applications.createdAt));
 }
 
+export async function getApplication(db: Db, applicationId: string): Promise<Application | null> {
+  const [app] = await db.select().from(applications).where(eq(applications.id, applicationId));
+  return app ?? null;
+}
+
+/** Sets (or clears, with `null`) the CV variant an application will submit with. */
+export async function setApplicationCvVariant(
+  db: Db,
+  applicationId: string,
+  cvVariantId: string | null,
+): Promise<Application | null> {
+  const [updated] = await db.update(applications)
+    .set({ cvVariantId, updatedAt: sql`now()` })
+    .where(eq(applications.id, applicationId))
+    .returning();
+  return updated ?? null;
+}
+
 export async function getApplicationDetail(db: Db, applicationId: string) {
   const [app] = await db.select().from(applications).where(eq(applications.id, applicationId));
   if (!app) return null;

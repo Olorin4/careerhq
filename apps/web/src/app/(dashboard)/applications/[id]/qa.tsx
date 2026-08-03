@@ -3,6 +3,7 @@
 import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicationAnswer } from "@careerhq/db";
+import { ProvenanceChips } from "../../../../components/provenance-chips.js";
 import {
   approveAnswerAction, askQuestionAction, rejectAnswerAction, saveManualAnswerAction,
   type AskQuestionResult,
@@ -17,25 +18,6 @@ interface QaPanelProps {
   answers: ApplicationAnswer[];
   /** Every fact claim in the workspace (including archived), keyed by id, for provenance chip labels. */
   factClaims: Record<string, string>;
-}
-
-function ProvenanceChips({
-  factIds,
-  factClaims,
-}: {
-  factIds: string[];
-  factClaims: Record<string, string>;
-}) {
-  if (factIds.length === 0) return null;
-  return (
-    <div className="chip-list">
-      {factIds.map((id) => (
-        <span key={id} className="chip" title={id}>
-          {factClaims[id] ?? "fact removed"}
-        </span>
-      ))}
-    </div>
-  );
 }
 
 function OutcomePane({ result }: { result: AskQuestionResult }) {

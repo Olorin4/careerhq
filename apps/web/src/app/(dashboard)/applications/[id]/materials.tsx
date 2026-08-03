@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DOCUMENT_KINDS, type DocumentKind } from "@careerhq/contracts";
 import type { GeneratedDocument } from "@careerhq/db";
+import { ProvenanceChips } from "../../../../components/provenance-chips.js";
 import type { GenerationOutcome } from "../../../../lib/generation.js";
 import {
   approveDocumentAction, createManualDocumentAction, generateDocumentAction, rejectDocumentAction,
@@ -49,25 +50,6 @@ export function Materials({ applicationId, documents, factClaims, aiAvailable }:
         />
       ))}
     </section>
-  );
-}
-
-function ProvenanceChips({
-  factIds,
-  factClaims,
-}: {
-  factIds: string[];
-  factClaims: Record<string, string>;
-}) {
-  if (factIds.length === 0) return null;
-  return (
-    <div className="chip-list">
-      {factIds.map((id) => (
-        <span key={id} className="chip" title={id}>
-          {factClaims[id] ?? "fact removed"}
-        </span>
-      ))}
-    </div>
   );
 }
 

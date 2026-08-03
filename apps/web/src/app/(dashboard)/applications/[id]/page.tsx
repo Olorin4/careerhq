@@ -2,11 +2,13 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import {
-  getApplicationDetail, listAnswers, listDocuments, listFacts, companies as companiesTable,
+  getApplicationDetail, listAnswers, listCvVariants, listDocuments, listFacts,
+  companies as companiesTable,
 } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
 import { TransitionButtons } from "../transition-buttons.js";
+import { CvSelect } from "./cv-select.js";
 import { Materials } from "./materials.js";
 import { QaPanel } from "./qa.js";
 
@@ -48,6 +50,7 @@ export default async function ApplicationDetailPage({
   );
   const aiAvailable = loadConfig().openrouterApiKey !== null;
   const answers = await listAnswers(db, application.id);
+  const cvVariants = await listCvVariants(db, application.workspaceId);
 
   return (
     <main>
@@ -78,6 +81,12 @@ export default async function ApplicationDetailPage({
         </p>
       )}
       <TransitionButtons applicationId={application.id} state={application.state} />
+
+      <CvSelect
+        applicationId={application.id}
+        cvVariantId={application.cvVariantId}
+        variants={cvVariants}
+      />
 
       <Materials
         applicationId={application.id}

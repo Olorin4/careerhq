@@ -180,6 +180,21 @@ d("runGeneration gates", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it("never burns a fast-tier LLM call for a ruleset-clean question when the applicationId is invalid", async () => {
+    const generate = stubGenerate(okResult({ answer: "a", factIds: [], confidence: 1, unsupportedClaims: [] }));
+    const classifySensitive = vi.fn(async () => null);
+    // "Describe your platform experience." is ruleset-clean (see the
+    // ruleset-widening tests above), so absent the fix this would reach the
+    // paid tie-break call before the workspace-scoping check ever runs.
+    const outcome = await runGeneration(deps({ generate, classifySensitive }), {
+      workspaceId: emptyWorkspaceId, applicationId, kind: "question",
+      question: "Describe your platform experience.",
+    });
+    expect(outcome).toEqual({ status: "failed", error: "application_not_found" });
+    expect(classifySensitive).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it("returns needs_facts without calling the model when nothing is selectable", async () => {
     const generate = stubGenerate(okResult({ answer: "a", factIds: [], confidence: 1, unsupportedClaims: [] }));
     const outcome = await runGeneration(deps({ generate }), {

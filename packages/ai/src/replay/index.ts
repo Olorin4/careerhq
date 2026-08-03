@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { z } from "zod";
 import type { AiMode } from "@careerhq/contracts";
 import type { FallbackResult } from "../client/fallback.js";
 
@@ -111,7 +112,10 @@ function parseRecordedCall<T>(raw: string): RecordedCall<T> | null {
  *   JSON missing `value`/a string `model`) — returns `error: "replay_miss"`
  *   rather than throwing, so a missing or malformed fixture degrades to a
  *   normal failure result instead of crashing whatever is running the
- *   replay suite.
+ *   replay suite. When `schema` is given, a hit whose `value` fails
+ *   `schema.safeParse` is treated exactly the same way — a fixture recorded
+ *   under an older/incompatible shape must never reach the caller as if it
+ *   were a good result.
  */
 export async function withReplay<T>(args: {
   mode: AiMode;
@@ -119,8 +123,18 @@ export async function withReplay<T>(args: {
   taskId: string;
   prompt: { system: string; user: string };
   run: () => Promise<FallbackResult<T>>;
+  /**
+   * Validated against a replay hit's `value`; a mismatch degrades to
+   * `replay_miss`. The input type param is widened to `unknown` (matching
+   * `chat-json.ts`'s `validateJson`): schemas with defaults (e.g.
+   * `generationResultSchema`'s `.default([])` fields) have an input type
+   * narrower than their output `T`, and this guard only ever runs
+   * `safeParse` on an already-parsed `unknown` value, never `parse`-as-input,
+   * so that contravariant slot carries no real type safety to preserve.
+   */
+  schema?: z.ZodType<T, z.ZodTypeDef, unknown>;
 }): Promise<FallbackResult<T>> {
-  const { mode, store, taskId, prompt, run } = args;
+  const { mode, store, taskId, prompt, run, schema } = args;
 
   if (mode === "live") {
     return run();
@@ -152,6 +166,10 @@ export async function withReplay<T>(args: {
 
   const recorded = parseRecordedCall<T>(raw);
   if (recorded === null) {
+    return replayMiss<T>();
+  }
+
+  if (schema && !schema.safeParse(recorded.value).success) {
     return replayMiss<T>();
   }
 

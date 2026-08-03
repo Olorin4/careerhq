@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import type { FallbackResult } from "../client/fallback.js";
 import { makeFsReplayStore, replayKey, withReplay, type ReplayStore } from "./index.js";
 
@@ -212,6 +213,66 @@ describe("withReplay", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toBe("replay_miss");
       expect(run).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("replay mode with a schema guard", () => {
+    const answerSchema = z.object({ answer: z.string() });
+
+    it("passes through a replay hit whose value matches the schema", async () => {
+      const key = replayKey("t", prompt);
+      const store = makeMemoryStore({
+        [key]: JSON.stringify({ value: { answer: "hi" }, model: "some/model" }),
+      });
+      const run = vi.fn().mockResolvedValue(okResult);
+      const result = await withReplay({
+        mode: "replay", store, taskId: "t", prompt, run, schema: answerSchema,
+      });
+      expect(result).toEqual({
+        ok: true,
+        value: { answer: "hi" },
+        model: "replay:some/model",
+        latencyMs: 0,
+        status: null,
+        error: null,
+        attempts: [],
+      });
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("returns replay_miss-shaped failure when a replay hit's value fails schema.safeParse, without calling run()", async () => {
+      const key = replayKey("t", prompt);
+      // Well-formed fixture (valid JSON, string model) but the recorded value
+      // does not match the shape the caller now expects — e.g. an older
+      // recording made before a schema field was added/renamed.
+      const store = makeMemoryStore({
+        [key]: JSON.stringify({ value: { wrongField: "hi" }, model: "some/model" }),
+      });
+      const run = vi.fn().mockResolvedValue(okResult);
+      const result = await withReplay({
+        mode: "replay", store, taskId: "t", prompt, run, schema: answerSchema,
+      });
+      expect(result).toEqual({
+        ok: false,
+        value: null,
+        model: "",
+        latencyMs: 0,
+        status: null,
+        error: "replay_miss",
+        attempts: [],
+      });
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("never throws when the schema rejects — degrades to replay_miss like every other corrupt fixture", async () => {
+      const key = replayKey("t", prompt);
+      const store = makeMemoryStore({
+        [key]: JSON.stringify({ value: { answer: 123 }, model: "some/model" }),
+      });
+      const run = vi.fn().mockResolvedValue(okResult);
+      await expect(
+        withReplay({ mode: "replay", store, taskId: "t", prompt, run, schema: answerSchema }),
+      ).resolves.toMatchObject({ ok: false, error: "replay_miss" });
     });
   });
 });
