@@ -37,6 +37,21 @@ describe("selectFactsForGeneration (spec §7.2.1)", () => {
     expect(a).toHaveLength(12);
     expect(a.map((f) => f.id)).toEqual(b.map((f) => f.id)); // input order must not matter
   });
+  it("breaks score ties by claim using a pinned 'en' locale collation, independent of host locale", () => {
+    // All facts share the same category and score (baseline-only, zero overlap), so the
+    // sort is decided entirely by the claim ASC tiebreak. Mixed case + a diacritic pin down
+    // the "en" collation order (case-insensitive-ish, base-letter-adjacent diacritics) so a
+    // host running with a different default ICU locale can't reorder these and change the
+    // prompt/replay hash.
+    const facts = [
+      fact({ id: "zebra", category: "experience", claim: "Zebra project" }),
+      fact({ id: "uber", category: "experience", claim: "Über tool" }),
+      fact({ id: "email", category: "experience", claim: "email client" }),
+      fact({ id: "apple", category: "experience", claim: "apple thing" }),
+    ];
+    const out = selectFactsForGeneration(facts, ctx);
+    expect(out.map((f) => f.id)).toEqual(["apple", "email", "uber", "zebra"]);
+  });
 });
 describe("normalizeQuestion", () => {
   it("lowercases, strips punctuation, collapses whitespace", () => {

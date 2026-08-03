@@ -91,8 +91,10 @@ export function selectFactsForGeneration(
     if (catIndexA !== catIndexB) {
       return catIndexA - catIndexB;
     }
-    // Claim ASC
-    return a.fact.claim.localeCompare(b.fact.claim);
+    // Claim ASC. Locale pinned to "en": tie order feeds prompts feeds replay
+    // hashes, so host-locale collation must not vary generation output
+    // across machines.
+    return a.fact.claim.localeCompare(b.fact.claim, "en");
   });
 
   // Step 5: Take top maxFacts
