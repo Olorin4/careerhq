@@ -21,6 +21,7 @@
     "@careerhq/contracts": "workspace:*",
     "@careerhq/core": "workspace:*",
     "@careerhq/db": "workspace:*",
+    "@careerhq/email": "workspace:*",
     "@careerhq/ingest": "workspace:*",
     "@careerhq/config": "workspace:*"
   },

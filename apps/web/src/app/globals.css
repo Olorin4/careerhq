@@ -836,3 +836,83 @@ body {
   color: #777;
   font-size: 0.8rem;
 }
+
+.badge-ok {
+  background: #1a7f37;
+  color: #fff;
+}
+
+.email-keygen-command {
+  display: inline-block;
+  padding: 0.5rem 0.75rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.email-connections-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.email-connections-table th,
+.email-connections-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #ddd;
+  vertical-align: top;
+}
+
+.email-connections-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #666;
+}
+
+.email-health-detail {
+  margin-top: 0.25rem;
+  color: #b00020;
+  font-size: 0.8rem;
+  max-width: 320px;
+}
+
+.email-connection-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+
+.email-connection-actions button {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+
+.email-form-fieldset {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.email-form-fieldset label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.email-imap-toggle {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+  font-weight: 600;
+  cursor: pointer;
+}

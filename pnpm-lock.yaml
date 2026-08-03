@@ -47,6 +47,9 @@ importers:
       '@careerhq/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@careerhq/email':
+        specifier: workspace:*
+        version: link:../../packages/email
       '@careerhq/ingest':
         specifier: workspace:*
         version: link:../../packages/ingest

@@ -49,6 +49,14 @@ export default async function SettingsPage() {
         )}
         <WatchlistForm />
       </section>
+
+      <section className="settings-section">
+        <h2>Email connections</h2>
+        <p>
+          Connect a mailbox to send applications and track replies.{" "}
+          <a href="/settings/email">Manage email connections</a>
+        </p>
+      </section>
     </main>
   );
 }
