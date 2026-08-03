@@ -271,3 +271,17 @@ export const attemptConfirmations = pgTable("attempt_confirmations", {
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("attempt_confirmations_attempt").on(t.attemptId, t.createdAt)]);
+
+export const formSnapshots = pgTable("form_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  attemptId: uuid("attempt_id").notNull().references(() => applicationAttempts.id, { onDelete: "cascade" }),
+  atsType: text("ats_type").notNull(),                   // greenhouse|lever|generic
+  url: text("url").notNull(),
+  requisitionKey: text("requisition_key").notNull(),
+  parserVersion: text("parser_version").notNull(),
+  canonicalForm: jsonb("canonical_form").notNull(),      // CanonicalForm
+  plannedAnswers: jsonb("planned_answers").notNull(),    // PlannedAnswer[]
+  currentStep: integer("current_step").notNull().default(0),
+  recoveryState: jsonb("recovery_state"),                // non-secret per-step progress
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("form_snapshots_attempt").on(t.attemptId, t.capturedAt)]);

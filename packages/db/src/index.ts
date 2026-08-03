@@ -9,13 +9,15 @@ export * from "./repos/documents.js";
 export * from "./repos/answers.js";
 export * from "./repos/credentials.js";
 export * from "./repos/email-connections.js";
+export * from "./repos/attempts.js";
 export * from "./repos/email-attempts.js";
 export * from "./repos/email-messages.js";
+export * from "./repos/form-snapshots.js";
 export * from "./crypto.js";
 import type {
   applicationAnswers, applicationAttempts, applicationEvents, applications, attemptConfirmations,
-  candidateFacts, credentials, cvVariants, emailConnections, emailMessages, generatedDocuments,
-  ingestRuns, jobs, scoringProfiles, watchlistCompanies, workspaces,
+  candidateFacts, credentials, cvVariants, emailConnections, emailMessages, formSnapshots,
+  generatedDocuments, ingestRuns, jobs, scoringProfiles, watchlistCompanies, workspaces,
 } from "./schema/index.js";
 export type Application = typeof applications.$inferSelect;
 export type NewApplication = typeof applications.$inferInsert;
@@ -49,3 +51,5 @@ export type EmailMessage = typeof emailMessages.$inferSelect;
 export type NewEmailMessage = typeof emailMessages.$inferInsert;
 export type AttemptConfirmation = typeof attemptConfirmations.$inferSelect;
 export type NewAttemptConfirmation = typeof attemptConfirmations.$inferInsert;
+export type FormSnapshot = typeof formSnapshots.$inferSelect;
+export type NewFormSnapshot = typeof formSnapshots.$inferInsert;
