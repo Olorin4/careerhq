@@ -1,0 +1,310 @@
+{
+  "url": "https://northwind.example/greenhouse/jobs/eng-1",
+  "title": "Senior Robotics Engineer at Northwind Robotics",
+  "bodyText": "Senior Robotics Engineer at Northwind Robotics Your Information First Name Last Name Email Phone Resume/CV LinkedIn Profile Next Application Details Are you legally authorized to work in the country of this job posting? (Work Authorization) -- Select -- Yes No Will you now or in the future require visa sponsorship? -- Select -- Yes No Why do you want to work at Northwind Robotics? I attest that the information provided in this application is true and complete. Next Voluntary Self-Identification Northwind Robotics is an equal opportunity employer. Completion of this section is voluntary. Gender Male Female Non-binary Decline to self-identify Veteran Status I am a veteran I am not a veteran Decline to self-identify Submit",
+  "rootMarkers": [
+    "id=application_form",
+    "data-source=greenhouse"
+  ],
+  "fields": [
+    {
+      "selector": "#first_name",
+      "tag": "input",
+      "type": "text",
+      "name": "first_name",
+      "id": "first_name",
+      "labelText": "First Name",
+      "nearbyText": "First Name",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#last_name",
+      "tag": "input",
+      "type": "text",
+      "name": "last_name",
+      "id": "last_name",
+      "labelText": "Last Name",
+      "nearbyText": "Last Name",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#email",
+      "tag": "input",
+      "type": "email",
+      "name": "email",
+      "id": "email",
+      "labelText": "Email",
+      "nearbyText": "Email",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#phone",
+      "tag": "input",
+      "type": "tel",
+      "name": "phone",
+      "id": "phone",
+      "labelText": "Phone",
+      "nearbyText": "Phone",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#resume",
+      "tag": "input",
+      "type": "file",
+      "name": "resume",
+      "id": "resume",
+      "labelText": "Resume/CV",
+      "nearbyText": "Resume/CV",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#linkedin_url",
+      "tag": "input",
+      "type": "url",
+      "name": "linkedin_url",
+      "id": "linkedin_url",
+      "labelText": "LinkedIn Profile",
+      "nearbyText": "LinkedIn Profile",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#work_authorization",
+      "tag": "select",
+      "type": "",
+      "name": "work_authorization",
+      "id": "work_authorization",
+      "labelText": "Are you legally authorized to work in the country of this job posting? (Work Authorization)",
+      "nearbyText": "Are you legally authorized to work in the country of this job posting? (Work Authorization) -- Select -- Yes No",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [
+        {
+          "value": "",
+          "label": "-- Select --"
+        },
+        {
+          "value": "yes",
+          "label": "Yes"
+        },
+        {
+          "value": "no",
+          "label": "No"
+        }
+      ],
+      "step": 1
+    },
+    {
+      "selector": "#visa_sponsorship",
+      "tag": "select",
+      "type": "",
+      "name": "visa_sponsorship",
+      "id": "visa_sponsorship",
+      "labelText": "Will you now or in the future require visa sponsorship?",
+      "nearbyText": "Will you now or in the future require visa sponsorship? -- Select -- Yes No",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [
+        {
+          "value": "",
+          "label": "-- Select --"
+        },
+        {
+          "value": "yes",
+          "label": "Yes"
+        },
+        {
+          "value": "no",
+          "label": "No"
+        }
+      ],
+      "step": 1
+    },
+    {
+      "selector": "#why_northwind",
+      "tag": "textarea",
+      "type": "",
+      "name": "why_northwind",
+      "id": "why_northwind",
+      "labelText": "Why do you want to work at Northwind Robotics?",
+      "nearbyText": "Why do you want to work at Northwind Robotics?",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 1
+    },
+    {
+      "selector": "#legal_attestation",
+      "tag": "input",
+      "type": "checkbox",
+      "name": "legal_attestation",
+      "id": "legal_attestation",
+      "labelText": "I attest that the information provided in this application is true and complete.",
+      "nearbyText": "I attest that the information provided in this application is true and complete.",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 1
+    },
+    {
+      "selector": "input[name=\"gender\"][value=\"male\"]",
+      "tag": "input",
+      "type": "radio",
+      "name": "gender",
+      "id": "",
+      "labelText": "Male",
+      "nearbyText": "Gender Male Female Non-binary Decline to self-identify",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 2
+    },
+    {
+      "selector": "input[name=\"gender\"][value=\"female\"]",
+      "tag": "input",
+      "type": "radio",
+      "name": "gender",
+      "id": "",
+      "labelText": "Female",
+      "nearbyText": "Gender Male Female Non-binary Decline to self-identify",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 2
+    },
+    {
+      "selector": "input[name=\"gender\"][value=\"nonbinary\"]",
+      "tag": "input",
+      "type": "radio",
+      "name": "gender",
+      "id": "",
+      "labelText": "Non-binary",
+      "nearbyText": "Gender Male Female Non-binary Decline to self-identify",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 2
+    },
+    {
+      "selector": "input[name=\"gender\"][value=\"decline\"]",
+      "tag": "input",
+      "type": "radio",
+      "name": "gender",
+      "id": "",
+      "labelText": "Decline to self-identify",
+      "nearbyText": "Gender Male Female Non-binary Decline to self-identify",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 2
+    },
+    {
+      "selector": "input[name=\"veteran_status\"][value=\"veteran\"]",
+      "tag": "input",
+      "type": "radio",
+      "name": "veteran_status",
+      "id": "",
+      "labelText": "I am a veteran",
+      "nearbyText": "Veteran Status I am a veteran I am not a veteran Decline to self-identify",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 2
+    },
+    {
+      "selector": "input[name=\"veteran_status\"][value=\"not_veteran\"]",
+      "tag": "input",
+      "type": "radio",
+      "name": "veteran_status",
+      "id": "",
+      "labelText": "I am not a veteran",
+      "nearbyText": "Veteran Status I am a veteran I am not a veteran Decline to self-identify",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 2
+    },
+    {
+      "selector": "input[name=\"veteran_status\"][value=\"decline\"]",
+      "tag": "input",
+      "type": "radio",
+      "name": "veteran_status",
+      "id": "",
+      "labelText": "Decline to self-identify",
+      "nearbyText": "Veteran Status I am a veteran I am not a veteran Decline to self-identify",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 2
+    }
+  ],
+  "buttons": [
+    {
+      "selector": "#btn_next_1",
+      "id": "btn_next_1",
+      "text": "Next"
+    },
+    {
+      "selector": "#btn_next_2",
+      "id": "btn_next_2",
+      "text": "Next"
+    },
+    {
+      "selector": "#btn_submit",
+      "id": "btn_submit",
+      "text": "Submit"
+    }
+  ],
+  "totalSteps": 3
+}

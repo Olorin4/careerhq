@@ -1,0 +1,80 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { greenhousePage } from "@careerhq/demo-ats";
+import { rawFieldId, type RawField, type RawFormPage } from "../raw.js";
+import { rawPageFromHtml } from "../testing/from-html.js";
+import { GREENHOUSE_FIXTURE_HASH, hashRawFormPage, parseGreenhouse } from "./greenhouse.js";
+
+const job = { id: "eng-1", title: "Senior Robotics Engineer", company: "Northwind Robotics" };
+const url = "https://northwind.example/greenhouse/jobs/eng-1";
+
+const FIXTURE_PATH = path.resolve(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "..",
+  "fixtures",
+  "greenhouse-page.json",
+);
+
+function loadFixture(): RawFormPage {
+  return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as RawFormPage;
+}
+
+function idFor(selector: string): string {
+  return rawFieldId({ selector } as RawField);
+}
+
+describe("parseGreenhouse (committed fixture)", () => {
+  const page = loadFixture();
+  const form = parseGreenhouse(page);
+
+  it("sets atsType to greenhouse", () => {
+    expect(form.atsType).toBe("greenhouse");
+  });
+
+  it("maps identity fields to their canonical fields at 0.9 confidence", () => {
+    const cases: Array<[string, string]> = [
+      ["#first_name", "first_name"],
+      ["#last_name", "last_name"],
+      ["#email", "email"],
+      ["#phone", "phone"],
+      ["#resume", "resume_file"],
+      ["#linkedin_url", "linkedin_url"],
+    ];
+    for (const [selector, canonicalField] of cases) {
+      const field = form.fields.find((f) => f.id === idFor(selector));
+      expect(field?.canonicalField).toBe(canonicalField);
+      expect(field?.mappingConfidence).toBe(0.9);
+    }
+  });
+
+  it("maps the demographics radios (gender, veteran_status) to demographics at 0.9", () => {
+    const demographics = form.fields.filter((f) => f.canonicalField === "demographics");
+    // 4 gender options (male/female/nonbinary/decline) + 3 veteran_status options
+    expect(demographics.length).toBe(7);
+    expect(demographics.every((f) => f.mappingConfidence === 0.9)).toBe(true);
+  });
+
+  it("maps the 'why do you want to work here' screening textarea to screening_question", () => {
+    const field = form.fields.find((f) => f.id === idFor("#why_northwind"));
+    expect(field?.canonicalField).toBe("screening_question");
+    expect(field?.mappingConfidence).toBe(0.9);
+  });
+
+  it("leaves unmapped custom fields (selects, attestation checkbox) unknown at 0", () => {
+    for (const selector of ["#work_authorization", "#visa_sponsorship", "#legal_attestation"]) {
+      const field = form.fields.find((f) => f.id === idFor(selector));
+      expect(field?.canonicalField).toBe("unknown");
+      expect(field?.mappingConfidence).toBe(0);
+    }
+  });
+});
+
+describe("GREENHOUSE_FIXTURE_HASH (parser-drift tripwire)", () => {
+  it("still matches the sha256 of the live demo-ats helper output", () => {
+    const livePage = rawPageFromHtml(greenhousePage(job), url);
+    expect(hashRawFormPage(livePage)).toBe(GREENHOUSE_FIXTURE_HASH);
+  });
+});
