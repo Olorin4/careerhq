@@ -9,9 +9,12 @@ module.exports = {
     },
     {
       name: "ingest-and-ai-purity",
-      comment: "ingest, ai, and email are consumed by the worker/apps but must not reach into db or apps themselves",
+      comment:
+        "ingest, ai, email, and autoapply are consumed by the worker/apps but must not reach into db or apps " +
+        "themselves (autoapply's own *.test.ts fixtures are exempt — they import the pure @careerhq/demo-ats " +
+        "page builders as a devDependency, never db)",
       severity: "error",
-      from: { path: "^packages/(ingest|ai|email)" },
+      from: { path: "^packages/(ingest|ai|email|autoapply)", pathNot: "\\.test\\.ts$" },
       to: { path: "^(packages/db|apps)" },
     },
     {
@@ -22,8 +25,11 @@ module.exports = {
     },
     {
       name: "packages-not-into-apps",
+      comment:
+        "production package code must never import from apps; *.test.ts fixtures are exempt (e.g. autoapply's " +
+        "tests build fixtures from the pure @careerhq/demo-ats page builders)",
       severity: "error",
-      from: { path: "^packages" },
+      from: { path: "^packages", pathNot: "\\.test\\.ts$" },
       to: { path: "^apps" },
     },
   ],
