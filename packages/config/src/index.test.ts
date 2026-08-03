@@ -88,6 +88,12 @@ describe("loadConfig", () => {
   it("passes through a custom INGEST_CRON", () => {
     expect(loadConfig({ ...BASE, INGEST_CRON: "*/15 * * * *" }).ingestCron).toBe("*/15 * * * *");
   });
+  it("defaults emailSyncCron to every 15 minutes", () => {
+    expect(loadConfig(BASE).emailSyncCron).toBe("*/15 * * * *");
+  });
+  it("passes through a custom EMAIL_SYNC_CRON", () => {
+    expect(loadConfig({ ...BASE, EMAIL_SYNC_CRON: "*/5 * * * *" }).emailSyncCron).toBe("*/5 * * * *");
+  });
 
   it("defaults aiMode to live", () => {
     expect(loadConfig(BASE).aiMode).toBe("live");

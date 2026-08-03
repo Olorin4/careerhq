@@ -10,8 +10,8 @@ import { hashConfirmationToken } from "@careerhq/core/gates";
 import {
   beginSubmission, completeSubmission, createApplication, createCvVariant, createDb,
   createEmailAttempt, createEmailConnection, generateMasterKeyB64, getActiveConfirmation,
-  getApplicationDetail, getEmailAttempt, transitionApplication, updateEmailDraft, workspaces,
-  type Db,
+  getApplicationDetail, getEmailAttempt, listMessagesForApplication, transitionApplication,
+  updateEmailDraft, workspaces, type Db,
 } from "@careerhq/db";
 import type { SmtpTransportLike } from "@careerhq/email";
 import { confirmAndSend, previewSubmission, type EmailSubmissionDeps } from "./email-submission";
@@ -322,6 +322,16 @@ d("email submission orchestrator", () => {
     const detail = await getApplicationDetail(db, fixture.applicationId);
     expect(detail?.application.state).toBe("SUBMITTED");
     expect(detail?.events.at(-1)?.trigger).toBe("attempt");
+
+    // The sent message is indexed for threading: the IMAP sync job matches a
+    // reply's In-Reply-To against exactly this row.
+    const outbound = await listMessagesForApplication(db, fixture.applicationId);
+    expect(outbound).toHaveLength(1);
+    expect(outbound[0]!.direction).toBe("outbound");
+    expect(outbound[0]!.messageId).toBe("<happy@careerhq.test>");
+    expect(outbound[0]!.matchMethod).toBe("manual");
+    expect(outbound[0]!.toAddrs).toEqual(["careers@acme.test"]);
+    expect(outbound[0]!.subject).toBe("Application: Senior Platform Engineer");
 
     // The token is single-use: a second confirm on a submitted attempt is a duplicate.
     const again = await confirmAndSend(deps(), {

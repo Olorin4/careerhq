@@ -110,6 +110,7 @@ const baseConfig: AppConfig = {
   aiWritingModels: ["test/writing-model"],
   aiReplayDir: "/tmp/careerhq-worker-test/replay",
   ingestCron: "0 */6 * * *",
+  emailSyncCron: "*/15 * * * *",
   aiMode: "live",
   masterKey: null,
 };

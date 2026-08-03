@@ -111,6 +111,7 @@ const envSchema = z.object({
     .default(DEFAULT_AI_WRITING_MODELS.join(","))
     .transform((value) => parseModelList(value, DEFAULT_AI_WRITING_MODELS)),
   INGEST_CRON: z.string().default("0 */6 * * *"),
+  EMAIL_SYNC_CRON: z.string().default("*/15 * * * *"),
   AI_MODE: z.enum(AI_MODES, {
     errorMap: () => ({
       message: `AI_MODE must be one of: ${AI_MODES.join(", ")}`,
@@ -161,6 +162,8 @@ export interface AppConfig {
   /** Never empty: an unset or blank AI_WRITING_MODELS yields the default list. */
   aiWritingModels: string[];
   ingestCron: string;
+  /** Cron for the worker's IMAP poll; default every 15 minutes. */
+  emailSyncCron: string;
   /** Controls the AI record/replay layer; default "live" makes real calls. */
   aiMode: AiMode;
   /** Always absolute: relative AI_REPLAY_DIR values resolve against the repo root. */
@@ -190,6 +193,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     aiFastModels: parsed.AI_FAST_MODELS,
     aiWritingModels: parsed.AI_WRITING_MODELS,
     ingestCron: parsed.INGEST_CRON,
+    emailSyncCron: parsed.EMAIL_SYNC_CRON,
     aiMode: parsed.AI_MODE,
     aiReplayDir: parsed.AI_REPLAY_DIR,
     masterKey: optionalString(parsed.CAREERHQ_MASTER_KEY),

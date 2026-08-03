@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import PgBoss from "pg-boss";
 import { loadConfig } from "@careerhq/config";
 import { createDb } from "@careerhq/db";
+import { runEmailSyncOnce } from "./jobs/email-sync.js";
 import { runIngestOnce } from "./jobs/ingest.js";
 import { runRerankOnce } from "./jobs/rerank.js";
 import { getPersonalWorkspaceId } from "./lib/workspace.js";
@@ -21,6 +22,7 @@ const db = createDb(config.databaseUrl);
 
 const INGEST_QUEUE = "discovery.ingest";
 const RERANK_QUEUE = "discovery.rerank";
+const EMAIL_SYNC_QUEUE = "email.sync";
 
 boss.on("error", (err) => console.error("[worker] pg-boss error", err));
 
@@ -54,6 +56,18 @@ await boss.work(RERANK_QUEUE, async () => {
   }
   const result = await runRerankOnce(db, workspaceId, config);
   console.log(`[worker] ${RERANK_QUEUE}`, result);
+});
+
+await boss.createQueue(EMAIL_SYNC_QUEUE);
+await boss.schedule(EMAIL_SYNC_QUEUE, config.emailSyncCron);
+await boss.work(EMAIL_SYNC_QUEUE, async () => {
+  const workspaceId = await getPersonalWorkspaceId(db);
+  if (!workspaceId) {
+    console.log(`[worker] ${EMAIL_SYNC_QUEUE}: no personal workspace yet, skipping`);
+    return;
+  }
+  const summary = await runEmailSyncOnce(db, workspaceId, config);
+  console.log(`[worker] ${EMAIL_SYNC_QUEUE}`, summary);
 });
 
 console.log("[worker] started; queues registered");

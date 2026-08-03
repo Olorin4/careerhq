@@ -53,6 +53,8 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       AI_FAST_MODELS: ${AI_FAST_MODELS:-}
       INGEST_CRON: ${INGEST_CRON:-0 */6 * * *}
+      # Cron for the IMAP poll that links replies to applications (email.sync).
+      EMAIL_SYNC_CRON: ${EMAIL_SYNC_CRON:-*/15 * * * *}
       # Credential encryption key (packages/db/src/crypto.ts). Unset disables
       # email connections; see .env.example for how to generate one.
       CAREERHQ_MASTER_KEY: ${CAREERHQ_MASTER_KEY:-}

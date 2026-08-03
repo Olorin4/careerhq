@@ -13,7 +13,7 @@ import {
   beginSubmission, completeSubmission, cvVariants as cvVariantsTable,
   emailConnections as emailConnectionsTable, failSubmission, getApplicationDetail,
   getConnectionSecrets, getEmailAttempt, getLatestConfirmation, hasBlockingAttempt,
-  markNeedsReconcile, recordPreview, workspaces as workspacesTable,
+  markNeedsReconcile, recordOutboundMessage, recordPreview, workspaces as workspacesTable,
   type ApplicationAttempt, type Db, type EmailConnection,
 } from "@careerhq/db";
 import {
@@ -398,6 +398,28 @@ export async function confirmAndSend(
     const reason = `sent as ${outcome.messageId} but the receipt was refused: ${completed.reason}`;
     await markNeedsReconcile(db, attempt.id, reason);
     return { status: "needs_reconcile", reason };
+  }
+
+  // Index the sent message so the IMAP sync job can thread a reply's
+  // In-Reply-To/References back onto this application. Deliberately outside the
+  // receipt transaction and non-fatal: the mail is out and the receipt is
+  // written, so a failure here costs header-based threading (the sender-domain
+  // fallback still applies), and reporting it as a failed submission would be a
+  // far worse lie. It is logged rather than swallowed.
+  try {
+    await recordOutboundMessage(db, {
+      workspaceId: args.workspaceId,
+      connectionId: connection.id,
+      messageId: outcome.messageId,
+      toAddrs: [draft.to],
+      subject: draft.subject,
+      applicationId,
+    });
+  } catch (err) {
+    console.error(
+      `[email-submission] sent ${outcome.messageId} but could not index it for threading: `
+      + redactError(err, secrets),
+    );
   }
 
   return { status: "submitted", messageId: outcome.messageId };
