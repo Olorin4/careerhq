@@ -9,7 +9,6 @@
 // use: detectAts → parseGreenhouse | parseLever | parseGenericForm(generic).
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { canonicalFormSchema, type CanonicalField, type CanonicalForm } from "@careerhq/contracts";
 import { detectAts } from "../detect.js";
 import { parseGenericForm } from "../generic.js";
@@ -117,13 +116,11 @@ export function parseLever(page: RawFormPage): CanonicalForm {
   return canonicalFormSchema.parse({ ...generic, fields });
 }
 
-const FIXTURE_PATH = path.resolve(
-  fileURLToPath(new URL(".", import.meta.url)),
-  "..",
-  "..",
-  "fixtures",
-  "lever-page.json",
-);
+// `import.meta.dirname` — see the identical note in greenhouse.ts's
+// FIXTURE_PATH: webpack's static `new URL(literal, import.meta.url)` asset
+// analysis breaks apps/web's production build once this module is reachable
+// from a server action.
+const FIXTURE_PATH = path.resolve(import.meta.dirname, "..", "..", "fixtures", "lever-page.json");
 
 function loadFixtureRawPage(): RawFormPage {
   return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as RawFormPage;

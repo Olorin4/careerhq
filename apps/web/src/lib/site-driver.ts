@@ -4,14 +4,17 @@ import path from "node:path";
 import type { AppConfig } from "@careerhq/config";
 import type { RawFormPage } from "@careerhq/autoapply";
 // Task 8's Playwright driver lives in the worker app (its Docker image is the
-// one built with Chromium's browser binaries); this reaches across the app
-// boundary by relative path rather than duplicating ~300 lines of extraction
-// and fill logic a second time. Nothing here re-implements the driver — it
-// only shapes `openSession`/`capturePage`/`fillAndSubmit`'s results into the
+// one built with Chromium's browser binaries); this reaches it through the
+// package export `@careerhq/worker/autoapply` (apps/worker/package.json's
+// "exports", backed by apps/worker/src/autoapply/index.ts) rather than a
+// relative import crossing the app boundary — `.dependency-cruiser.cjs`'s
+// `no-relative-cross-app-*` rules enforce that a relative path here is a
+// build-time error. Nothing here re-implements the driver — it only shapes
+// `openSession`/`capturePage`/`fillAndSubmit`'s results into the
 // `SiteDeps.capture`/`submit` contract `site-submission.ts` expects, and
 // writes the raw screenshot buffer to disk (the one adapter step the
 // orchestrator explicitly leaves to its caller — see Task 11's report).
-import { capturePage, fillAndSubmit, openSession } from "../../../worker/src/autoapply/driver.js";
+import { capturePage, fillAndSubmit, openSession } from "@careerhq/worker/autoapply";
 import type { SiteSubmitArgs, SiteSubmitResult } from "./site-submission.js";
 
 /**

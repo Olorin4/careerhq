@@ -7,7 +7,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { canonicalFormSchema, type CanonicalField, type CanonicalForm, type FieldKind } from "@careerhq/contracts";
 import { parseGenericForm } from "../generic.js";
 import { rawFieldId, type RawField, type RawFormPage } from "../raw.js";
@@ -119,13 +118,13 @@ export function hashRawFormPage(page: RawFormPage): string {
   return createHash("sha256").update(JSON.stringify(page)).digest("hex");
 }
 
-const FIXTURE_PATH = path.resolve(
-  fileURLToPath(new URL(".", import.meta.url)),
-  "..",
-  "..",
-  "fixtures",
-  "greenhouse-page.json",
-);
+// `import.meta.dirname` (Node 22+) rather than `fileURLToPath(new URL(".",
+// import.meta.url))`: webpack's static `new URL(literal, import.meta.url)`
+// asset-import analysis — which apps/web's production build applies to every
+// module it bundles, this one included, once @careerhq/autoapply is reachable
+// from a server action — tries to resolve "." as an asset and fails the
+// build; a plain string has no such special handling.
+const FIXTURE_PATH = path.resolve(import.meta.dirname, "..", "..", "fixtures", "greenhouse-page.json");
 
 function loadFixtureRawPage(): RawFormPage {
   return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as RawFormPage;

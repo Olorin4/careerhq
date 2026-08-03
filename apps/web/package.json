@@ -24,7 +24,8 @@
     "@careerhq/db": "workspace:*",
     "@careerhq/email": "workspace:*",
     "@careerhq/ingest": "workspace:*",
-    "@careerhq/config": "workspace:*"
+    "@careerhq/config": "workspace:*",
+    "@careerhq/worker": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

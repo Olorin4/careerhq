@@ -75,6 +75,9 @@ importers:
       '@careerhq/ingest':
         specifier: workspace:*
         version: link:../../packages/ingest
+      '@careerhq/worker':
+        specifier: workspace:*
+        version: link:../worker
       drizzle-orm:
         specifier: ^0.44.0
         version: 0.44.7(pg@8.22.0)(postgres@3.4.9)
@@ -136,6 +139,9 @@ importers:
       playwright:
         specifier: 1.62.1
         version: 1.62.1
+      zod:
+        specifier: ^3.25.0
+        version: 3.25.76
     devDependencies:
       '@careerhq/demo-ats':
         specifier: workspace:*

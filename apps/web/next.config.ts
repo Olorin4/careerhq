@@ -20,6 +20,31 @@ const nextConfig: NextConfig = {
       ".js": [".ts", ".tsx", ".js"],
     },
   },
+  // `site-driver.ts`'s server actions reach `@careerhq/worker/autoapply`,
+  // which pulls in `playwright`/`playwright-core` — a Node-only package Next's
+  // webpack bundler should not try to bundle at all (it launches a real
+  // browser process; there is nothing here for a bundler to usefully inline).
+  // `serverExternalPackages` handles that for the ordinary server-render
+  // compilation, but Next.js compiles Server Actions through a separate
+  // "flight action" pass that does not consult it, and still tries to
+  // statically bundle `playwright-core`'s internals — including two
+  // BiDi-protocol modules (`chromium-bidi/...`) that are not installed at
+  // all, because they are optional and this driver only ever launches
+  // Chromium over CDP, never BiDi. The `webpack()` externals below are the
+  // one config surface both compilations respect.
+  serverExternalPackages: ["playwright", "playwright-core"],
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      const missingOptionalBidiModules = [
+        "chromium-bidi/lib/cjs/bidiMapper/BidiMapper",
+        "chromium-bidi/lib/cjs/cdp/CdpConnection",
+      ];
+      config.externals = Array.isArray(config.externals)
+        ? [...config.externals, ...missingOptionalBidiModules]
+        : [config.externals, ...missingOptionalBidiModules].filter(Boolean);
+    }
+    return config;
+  },
 };
 
 export default nextConfig;

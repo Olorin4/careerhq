@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": { "types": "./dist/main.d.ts", "default": "./dist/main.js" },
+    "./autoapply": { "types": "./dist/autoapply/index.d.ts", "default": "./dist/autoapply/index.js" }
+  },
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "build": "tsc -p tsconfig.json",
