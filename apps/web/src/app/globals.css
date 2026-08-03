@@ -672,3 +672,167 @@ body {
 .materials-manual-form textarea {
   font-family: inherit;
 }
+
+.qa {
+  margin: 2rem 0;
+  max-width: 640px;
+}
+
+.qa-ask-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+
+.qa-ask-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.qa-needs-facts {
+  padding: 0.6rem 0.75rem;
+  background: #fffaf0;
+  border-left: 3px solid #f5a623;
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.qa-manual-note {
+  color: #777;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.qa-error {
+  color: #b00020;
+  font-size: 0.85rem;
+}
+
+.qa-manual-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.qa-manual-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.qa-answer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.qa-answer-row {
+  padding: 0.75rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.qa-answer-question {
+  margin: 0;
+}
+
+.qa-answer-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.qa-answer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.qa-answer-date {
+  color: #777;
+  font-size: 0.8rem;
+}
+
+.qa-answer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.qa-reusable-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.qa-empty {
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.answers-summary {
+  color: #555;
+  margin-bottom: 1rem;
+}
+
+.answers-empty {
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.answers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.answers-row {
+  padding: 0.75rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.answers-question {
+  margin: 0;
+}
+
+.answers-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.answers-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.answers-detail {
+  color: #777;
+  font-size: 0.8rem;
+}

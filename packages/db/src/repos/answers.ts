@@ -50,8 +50,10 @@ export async function approveAnswer(
   return updated ?? null;
 }
 
-export async function rejectAnswer(db: Db, id: string): Promise<void> {
-  await db.update(applicationAnswers).set({ approval: "rejected" }).where(eq(applicationAnswers.id, id));
+export async function rejectAnswer(db: Db, id: string): Promise<ApplicationAnswer | null> {
+  const [updated] = await db.update(applicationAnswers).set({ approval: "rejected" })
+    .where(eq(applicationAnswers.id, id)).returning();
+  return updated ?? null;
 }
 
 export async function listAnswers(db: Db, applicationId: string): Promise<ApplicationAnswer[]> {

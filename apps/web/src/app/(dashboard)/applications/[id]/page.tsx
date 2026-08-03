@@ -1,11 +1,14 @@
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { getApplicationDetail, listDocuments, listFacts, companies as companiesTable } from "@careerhq/db";
+import {
+  getApplicationDetail, listAnswers, listDocuments, listFacts, companies as companiesTable,
+} from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
 import { TransitionButtons } from "../transition-buttons.js";
 import { Materials } from "./materials.js";
+import { QaPanel } from "./qa.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -44,6 +47,7 @@ export default async function ApplicationDetailPage({
     facts.map((fact) => [fact.id, fact.claim] as const),
   );
   const aiAvailable = loadConfig().openrouterApiKey !== null;
+  const answers = await listAnswers(db, application.id);
 
   return (
     <main>
@@ -81,6 +85,8 @@ export default async function ApplicationDetailPage({
         factClaims={factClaims}
         aiAvailable={aiAvailable}
       />
+
+      <QaPanel applicationId={application.id} answers={answers} factClaims={factClaims} />
 
       <h2>Event timeline</h2>
       <ol className="detail-timeline">
