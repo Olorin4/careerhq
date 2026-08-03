@@ -44,8 +44,10 @@ services:
       # allow-list names the mailpit service on this network.
       SUBMISSIONS_LIVE_EMAIL: ${SUBMISSIONS_LIVE_EMAIL:-false}
       SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
-      # Fictional ATS target for auto-apply demos (spec P5).
+      # Fictional ATS target for auto-apply demos (spec P5). The web app only
+      # links to it; the worker is what drives a browser against it.
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
+      AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
     ports: ["3000:3000"]
     volumes: [files:/app/var/files]
     depends_on:
@@ -70,8 +72,11 @@ services:
       # automation must never outrun the environment's send permission.
       SUBMISSIONS_LIVE_EMAIL: ${SUBMISSIONS_LIVE_EMAIL:-false}
       SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
-      # Fictional ATS target for auto-apply demos (spec P5).
+      # Auto-apply (spec P5): the fictional ATS the Playwright driver targets,
+      # and the driver's per-action budget (navigation, one field, the submit
+      # wait) — not the budget for a whole attempt.
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
+      AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
     volumes: [files:/app/var/files]
     depends_on:
       postgres: { condition: service_healthy }

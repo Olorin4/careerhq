@@ -13,7 +13,9 @@
   },
   "dependencies": {
     "pg-boss": "^10.0.0",
+    "playwright": "1.62.1",
     "@careerhq/ai": "workspace:*",
+    "@careerhq/autoapply": "workspace:*",
     "@careerhq/config": "workspace:*",
     "@careerhq/contracts": "workspace:*",
     "@careerhq/core": "workspace:*",
@@ -22,8 +24,10 @@
     "@careerhq/ingest": "workspace:*"
   },
   "devDependencies": {
+    "@careerhq/demo-ats": "workspace:*",
     "@types/node": "^22.0.0",
     "drizzle-orm": "^0.44.0",
+    "linkedom": "^0.18.0",
     "tsx": "^4.20.0",
     "vitest": "^3.2.0"
   }

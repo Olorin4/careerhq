@@ -78,6 +78,9 @@ function optionalString(value: string | undefined): string | null {
  */
 const DEFAULT_SANDBOX_SMTP_HOST = "mailpit";
 
+/** The compose service name of the fictional ATS (apps/demo-ats). */
+const DEFAULT_DEMO_ATS_URL = "http://demo-ats:3001";
+
 const envSchema = z.object({
   DATABASE_URL: z
     .string({
@@ -128,6 +131,29 @@ const envSchema = z.object({
   // plain `Buffer.from(v, "base64")` rather than the real secretbox key size
   // constant; packages/db/src/crypto.ts re-validates with libsodium's own
   // constant and throws CryptoError if the two ever disagree.
+  // Auto-apply (spec §10). The browser budget covers one navigation or one
+  // field action in the Playwright driver, not the whole attempt — a real ATS
+  // page with a slow embed regularly needs more than a default 30s.
+  AUTOAPPLY_BROWSER_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
+  // The fictional ATS (apps/demo-ats): the only site auto-apply demos target.
+  // Compose's service name is the default; a local run points at localhost.
+  DEMO_ATS_URL: z
+    .string()
+    .default(DEFAULT_DEMO_ATS_URL)
+    .transform((v) => v.trim().replace(/\/+$/, "") || DEFAULT_DEMO_ATS_URL)
+    .refine(
+      (v) => {
+        // Not `URL.canParse`: it accepts "demo-ats:3001" (scheme "demo-ats"),
+        // which is the exact typo a "host:port" habit produces here.
+        try {
+          const url = new URL(v);
+          return url.protocol === "http:" || url.protocol === "https:";
+        } catch {
+          return false;
+        }
+      },
+      { message: "DEMO_ATS_URL must be an http(s) URL, e.g. http://localhost:3001" },
+    ),
   CAREERHQ_MASTER_KEY: z
     .string()
     .optional()
@@ -170,6 +196,10 @@ export interface AppConfig {
   aiReplayDir: string;
   /** null (default) disables email connections — no key to seal/open credentials with. */
   masterKey: string | null;
+  /** Per-action budget for the Playwright auto-apply driver; default 45s. */
+  autoapplyBrowserTimeoutMs: number;
+  /** Never empty and never trailing-slashed: base URL of the demo ATS. */
+  demoAtsUrl: string;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
@@ -197,5 +227,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     aiMode: parsed.AI_MODE,
     aiReplayDir: parsed.AI_REPLAY_DIR,
     masterKey: optionalString(parsed.CAREERHQ_MASTER_KEY),
+    autoapplyBrowserTimeoutMs: parsed.AUTOAPPLY_BROWSER_TIMEOUT_MS,
+    demoAtsUrl: parsed.DEMO_ATS_URL,
   };
 }

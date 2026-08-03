@@ -190,4 +190,37 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...BASE, SANDBOX_SMTP_ALLOWED_HOST: "" }).sandboxSmtpAllowedHost).toBe("mailpit");
     expect(loadConfig({ ...BASE, SANDBOX_SMTP_ALLOWED_HOST: "   " }).sandboxSmtpAllowedHost).toBe("mailpit");
   });
+
+  // Auto-apply (spec §10): the Playwright driver's per-action budget and the
+  // demo ATS it targets. Both are read by the worker in containers, where
+  // Compose passes `${VAR:-}` for anything the user never set.
+  it("defaults autoapplyBrowserTimeoutMs to 45s", () => {
+    expect(loadConfig(BASE).autoapplyBrowserTimeoutMs).toBe(45_000);
+  });
+  it("takes an explicit AUTOAPPLY_BROWSER_TIMEOUT_MS", () => {
+    expect(loadConfig({ ...BASE, AUTOAPPLY_BROWSER_TIMEOUT_MS: "12000" }).autoapplyBrowserTimeoutMs).toBe(12_000);
+  });
+  it("rejects a non-positive AUTOAPPLY_BROWSER_TIMEOUT_MS", () => {
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_BROWSER_TIMEOUT_MS: "0" })).toThrow(/AUTOAPPLY_BROWSER_TIMEOUT_MS/);
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_BROWSER_TIMEOUT_MS: "-1" })).toThrow(/AUTOAPPLY_BROWSER_TIMEOUT_MS/);
+  });
+
+  it("defaults demoAtsUrl to the compose demo-ats service", () => {
+    expect(loadConfig(BASE).demoAtsUrl).toBe("http://demo-ats:3001");
+  });
+  it("takes an explicit DEMO_ATS_URL", () => {
+    expect(loadConfig({ ...BASE, DEMO_ATS_URL: "http://localhost:3001" }).demoAtsUrl).toBe("http://localhost:3001");
+  });
+  // The driver joins paths onto this ("/greenhouse/jobs/eng-1"), so a trailing
+  // slash would produce a double slash in every captured URL.
+  it("strips trailing slashes from DEMO_ATS_URL", () => {
+    expect(loadConfig({ ...BASE, DEMO_ATS_URL: "http://localhost:3001//" }).demoAtsUrl).toBe("http://localhost:3001");
+  });
+  it("treats an empty DEMO_ATS_URL as unset, like the other compose-passed vars", () => {
+    expect(loadConfig({ ...BASE, DEMO_ATS_URL: "" }).demoAtsUrl).toBe("http://demo-ats:3001");
+    expect(loadConfig({ ...BASE, DEMO_ATS_URL: "   " }).demoAtsUrl).toBe("http://demo-ats:3001");
+  });
+  it("rejects a DEMO_ATS_URL that isn't a URL, naming the var in prose", () => {
+    expect(() => loadConfig({ ...BASE, DEMO_ATS_URL: "demo-ats:3001" })).toThrow(/DEMO_ATS_URL/);
+  });
 });

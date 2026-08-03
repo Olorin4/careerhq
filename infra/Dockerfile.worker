@@ -1,4 +1,16 @@
-FROM node:22-alpine AS base
+# The worker is the ONLY service that drives a real browser (auto-apply, spec
+# §10), so its base is Microsoft's Playwright image rather than node:22-alpine
+# like the other services: it ships Chromium plus the system libraries
+# headless Chrome needs (libnss3, libatk, libgbm, fonts …), none of which are
+# on alpine — and Playwright publishes no musl browser builds, so
+# `playwright install chromium` there downloads a binary that cannot run.
+#
+# The tag MUST stay in lockstep with the `playwright` version pinned in
+# apps/worker/package.json (pinned exactly, not caret-ranged): the npm package
+# only launches the browser build it shipped with, and the image carries
+# exactly that build under PLAYWRIGHT_BROWSERS_PATH=/ms-playwright. Bump both
+# together, or the container builds fine and fails at the first launch.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble AS base
 RUN corepack enable
 WORKDIR /app
 # See Dockerfile.web: a partial workspace copy fails `--frozen-lockfile`.

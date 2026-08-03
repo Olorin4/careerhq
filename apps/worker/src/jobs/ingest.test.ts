@@ -113,6 +113,8 @@ const baseConfig: AppConfig = {
   emailSyncCron: "*/15 * * * *",
   aiMode: "live",
   masterKey: null,
+  autoapplyBrowserTimeoutMs: 45_000,
+  demoAtsUrl: "http://demo-ats:3001",
 };
 
 d("runIngestOnce", () => {
