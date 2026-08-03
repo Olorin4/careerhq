@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { Db } from "../client.js";
+import type { DbOrTx } from "../client.js";
 import { openSecret, sealSecret } from "../crypto.js";
 import { credentials } from "../schema/index.js";
 
@@ -15,8 +15,11 @@ export interface CreateCredentialInput {
  * the plaintext never reaches the database. Returns the new row's id so
  * callers (e.g. email connection setup) can reference it without ever
  * holding the secret themselves.
+ *
+ * Takes `DbOrTx` so `createEmailConnection` can seal both passwords and insert
+ * the connection that references them in a single transaction.
  */
-export async function createCredential(db: Db, input: CreateCredentialInput): Promise<string> {
+export async function createCredential(db: DbOrTx, input: CreateCredentialInput): Promise<string> {
   const sealed = await sealSecret(input.masterKeyB64, input.secret);
   const [row] = await db.insert(credentials).values({
     workspaceId: input.workspaceId,
@@ -33,7 +36,7 @@ export async function createCredential(db: Db, input: CreateCredentialInput): Pr
  * `CryptoError` from `openSecret` (wrong key, tampered row) propagates to the
  * caller unchanged — this function does not mask crypto failures.
  */
-export async function readCredentialSecret(db: Db, id: string, masterKeyB64: string): Promise<string> {
+export async function readCredentialSecret(db: DbOrTx, id: string, masterKeyB64: string): Promise<string> {
   const [row] = await db.select({ ciphertext: credentials.ciphertext })
     .from(credentials)
     .where(eq(credentials.id, id))
@@ -44,6 +47,6 @@ export async function readCredentialSecret(db: Db, id: string, masterKeyB64: str
   return openSecret(masterKeyB64, row.ciphertext);
 }
 
-export async function deleteCredential(db: Db, id: string): Promise<void> {
+export async function deleteCredential(db: DbOrTx, id: string): Promise<void> {
   await db.delete(credentials).where(eq(credentials.id, id));
 }

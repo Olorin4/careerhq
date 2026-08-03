@@ -1,7 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import type { ApplicationState, TransitionTrigger } from "@careerhq/contracts";
 import { canTransition, computeNextAction, type TransitionContext } from "@careerhq/core";
-import type { Db } from "../client.js";
+import type { Db, Tx } from "../client.js";
 import {
   applicationAttempts, applicationEvents, applications, jobs,
 } from "../schema/index.js";
@@ -52,33 +52,43 @@ export async function createApplication(db: Db, input: CreateApplicationInput): 
 
 export type TransitionOutcome = { ok: true; application: Application } | { ok: false; reason: string };
 
-export async function transitionApplication(db: Db, args: {
+export interface TransitionArgs {
   applicationId: string; to: ApplicationState; trigger: TransitionTrigger;
   ctx?: TransitionContext; actor?: string; followUpDays?: number;
-}): Promise<TransitionOutcome> {
-  return db.transaction(async (tx) => {
-    const [current] = await tx.select().from(applications)
-      .where(eq(applications.id, args.applicationId)).for("update");
-    if (!current) return { ok: false, reason: "application not found" };
+}
 
-    const check = canTransition(current.state, args.to, args.trigger, args.ctx ?? {});
-    if (!check.ok) return check;
+export async function transitionApplication(db: Db, args: TransitionArgs): Promise<TransitionOutcome> {
+  return db.transaction((tx) => transitionApplicationTx(tx, args));
+}
 
-    const submittedAt = args.to === "SUBMITTED" ? new Date() : current.submittedAt;
-    const next = computeNextAction({
-      state: args.to, submittedAt, lastEventAt: new Date(), followUpDays: args.followUpDays,
-    });
-    await tx.insert(applicationEvents).values({
-      applicationId: current.id, fromState: current.state, toState: args.to,
-      trigger: args.trigger, actor: args.actor ?? "owner",
-    });
-    const [updated] = await tx.update(applications).set({
-      state: args.to, submittedAt,
-      nextAction: next?.label ?? null, nextActionDue: next?.due ?? null,
-      updatedAt: sql`now()`,
-    }).where(eq(applications.id, current.id)).returning();
-    return { ok: true, application: updated! };
+/**
+ * The guarded transition itself, on an existing transaction handle. Exists so
+ * callers that must move the application as part of a larger atomic write —
+ * `completeSubmission` recording a submission receipt — get the identical
+ * guard/event/next-action behaviour without opening a nested transaction.
+ */
+export async function transitionApplicationTx(tx: Tx, args: TransitionArgs): Promise<TransitionOutcome> {
+  const [current] = await tx.select().from(applications)
+    .where(eq(applications.id, args.applicationId)).for("update");
+  if (!current) return { ok: false, reason: "application not found" };
+
+  const check = canTransition(current.state, args.to, args.trigger, args.ctx ?? {});
+  if (!check.ok) return check;
+
+  const submittedAt = args.to === "SUBMITTED" ? new Date() : current.submittedAt;
+  const next = computeNextAction({
+    state: args.to, submittedAt, lastEventAt: new Date(), followUpDays: args.followUpDays,
   });
+  await tx.insert(applicationEvents).values({
+    applicationId: current.id, fromState: current.state, toState: args.to,
+    trigger: args.trigger, actor: args.actor ?? "owner",
+  });
+  const [updated] = await tx.update(applications).set({
+    state: args.to, submittedAt,
+    nextAction: next?.label ?? null, nextActionDue: next?.due ?? null,
+    updatedAt: sql`now()`,
+  }).where(eq(applications.id, current.id)).returning();
+  return { ok: true, application: updated! };
 }
 
 export async function listApplications(db: Db, workspaceId: string): Promise<Application[]> {

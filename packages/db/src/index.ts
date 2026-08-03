@@ -8,6 +8,8 @@ export * from "./repos/discovery.js";
 export * from "./repos/documents.js";
 export * from "./repos/answers.js";
 export * from "./repos/credentials.js";
+export * from "./repos/email-connections.js";
+export * from "./repos/email-attempts.js";
 export * from "./crypto.js";
 import type {
   applicationAnswers, applicationAttempts, applicationEvents, applications, attemptConfirmations,
