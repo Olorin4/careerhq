@@ -95,7 +95,7 @@ export function greenhousePage(job: DemoJob): string {
         <label for="linkedin_url">LinkedIn Profile</label>
         <input type="url" id="linkedin_url" name="linkedin_url" />
       </div>
-      <button type="button" id="btn_next">Next</button>
+      <button type="button" id="btn_next_1">Next</button>
     </section>
     <section data-step="2">
       <h2>Application Details</h2>
@@ -125,7 +125,7 @@ export function greenhousePage(job: DemoJob): string {
           I attest that the information provided in this application is true and complete.
         </label>
       </div>
-      <button type="button" id="btn_next">Next</button>
+      <button type="button" id="btn_next_2">Next</button>
     </section>
     <section data-step="3">
       <h2>Voluntary Self-Identification</h2>
@@ -147,7 +147,7 @@ export function greenhousePage(job: DemoJob): string {
     </section>
   </form>
 </div>`;
-  return layout(`Apply — ${job.title}`, body);
+  return layout(`${job.title} at ${job.company}`, body);
 }
 
 /**
@@ -198,7 +198,7 @@ export function leverPage(job: DemoJob): string {
   </div>
   <button type="submit" id="btn_submit">Submit Application</button>
 </form>`;
-  return layout(`Apply — ${job.title}`, body);
+  return layout(`${job.title} at ${job.company}`, body);
 }
 
 /**

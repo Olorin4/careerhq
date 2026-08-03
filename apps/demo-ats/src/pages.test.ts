@@ -13,12 +13,27 @@ describe("demo-ats pages", () => {
     expect(html.toLowerCase()).toContain("sponsorship");
     expect(html).toContain('id="btn_submit"');
   });
+  it("greenhouse page gives each step's Next button a distinct id, and no id repeats in the document", () => {
+    const html = greenhousePage(job);
+    expect(html).toContain('id="btn_next_1"');
+    expect(html).toContain('id="btn_next_2"');
+    const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+    const uniqueIds = new Set(ids);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(uniqueIds.size).toBe(ids.length);
+  });
   it("lever page is single-step with a resume input and notice-period select", () => {
     const html = leverPage(job);
     expect(html).toContain('data-source="lever"');
     expect(html).toContain('name="resume"');
     expect(html.toLowerCase()).toContain("notice period");
     expect(html).not.toContain('id="btn_next"');
+  });
+  it("greenhouse and lever <title> follow the '<role> at <company>' convention the parser splits on", () => {
+    expect(greenhousePage(job)).toContain(
+      "<title>Senior Robotics Engineer at Northwind Robotics</title>",
+    );
+    expect(leverPage(job)).toContain("<title>Senior Robotics Engineer at Northwind Robotics</title>");
   });
   it("captcha and login pages expose their blocker markers", () => {
     expect(captchaPage(job)).toContain("g-recaptcha");
