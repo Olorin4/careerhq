@@ -114,3 +114,60 @@ export type GenerationResult = z.infer<typeof generationResultSchema>;
 
 export const AI_MODES = ["live", "record", "replay"] as const;
 export type AiMode = (typeof AI_MODES)[number];
+
+export const EMAIL_DIRECTIONS = ["inbound", "outbound"] as const;
+export type EmailDirection = (typeof EMAIL_DIRECTIONS)[number];
+export const emailDirectionSchema = z.enum(EMAIL_DIRECTIONS);
+
+export const MATCH_METHODS = ["headers", "sender", "semantic", "manual"] as const;
+export type MatchMethod = (typeof MATCH_METHODS)[number];
+export const matchMethodSchema = z.enum(MATCH_METHODS);
+
+export const REPLY_CLASSIFICATIONS = ["ack", "recruiter", "interview", "rejection", "offer", "unrelated"] as const;
+export type ReplyClassification = (typeof REPLY_CLASSIFICATIONS)[number];
+export const replyClassificationSchema = z.enum(REPLY_CLASSIFICATIONS);
+
+export const SUGGESTION_STATES = ["pending", "accepted", "dismissed"] as const;
+export type SuggestionState = (typeof SUGGESTION_STATES)[number];
+export const suggestionStateSchema = z.enum(SUGGESTION_STATES);
+
+export const RETENTION_MODES = ["metadata_only", "full_local", "days_limited"] as const;
+export type RetentionMode = (typeof RETENTION_MODES)[number];
+export const retentionSettingSchema = z.object({
+  mode: z.enum(RETENTION_MODES).default("metadata_only"),
+  days: z.number().int().positive().optional(),
+}).refine((r) => r.mode !== "days_limited" || r.days != null, { message: "days required for days_limited" });
+export type RetentionSetting = z.infer<typeof retentionSettingSchema>;
+
+export const TLS_MODES = ["starttls", "implicit", "none"] as const;
+export const smtpConfigSchema = z.object({
+  host: z.string().min(1),
+  port: z.coerce.number().int().min(1).max(65535),
+  username: z.string().min(1),
+  tls: z.enum(TLS_MODES).default("starttls"),
+});
+export type SmtpConfig = z.infer<typeof smtpConfigSchema>;
+export const imapConfigSchema = z.object({
+  host: z.string().min(1),
+  port: z.coerce.number().int().min(1).max(65535),
+  username: z.string().min(1),
+  tls: z.enum(TLS_MODES).default("implicit"),
+  folders: z.array(z.string().min(1)).min(1).default(["INBOX"]),
+});
+export type ImapConfig = z.infer<typeof imapConfigSchema>;
+
+export const emailDraftSchema = z.object({
+  to: z.string().email(),
+  subject: z.string().trim().min(1),
+  body: z.string().trim().min(1),
+  cvVariantId: z.string().uuid().optional(),
+});
+export type EmailDraft = z.infer<typeof emailDraftSchema>;
+
+export const classifyReplyResultSchema = z.object({
+  classification: replyClassificationSchema,
+  confidence: z.number().min(0).max(1),
+  suggestedState: applicationStateSchema.optional(),
+  quotedEvidence: z.string().default(""),
+});
+export type ClassifyReplyResult = z.infer<typeof classifyReplyResultSchema>;
