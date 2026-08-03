@@ -916,3 +916,175 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
+
+.badge-reconcile {
+  background: #f5a623;
+  color: #fff;
+}
+
+.email-panel {
+  margin: 2rem 0;
+}
+
+.email-empty {
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.email-hint {
+  color: #555;
+  font-size: 0.85rem;
+}
+
+.email-error {
+  color: #b00020;
+  font-size: 0.85rem;
+}
+
+.email-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 560px;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.email-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.email-attachment-line {
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.email-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 560px;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.email-preview-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.email-preview-fields dt {
+  font-weight: 600;
+  color: #555;
+}
+
+.email-preview-fields dd {
+  margin: 0;
+}
+
+.email-preview-body {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0;
+}
+
+.email-expired {
+  color: #b00020;
+  font-weight: 600;
+}
+
+.email-retype-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.email-preview-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.email-outcome {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.email-outcome-submitted {
+  background: #eafaf0;
+  border-left: 3px solid #1a7f37;
+}
+
+.email-outcome-blocked {
+  background: #fff8e6;
+  border-left: 3px solid #f5a623;
+}
+
+.email-outcome-failed {
+  background: #fff5f5;
+  border-left: 3px solid #b00020;
+}
+
+.email-outcome-reconcile {
+  background: #fff8e6;
+  border-left: 3px solid #f5a623;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.email-outcome-hint {
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.email-reconcile-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.email-attempt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.email-attempt-row {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.email-attempt-row-reconcile {
+  border-color: #f5a623;
+}
+
+.email-attempt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.email-attempt-date {
+  color: #777;
+}
+
+.email-attempt-message-id {
+  color: #555;
+}

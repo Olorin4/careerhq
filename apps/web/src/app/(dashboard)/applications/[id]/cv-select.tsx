@@ -39,7 +39,7 @@ export function CvSelect({ applicationId, cvVariantId, variants }: CvSelectProps
   }
 
   return (
-    <div className="cv-select">
+    <div className="cv-select" id="cv-select">
       <label>
         CV variant
         <select value={cvVariantId ?? ""} onChange={handleChange} disabled={isPending}>

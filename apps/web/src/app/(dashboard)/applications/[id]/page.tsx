@@ -2,13 +2,14 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import {
-  getApplicationDetail, listAnswers, listCvVariants, listDocuments, listFacts,
-  companies as companiesTable,
+  getApplicationDetail, listAnswers, listAttemptsForApplication, listCvVariants, listDocuments,
+  listEmailConnections, listFacts, companies as companiesTable,
 } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
 import { TransitionButtons } from "../transition-buttons.js";
 import { CvSelect } from "./cv-select.js";
+import { EmailPanel } from "./email-panel.js";
 import { Materials } from "./materials.js";
 import { QaPanel } from "./qa.js";
 
@@ -51,6 +52,8 @@ export default async function ApplicationDetailPage({
   const aiAvailable = loadConfig().openrouterApiKey !== null;
   const answers = await listAnswers(db, application.id);
   const cvVariants = await listCvVariants(db, application.workspaceId);
+  const emailConnections = await listEmailConnections(db, application.workspaceId);
+  const emailAttempts = await listAttemptsForApplication(db, application.id);
 
   return (
     <main>
@@ -96,6 +99,15 @@ export default async function ApplicationDetailPage({
       />
 
       <QaPanel applicationId={application.id} answers={answers} factClaims={factClaims} />
+
+      <EmailPanel
+        applicationId={application.id}
+        connections={emailConnections}
+        attempts={emailAttempts}
+        documents={documents}
+        cvVariantId={application.cvVariantId}
+        cvVariants={cvVariants}
+      />
 
       <h2>Event timeline</h2>
       <ol className="detail-timeline">
