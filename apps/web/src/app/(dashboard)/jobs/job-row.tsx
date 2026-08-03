@@ -61,9 +61,15 @@ export function JobRow({ job }: { job: JobRowData }) {
   return (
     <article className="job-row">
       <header className="job-row-header">
-        <a href={job.url ?? "#"} target="_blank" rel="noopener noreferrer" className="job-row-link">
-          <strong>{job.title}</strong> · {job.company}
-        </a>
+        {job.url ? (
+          <a href={job.url} target="_blank" rel="noopener noreferrer" className="job-row-link">
+            <strong>{job.title}</strong> · {job.company}
+          </a>
+        ) : (
+          <span className="job-row-link">
+            <strong>{job.title}</strong> · {job.company}
+          </span>
+        )}
         {job.remoteMode && <span className="badge">{job.remoteMode}</span>}
         {job.location && <span className="job-row-location">{job.location}</span>}
       </header>

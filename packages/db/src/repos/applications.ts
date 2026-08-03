@@ -6,7 +6,7 @@ import {
   applicationAttempts, applicationEvents, applications, jobs,
 } from "../schema/index.js";
 import type { Application, ApplicationEvent, Job } from "../index.js";
-import { getOrCreateCompany } from "./discovery.js";
+import { getOrCreateCompany } from "./companies.js";
 
 export interface CreateApplicationInput {
   workspaceId: string; companyName: string; jobTitle: string;

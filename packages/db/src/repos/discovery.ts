@@ -1,12 +1,13 @@
 import {
-  and, asc, desc, eq, isNotNull, isNull, lt, ne, sql,
+  and, asc, desc, eq, exists, isNotNull, isNull, lt, ne, notInArray, or, sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import {
   DEFAULT_SCORING_PROFILE, scoringProfileSchema,
   type ApplicationState, type AtsType, type NormalizedJob, type RerankResult, type ScoringProfile,
 } from "@careerhq/contracts";
 import { computeNextAction, scoreJob } from "@careerhq/core";
-import type { Db, DbOrTx } from "../client.js";
+import type { Db } from "../client.js";
 import {
   applicationEvents, applications, companies, ingestRuns, jobs, scoringProfiles, watchlistCompanies,
 } from "../schema/index.js";
@@ -141,11 +142,23 @@ export async function listIngestRuns(
 }
 
 export async function listInboxJobs(db: Db, workspaceId: string): Promise<Job[]> {
+  const canonical = alias(jobs, "canonical_job");
   return db.select().from(jobs).where(and(
     eq(jobs.workspaceId, workspaceId),
     eq(jobs.status, "inbox"),
     isNull(jobs.expiredAt),
-    isNull(jobs.duplicateOfJobId),
+    or(
+      isNull(jobs.duplicateOfJobId),
+      // The canonical job this row was flagged a duplicate of is no longer
+      // visible in the inbox (expired or dismissed) — surface the duplicate
+      // instead of silently losing the listing.
+      exists(
+        db.select({ one: sql`1` }).from(canonical).where(and(
+          eq(canonical.id, jobs.duplicateOfJobId),
+          or(isNotNull(canonical.expiredAt), eq(canonical.status, "dismissed")),
+        )),
+      ),
+    ),
   )).orderBy(sql`${jobs.llmScore} DESC NULLS LAST`, desc(jobs.keywordScore));
 }
 
@@ -174,6 +187,22 @@ export async function applyRerank(
       .returning({ id: jobs.id });
     count += affected.length;
   }
+
+  // A rerank batch only ever covers part of the inbox — jobs left out (new
+  // arrivals since the last rerank, or ones the LLM skipped) would otherwise
+  // keep a stale llm_score that outranks freshly-scored jobs in
+  // `listInboxJobs`. Clear it for everyone outside this batch.
+  const batchIds = results.map((r) => r.jobId);
+  await db.update(jobs).set({
+    llmScore: null,
+    llmRationale: null,
+    llmRedFlags: null,
+  }).where(and(
+    eq(jobs.workspaceId, workspaceId),
+    eq(jobs.status, "inbox"),
+    ...(batchIds.length > 0 ? [notInArray(jobs.id, batchIds)] : []),
+  ));
+
   return count;
 }
 
@@ -208,19 +237,6 @@ export async function addWatchlistEntry(
 
 export async function removeWatchlistEntry(db: Db, id: string): Promise<void> {
   await db.delete(watchlistCompanies).where(eq(watchlistCompanies.id, id));
-}
-
-/**
- * Insert-or-select against `companies_workspace_name` (migration 0001). Takes
- * `DbOrTx` so callers already inside a transaction — `createApplication` — get
- * the same conflict-safe semantics without opening a nested one.
- */
-export async function getOrCreateCompany(db: DbOrTx, workspaceId: string, name: string): Promise<string> {
-  await db.insert(companies).values({ workspaceId, name })
-    .onConflictDoNothing({ target: [companies.workspaceId, companies.name] });
-  const [company] = await db.select({ id: companies.id }).from(companies)
-    .where(and(eq(companies.workspaceId, workspaceId), eq(companies.name, name)));
-  return company!.id;
 }
 
 export type PromoteJobOutcome = { ok: true; applicationId: string } | { ok: false; reason: string };

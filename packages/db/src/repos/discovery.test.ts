@@ -11,7 +11,6 @@ import {
   applyRerank,
   countInboxDuplicates,
   dismissJob,
-  getOrCreateCompany,
   getScoringProfile,
   listIngestRuns,
   listInboxJobs,
@@ -24,6 +23,7 @@ import {
   scoreInboxJobs,
   upsertNormalizedJobs,
 } from "./discovery.js";
+import { getOrCreateCompany } from "./companies.js";
 
 const url = process.env.TEST_DATABASE_URL;
 const d = describe.skipIf(!url);
@@ -113,6 +113,34 @@ d("discovery repo", () => {
     const a = await getOrCreateCompany(db, workspaceId, "DupCo");
     const b = await getOrCreateCompany(db, workspaceId, "DupCo");
     expect(a).toBe(b);
+  });
+
+  it("applyRerank clears llm fields on inbox jobs outside the batch", async () => {
+    await upsertNormalizedJobs(db, workspaceId, [
+      { job: nj({ externalId: "rrA" }), contentHash: "hA" },
+      { job: nj({ externalId: "rrB" }), contentHash: "hB" },
+    ]);
+    const inbox = await listInboxJobs(db, workspaceId);
+    const [a, b] = [inbox.find((j) => j.externalId === "rrA")!, inbox.find((j) => j.externalId === "rrB")!];
+    await applyRerank(db, workspaceId, [
+      { jobId: a.id, score: 80, rationale: "x", redFlags: [] },
+      { jobId: b.id, score: 70, rationale: "y", redFlags: [] },
+    ]);
+    await applyRerank(db, workspaceId, [{ jobId: a.id, score: 85, rationale: "z", redFlags: [] }]);
+    const after = await listInboxJobs(db, workspaceId);
+    expect(after.find((j) => j.id === b.id)?.llmScore).toBeNull();
+    expect(after.find((j) => j.id === a.id)?.llmScore).toBe(85);
+  });
+
+  it("duplicate surfaces when its canonical job is expired", async () => {
+    await upsertNormalizedJobs(db, workspaceId, [{ job: nj({ externalId: "canX" }), contentHash: "dupX" }]);
+    await upsertNormalizedJobs(db, workspaceId,
+      [{ job: nj({ source: "remoteok", externalId: "dupX2" }), contentHash: "dupX" }]);
+    await db.update(jobs).set({ lastSeenAt: new Date(Date.now() - 30 * 86400_000) })
+      .where(and(eq(jobs.workspaceId, workspaceId), eq(jobs.externalId, "canX")));
+    await markExpiredJobs(db, workspaceId);
+    const inbox = await listInboxJobs(db, workspaceId);
+    expect(inbox.some((j) => j.externalId === "dupX2")).toBe(true);
   });
 
   it("watchlist add/list/remove round-trips", async () => {

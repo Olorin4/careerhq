@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { companies, createDb, type Db, workspaces } from "../index.js";
 import { createApplication, transitionApplication, getApplicationDetail } from "./applications.js";
-import { getOrCreateCompany } from "./discovery.js";
+import { getOrCreateCompany } from "./companies.js";
 
 const url = process.env.TEST_DATABASE_URL;
 const d = describe.skipIf(!url);

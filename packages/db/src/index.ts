@@ -1,6 +1,7 @@
 export * from "./client.js";
 export * from "./schema/index.js";
 export * from "./repos/applications.js";
+export * from "./repos/companies.js";
 export * from "./repos/facts.js";
 export * from "./repos/cv-variants.js";
 export * from "./repos/discovery.js";
