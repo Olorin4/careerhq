@@ -105,6 +105,29 @@ const envSchema = z.object({
   // Where withReplay's filesystem store keeps recorded AI calls. Fixtures are
   // committed, so the default points at the in-repo directory.
   AI_REPLAY_DIR: z.string().default("packages/ai/fixtures/replay").transform(resolveSharedDir),
+  // The libsodium secretbox key used to seal/open email credentials
+  // (packages/db/src/crypto.ts). Unset (or empty, as Compose passes with
+  // `${CAREERHQ_MASTER_KEY:-}`) disables email connections entirely — there
+  // is no key to encrypt SMTP/IMAP passwords with. This package cannot
+  // depend on libsodium (kept dep-light), so the length check is done with
+  // plain `Buffer.from(v, "base64")` rather than the real secretbox key size
+  // constant; packages/db/src/crypto.ts re-validates with libsodium's own
+  // constant and throws CryptoError if the two ever disagree.
+  CAREERHQ_MASTER_KEY: z
+    .string()
+    .optional()
+    .refine(
+      (v) => {
+        const trimmed = v?.trim();
+        if (!trimmed) return true;
+        return Buffer.from(trimmed, "base64").length === 32;
+      },
+      {
+        message:
+          "CAREERHQ_MASTER_KEY must be a base64-encoded 32-byte key — generate one with: "
+          + "node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
+      },
+    ),
 });
 
 export interface AppConfig {
@@ -126,6 +149,8 @@ export interface AppConfig {
   aiMode: AiMode;
   /** Always absolute: relative AI_REPLAY_DIR values resolve against the repo root. */
   aiReplayDir: string;
+  /** null (default) disables email connections — no key to seal/open credentials with. */
+  masterKey: string | null;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
@@ -150,5 +175,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     ingestCron: parsed.INGEST_CRON,
     aiMode: parsed.AI_MODE,
     aiReplayDir: parsed.AI_REPLAY_DIR,
+    masterKey: optionalString(parsed.CAREERHQ_MASTER_KEY),
   };
 }

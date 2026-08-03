@@ -110,6 +110,7 @@ const baseConfig: AppConfig = {
   aiReplayDir: "/tmp/careerhq-worker-test/replay",
   ingestCron: "0 */6 * * *",
   aiMode: "live",
+  masterKey: null,
 };
 
 d("runIngestOnce", () => {

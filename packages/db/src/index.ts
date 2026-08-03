@@ -7,6 +7,8 @@ export * from "./repos/cv-variants.js";
 export * from "./repos/discovery.js";
 export * from "./repos/documents.js";
 export * from "./repos/answers.js";
+export * from "./repos/credentials.js";
+export * from "./crypto.js";
 import type {
   applicationAnswers, applicationAttempts, applicationEvents, applications, attemptConfirmations,
   candidateFacts, credentials, cvVariants, emailConnections, emailMessages, generatedDocuments,

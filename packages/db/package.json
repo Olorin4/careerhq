@@ -15,12 +15,14 @@
   },
   "dependencies": {
     "drizzle-orm": "^0.44.0",
+    "libsodium-wrappers": "^0.8.4",
     "postgres": "^3.4.0",
     "@careerhq/contracts": "workspace:*",
     "@careerhq/core": "workspace:*",
     "@careerhq/config": "workspace:*"
   },
   "devDependencies": {
+    "@types/libsodium-wrappers": "^0.8.2",
     "@types/node": "^22.0.0",
     "drizzle-kit": "^0.31.0",
     "vitest": "^3.2.0",

@@ -30,6 +30,9 @@ services:
       AI_WRITING_MODELS: ${AI_WRITING_MODELS:-}
       AI_MODE: ${AI_MODE:-live}
       AI_REPLAY_DIR: ${AI_REPLAY_DIR:-}
+      # Credential encryption key (packages/db/src/crypto.ts). Unset disables
+      # email connections; see .env.example for how to generate one.
+      CAREERHQ_MASTER_KEY: ${CAREERHQ_MASTER_KEY:-}
     ports: ["3000:3000"]
     volumes: [files:/app/var/files]
     depends_on:
@@ -45,6 +48,9 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       AI_FAST_MODELS: ${AI_FAST_MODELS:-}
       INGEST_CRON: ${INGEST_CRON:-0 */6 * * *}
+      # Credential encryption key (packages/db/src/crypto.ts). Unset disables
+      # email connections; see .env.example for how to generate one.
+      CAREERHQ_MASTER_KEY: ${CAREERHQ_MASTER_KEY:-}
     volumes: [files:/app/var/files]
     depends_on:
       postgres: { condition: service_healthy }

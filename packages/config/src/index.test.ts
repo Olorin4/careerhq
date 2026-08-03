@@ -143,4 +143,28 @@ describe("loadConfig", () => {
   it("keeps an absolute AI_REPLAY_DIR as given (the container path)", () => {
     expect(loadConfig({ ...BASE, AI_REPLAY_DIR: "/app/fixtures" }).aiReplayDir).toBe("/app/fixtures");
   });
+
+  it("defaults masterKey to null: email connections disabled with no key configured", () => {
+    expect(loadConfig(BASE).masterKey).toBeNull();
+  });
+  // Compose sets `CAREERHQ_MASTER_KEY: ${CAREERHQ_MASTER_KEY:-}`, so "" is the
+  // live default in containers — it must mean "unset", exactly like the other
+  // optional secrets (OPENROUTER_API_KEY).
+  it("treats an empty CAREERHQ_MASTER_KEY as unset", () => {
+    expect(loadConfig({ ...BASE, CAREERHQ_MASTER_KEY: "" }).masterKey).toBeNull();
+  });
+  it("treats a whitespace-only CAREERHQ_MASTER_KEY as unset", () => {
+    expect(loadConfig({ ...BASE, CAREERHQ_MASTER_KEY: "   " }).masterKey).toBeNull();
+  });
+  it("rejects a CAREERHQ_MASTER_KEY that isn't a base64 32-byte key, naming the var in prose", () => {
+    expect(() => loadConfig({ ...BASE, CAREERHQ_MASTER_KEY: "too-short" })).toThrow(/CAREERHQ_MASTER_KEY/);
+  });
+  it("rejects a CAREERHQ_MASTER_KEY of the wrong decoded length even if valid base64", () => {
+    const wrongLength = Buffer.from(new Uint8Array(16)).toString("base64");
+    expect(() => loadConfig({ ...BASE, CAREERHQ_MASTER_KEY: wrongLength })).toThrow(/CAREERHQ_MASTER_KEY/);
+  });
+  it("round-trips a valid base64 32-byte CAREERHQ_MASTER_KEY", () => {
+    const key = Buffer.from(new Uint8Array(32).fill(7)).toString("base64");
+    expect(loadConfig({ ...BASE, CAREERHQ_MASTER_KEY: key }).masterKey).toBe(key);
+  });
 });
