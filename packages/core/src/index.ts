@@ -4,3 +4,4 @@ export * from "./next-action.js";
 export * from "./scoring/keyword.js";
 export * from "./grounding/sensitive.js";
 export * from "./grounding/select-facts.js";
+export * from "./grounding/validate.js";
