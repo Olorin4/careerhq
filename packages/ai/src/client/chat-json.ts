@@ -56,6 +56,50 @@ function extractContentValue(content: unknown): unknown | null {
   }
 }
 
+export interface ContentValidationResult<T> {
+  ok: boolean;
+  value: T | null;
+  error: "no_json" | "schema_invalid" | "not_useful" | null;
+}
+
+/**
+ * Schema-validates an already-extracted JSON value and applies the optional
+ * usefulness check. Shared by `chatJson` (which extracts from a raw message
+ * `content` field that may already be an object) and `validateContent` below.
+ */
+export function validateJson<T>(
+  json: unknown,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  isUseful?: (value: T) => boolean,
+): ContentValidationResult<T> {
+  if (json === null || json === undefined) {
+    return { ok: false, value: null, error: "no_json" };
+  }
+
+  const validated = schema.safeParse(json);
+  if (!validated.success) {
+    return { ok: false, value: null, error: "schema_invalid" };
+  }
+
+  const value = validated.data;
+  const usable = isUseful ? isUseful(value) : true;
+  return { ok: usable, value, error: usable ? null : "not_useful" };
+}
+
+/**
+ * Shared final-validation pipeline used by both the non-streaming
+ * (`chatJson`) and streaming (`streamChatJson`) clients: tolerant JSON
+ * extraction from raw LLM text, then `validateJson`. Kept here so both
+ * callers share one error taxonomy.
+ */
+export function validateContent<T>(
+  text: string,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  isUseful?: (value: T) => boolean,
+): ContentValidationResult<T> {
+  return validateJson(extractJsonObject(text), schema, isUseful);
+}
+
 /**
  * One round-trip to the OpenRouter (OpenAI-compatible) chat completions
  * endpoint in JSON mode. Never throws — every failure path (timeout, HTTP
@@ -133,39 +177,14 @@ export async function chatJson<T>(req: ChatJsonRequest<T>): Promise<ChatJsonResu
 
     const rawContent = payload?.choices?.[0]?.message?.content;
     const json = extractContentValue(rawContent);
-
-    if (json === null || json === undefined) {
-      return {
-        ok: false,
-        value: null,
-        model,
-        latencyMs,
-        status: response.status,
-        error: "no_json",
-      };
-    }
-
-    const validated = schema.safeParse(json);
-    if (!validated.success) {
-      return {
-        ok: false,
-        value: null,
-        model,
-        latencyMs,
-        status: response.status,
-        error: "schema_invalid",
-      };
-    }
-
-    const value = validated.data;
-    const usable = isUseful ? isUseful(value) : true;
+    const validation = validateJson(json, schema, isUseful);
     return {
-      ok: usable,
-      value,
+      ok: validation.ok,
+      value: validation.value,
       model,
       latencyMs,
       status: response.status,
-      error: usable ? null : "not_useful",
+      error: validation.error,
     };
   } catch (error) {
     const latencyMs = Date.now() - startedAt;
