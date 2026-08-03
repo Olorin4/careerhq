@@ -245,6 +245,7 @@ d("runEmailSyncOnce", () => {
     expect(threaded!.classification).toBe("interview");
     expect(threaded!.suggestedTransition).toBe("INTERVIEW");
     expect(threaded!.suggestionState).toBe("pending");
+    expect(threaded!.quotedEvidence).toBe("schedule a call");
     expect(threaded!.bodyRef).toBeNull(); // metadata_only keeps no body
 
     const [sender] = await messageBy(workspaceId, "<in-sender@sender.test>");
@@ -323,6 +324,7 @@ d("runEmailSyncOnce", () => {
     expect(message!.suggestionState).toBe("accepted");
     expect(message!.suggestedTransition).toBe("ACKNOWLEDGED");
     expect(message!.classificationConfidence).toBeCloseTo(0.95, 5);
+    expect(message!.quotedEvidence).toBe("we have received your application");
   });
 
   it("leaves an ack below the auto-ack threshold as a pending suggestion", async () => {

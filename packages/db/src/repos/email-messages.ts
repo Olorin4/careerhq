@@ -210,6 +210,8 @@ export interface SetClassificationInput {
   suggestedTransition: ApplicationState | null;
   /** null when the classification implies nothing a human needs to act on. */
   suggestionState: SuggestionState | null;
+  /** The verbatim phrase the model quoted as justification; omitted or null when there is none. */
+  quotedEvidence?: string | null;
 }
 
 /** Records a model verdict against a stored message. `id` is the `email_messages` row id. */
@@ -223,6 +225,7 @@ export async function setClassification(
     classificationConfidence: input.confidence,
     suggestedTransition: input.suggestedTransition,
     suggestionState: input.suggestionState,
+    quotedEvidence: input.quotedEvidence ?? null,
   }).where(eq(emailMessages.id, id));
 }
 

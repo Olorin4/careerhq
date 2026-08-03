@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import {
   getApplicationDetail, listAnswers, listAttemptsForApplication, listCvVariants, listDocuments,
-  listEmailConnections, listFacts, companies as companiesTable,
+  listEmailConnections, listFacts, listMessagesForApplication, companies as companiesTable,
 } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
@@ -11,6 +11,7 @@ import { TransitionButtons } from "../transition-buttons.js";
 import { CvSelect } from "./cv-select.js";
 import { EmailPanel } from "./email-panel.js";
 import { Materials } from "./materials.js";
+import { Messages } from "./messages.js";
 import { QaPanel } from "./qa.js";
 
 // Every render reads the database, so there is nothing to prerender: without
@@ -54,6 +55,7 @@ export default async function ApplicationDetailPage({
   const cvVariants = await listCvVariants(db, application.workspaceId);
   const emailConnections = await listEmailConnections(db, application.workspaceId);
   const emailAttempts = await listAttemptsForApplication(db, application.id);
+  const messages = await listMessagesForApplication(db, application.id);
 
   return (
     <main>
@@ -108,6 +110,8 @@ export default async function ApplicationDetailPage({
         cvVariantId={application.cvVariantId}
         cvVariants={cvVariants}
       />
+
+      <Messages messages={messages} />
 
       <h2>Event timeline</h2>
       <ol className="detail-timeline">

@@ -215,6 +215,9 @@ async function classifyAndSuggest(
     confidence: verdict.confidence,
     suggestedTransition,
     suggestionState,
+    // The model uses "" for "no quotable phrase" (see classify-reply's prompt);
+    // stored as null so the UI can tell "no evidence" from an empty string.
+    quotedEvidence: verdict.quotedEvidence || null,
   });
   return suggestionState;
 }

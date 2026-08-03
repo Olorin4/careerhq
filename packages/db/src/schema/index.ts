@@ -251,6 +251,7 @@ export const emailMessages = pgTable("email_messages", {
   matchMethod: matchMethod("match_method"),
   classification: replyClassification("classification"),
   classificationConfidence: real("classification_confidence"),
+  quotedEvidence: text("quoted_evidence"),
   suggestedTransition: applicationState("suggested_transition"),
   suggestionState: suggestionState("suggestion_state"),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),

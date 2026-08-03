@@ -207,12 +207,14 @@ d("email messages repo", () => {
     await setClassification(db, id, {
       classification: "interview", confidence: 0.82,
       suggestedTransition: "INTERVIEW", suggestionState: "pending",
+      quotedEvidence: "we would like to schedule a call",
     });
     const [classified] = await db.select().from(emailMessages).where(eq(emailMessages.id, id));
     expect(classified!.classification).toBe("interview");
     expect(classified!.classificationConfidence).toBeCloseTo(0.82, 5);
     expect(classified!.suggestedTransition).toBe("INTERVIEW");
     expect(classified!.suggestionState).toBe("pending");
+    expect(classified!.quotedEvidence).toBe("we would like to schedule a call");
 
     await setSuggestionState(db, id, "dismissed");
     const [dismissed] = await db.select().from(emailMessages).where(eq(emailMessages.id, id));
