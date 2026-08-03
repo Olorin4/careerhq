@@ -50,6 +50,8 @@ export async function upsertNormalizedJobs(
           location: job.location,
           remoteMode: job.remoteMode,
           descriptionMd: job.descriptionMd,
+          salaryRaw: job.salaryRaw,
+          postedAt: job.postedAt,
           contentHash,
           lastSeenAt: sql`now()`,
           expiredAt: null,
@@ -68,6 +70,8 @@ export async function upsertNormalizedJobs(
         location: job.location,
         remoteMode: job.remoteMode,
         descriptionMd: job.descriptionMd,
+        salaryRaw: job.salaryRaw,
+        postedAt: job.postedAt,
         contentHash,
       }).returning();
       inserted += 1;

@@ -15,6 +15,13 @@
       "when": 1785695538999,
       "tag": "0001_boring_jasper_sitwell",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785751287332,
+      "tag": "0002_rare_joystick",
+      "breakpoints": true
     }
   ]
 }

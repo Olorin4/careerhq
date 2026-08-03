@@ -1,10 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
-  index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex, uuid,
+  boolean, index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
 import {
-  APPLICATION_STATES, ATS_TYPES, ATTEMPT_STATUSES, CHANNELS, CV_FORMATS,
-  FACT_CATEGORIES, SENSITIVITIES, TRANSITION_TRIGGERS, WORKSPACE_KINDS,
+  ANSWER_ORIGINS, APPLICATION_STATES, APPROVAL_STATES, ATS_TYPES, ATTEMPT_STATUSES, CHANNELS,
+  CV_FORMATS, DOCUMENT_KINDS, FACT_CATEGORIES, SENSITIVITIES, TRANSITION_TRIGGERS, WORKSPACE_KINDS,
 } from "@careerhq/contracts";
 
 export const workspaceKind = pgEnum("workspace_kind", WORKSPACE_KINDS);
@@ -17,6 +17,9 @@ export const sensitivity = pgEnum("sensitivity", SENSITIVITIES);
 export const cvFormat = pgEnum("cv_format", CV_FORMATS);
 export const attemptOrigin = pgEnum("attempt_origin", ["app", "manual"]);
 export const atsType = pgEnum("ats_type", ATS_TYPES);
+export const documentKind = pgEnum("document_kind", DOCUMENT_KINDS);
+export const approvalState = pgEnum("approval_state", APPROVAL_STATES);
+export const answerOrigin = pgEnum("answer_origin", ANSWER_ORIGINS);
 
 export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -44,6 +47,8 @@ export const jobs = pgTable("jobs", {
   location: text("location"),
   remoteMode: text("remote_mode"),
   descriptionMd: text("description_md"),
+  salaryRaw: text("salary_raw"),
+  postedAt: timestamp("posted_at", { withTimezone: true }),
   contentHash: text("content_hash"),
   firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
@@ -156,3 +161,36 @@ export const watchlistCompanies = pgTable("watchlist_companies", {
   boardSlug: text("board_slug").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex("watchlist_workspace_ats_slug").on(t.workspaceId, t.atsType, t.boardSlug)]);
+
+export const generatedDocuments = pgTable("generated_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  applicationId: uuid("application_id").notNull().references(() => applications.id, { onDelete: "cascade" }),
+  kind: documentKind("kind").notNull(),
+  contentMd: text("content_md").notNull(),
+  sourceFactIds: uuid("source_fact_ids").array().notNull().default(sql`'{}'::uuid[]`),
+  model: text("model"),
+  origin: answerOrigin("origin").notNull().default("ai"),
+  approval: approvalState("approval").notNull().default("draft"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("generated_documents_application").on(t.applicationId, t.createdAt)]);
+
+export const applicationAnswers = pgTable("application_answers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  applicationId: uuid("application_id").notNull().references(() => applications.id, { onDelete: "cascade" }),
+  questionRaw: text("question_raw").notNull(),
+  questionNorm: text("question_norm").notNull(),
+  answer: text("answer").notNull(),
+  origin: answerOrigin("origin").notNull(),
+  sourceFactIds: uuid("source_fact_ids").array().notNull().default(sql`'{}'::uuid[]`),
+  confidence: real("confidence"),
+  sensitivity: sensitivity("sensitivity").notNull().default("normal"),
+  approval: approvalState("approval").notNull().default("draft"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  reusable: boolean("reusable").notNull().default(false),
+  reviewBy: timestamp("review_by", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("application_answers_application").on(t.applicationId, t.createdAt),
+  index("application_answers_reusable").on(t.reusable, t.questionNorm),
+]);

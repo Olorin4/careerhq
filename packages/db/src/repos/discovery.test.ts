@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   DEFAULT_SCORING_PROFILE, normalizedJobSchema, type NormalizedJob,
 } from "@careerhq/contracts";
@@ -186,6 +186,21 @@ d("discovery repo", () => {
   it("promoteJob refuses a job that does not exist", async () => {
     const result = await promoteJob(db, workspaceId, "00000000-0000-0000-0000-000000000000");
     expect(result.ok).toBe(false);
+  });
+
+  it("persists salaryRaw and postedAt on insert and update", async () => {
+    const posted = new Date("2026-07-01T00:00:00Z");
+    await upsertNormalizedJobs(db, workspaceId, [{
+      job: nj({ externalId: "sal1", salaryRaw: "$100k-$140k", postedAt: posted }), contentHash: "hsal",
+    }]);
+    let [row] = await db.select().from(jobs).where(and(eq(jobs.workspaceId, workspaceId), eq(jobs.externalId, "sal1")));
+    expect(row?.salaryRaw).toBe("$100k-$140k");
+    expect(row?.postedAt?.toISOString()).toBe(posted.toISOString());
+    await upsertNormalizedJobs(db, workspaceId, [{
+      job: nj({ externalId: "sal1", salaryRaw: "$110k-$150k", postedAt: posted }), contentHash: "hsal",
+    }]);
+    [row] = await db.select().from(jobs).where(and(eq(jobs.workspaceId, workspaceId), eq(jobs.externalId, "sal1")));
+    expect(row?.salaryRaw).toBe("$110k-$150k");
   });
 
   it("dismissJob flips job status and removes it from the inbox", async () => {
