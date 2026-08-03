@@ -11,10 +11,11 @@ module.exports = {
       name: "ingest-and-ai-purity",
       comment:
         "ingest, ai, email, and autoapply are consumed by the worker/apps but must not reach into db or apps " +
-        "themselves (autoapply's own *.test.ts fixtures and fixture-generation scripts are exempt — they import " +
-        "the pure @careerhq/demo-ats page builders as a devDependency, never db)",
+        "themselves. The ONLY carve-out is autoapply's own *.test.ts fixtures and fixture-generation scripts, " +
+        "which import the pure @careerhq/demo-ats page builders as a devDependency, never db — ingest/ai/email " +
+        "get no exemption and stay fully fenced.",
       severity: "error",
-      from: { path: "^packages/(ingest|ai|email|autoapply)", pathNot: "(\\.test\\.ts$|/scripts/)" },
+      from: { path: "^packages/(ingest|ai|email|autoapply)", pathNot: "^packages/autoapply/(.*\\.test\\.ts|scripts/.*)$" },
       to: { path: "^(packages/db|apps)" },
     },
     {
@@ -26,11 +27,11 @@ module.exports = {
     {
       name: "packages-not-into-apps",
       comment:
-        "production package code must never import from apps; *.test.ts fixtures and fixture-generation " +
-        "scripts are exempt (e.g. autoapply's tests and scripts/write-fixture.ts build fixtures from the pure " +
-        "@careerhq/demo-ats page builders)",
+        "production package code must never import from apps. The ONLY carve-out is autoapply's own *.test.ts " +
+        "fixtures and scripts/write-fixture.ts, which build fixtures from the pure @careerhq/demo-ats page " +
+        "builders — every other package stays fully fenced from apps.",
       severity: "error",
-      from: { path: "^packages", pathNot: "(\\.test\\.ts$|/scripts/)" },
+      from: { path: "^packages", pathNot: "^packages/autoapply/(.*\\.test\\.ts|scripts/.*)$" },
       to: { path: "^apps" },
     },
   ],
