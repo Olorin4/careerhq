@@ -30,6 +30,18 @@ interface NameHint {
 /**
  * Ordered name/id substring hints (case-insensitive), checked after the
  * "name" exact-match special case below. First match wins.
+ *
+ * Fix round audit (Task 5 review item 3 — checked every hint below against
+ * the full CANONICAL_FIELDS list for the same "general pattern shadows a
+ * more specific sibling field" bug found in greenhouse.ts's location hint):
+ * only `notice|availability -> notice_period` collided (fixed above,
+ * splitting out a dedicated `availability` hint). Everything else —
+ * `org|company` (current_company), `resume`, `linkedin`, `github`,
+ * `portfolio`, `comments|additional_information`, `salary|compensation`
+ * (desired_salary), `work_auth|authorized` (work_authorization), `sponsor`
+ * (visa_sponsorship), `email`, `phone`, plus the exact-match "name" ->
+ * full_name check — has no other CanonicalField whose name is a substring
+ * match (or superset) of its pattern, so no further splitting was needed.
  */
 const NAME_HINTS: NameHint[] = [
   { pattern: /org|company/i, field: "current_company" },
@@ -38,7 +50,16 @@ const NAME_HINTS: NameHint[] = [
   { pattern: /github/i, field: "github_url" },
   { pattern: /portfolio/i, field: "portfolio_url" },
   { pattern: /comments|additional_information/i, field: "screening_question" },
-  { pattern: /notice|availability/i, field: "notice_period" },
+  // Fix round (Task 5 review, item 3 — auditing lever.ts for the same
+  // collision class): "availability" is its OWN CanonicalField, distinct
+  // from "notice_period" (start-date availability vs. current-employer
+  // notice period). The original combined `/notice|availability/i ->
+  // notice_period` pattern (straight from the Task 6 brief's hint table)
+  // silently conflated the two — split so each substring maps to its own
+  // field. No effect on the committed lever fixture: its only matching
+  // field is id/name "notice_period", which only contains "notice".
+  { pattern: /notice/i, field: "notice_period" },
+  { pattern: /availability/i, field: "availability" },
   { pattern: /salary|compensation/i, field: "desired_salary" },
   { pattern: /work_auth|authorized/i, field: "work_authorization" },
   { pattern: /sponsor/i, field: "visa_sponsorship" },

@@ -8,17 +8,33 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonicalFormSchema, type CanonicalField, type CanonicalForm } from "@careerhq/contracts";
+import { canonicalFormSchema, type CanonicalField, type CanonicalForm, type FieldKind } from "@careerhq/contracts";
 import { parseGenericForm } from "../generic.js";
 import { rawFieldId, type RawField, type RawFormPage } from "../raw.js";
 
+/**
+ * A hint's target is usually a fixed CanonicalField, but a few name/id
+ * patterns are ambiguous without also looking at the field's structural
+ * `kind` (e.g. "cover_letter" is a file upload on some tenants, a pasted
+ * text box on others) — those hints resolve via a `(kind) => field`
+ * function instead.
+ */
+type HintTarget = CanonicalField | ((kind: FieldKind) => CanonicalField);
+
 interface NameHint {
   pattern: RegExp;
-  field: CanonicalField;
+  field: HintTarget;
 }
 
 /**
- * Ordered name/id substring hints (case-insensitive). First match wins.
+ * Ordered name/id substring hints (case-insensitive). First match wins, so
+ * MORE specific patterns that nest inside a more general one (e.g.
+ * "relocation" containing "location") are listed first — belt-and-braces
+ * with the `\b` word-boundary anchors on the fields most prone to that,
+ * so "relocation" can never satisfy the bare `location` pattern regardless
+ * of ordering (fix round: Task 5 review flagged `/location/i` shadowing a
+ * `relocation` field at 0.9 before this).
+ *
  * `job_application[first_name]`-style Greenhouse names already contain the
  * bare keyword (e.g. "first_name"), so a single substring pattern covers
  * both the bracketed and unbracketed conventions from the brief.
@@ -29,19 +45,28 @@ const NAME_HINTS: NameHint[] = [
   { pattern: /email/i, field: "email" },
   { pattern: /phone/i, field: "phone" },
   { pattern: /resume/i, field: "resume_file" },
-  { pattern: /cover_letter/i, field: "cover_letter_file" },
+  // Kind-aware: a "cover_letter"-named field is only ever a file input or a
+  // textarea in practice — route each to its own canonical field instead of
+  // always forcing cover_letter_file (fix round: Task 5 review flagged
+  // cover_letter_text as unreachable before this).
+  { pattern: /cover_letter/i, field: (kind) => (kind === "textarea" ? "cover_letter_text" : "cover_letter_file") },
   { pattern: /linkedin/i, field: "linkedin_url" },
   { pattern: /github/i, field: "github_url" },
   { pattern: /website|portfolio/i, field: "portfolio_url" },
-  { pattern: /location/i, field: "location" },
+  { pattern: /\brelocation\b/i, field: "relocation" },
+  { pattern: /work_auth/i, field: "work_authorization" },
+  { pattern: /sponsor/i, field: "visa_sponsorship" },
+  { pattern: /\blocation\b/i, field: "location" },
   { pattern: /question_|custom_question/i, field: "screening_question" },
   { pattern: /gender|race|ethnicity|veteran|disability|self_identif/i, field: "demographics" },
 ];
 
-function matchNameHint(raw: RawField): CanonicalField | null {
+function matchNameHint(raw: RawField, kind: FieldKind): CanonicalField | null {
   const haystack = `${raw.name} ${raw.id}`.toLowerCase();
   for (const hint of NAME_HINTS) {
-    if (hint.pattern.test(haystack)) return hint.field;
+    if (hint.pattern.test(haystack)) {
+      return typeof hint.field === "function" ? hint.field(kind) : hint.field;
+    }
   }
   return null;
 }
@@ -54,8 +79,14 @@ function matchNameHint(raw: RawField): CanonicalField | null {
  * "custom_question"/"question_N" fields always render as textareas, and a
  * tenant may give that textarea a human-readable name (as our demo-ats
  * fixture does with "why_northwind") instead of the generic convention.
- * Every other unmatched field (selects, checkboxes, ...) is left "unknown"
- * — deterministic label matching is Task 7's job.
+ * Every other unmatched field (checkboxes, unrecognized selects, ...) is
+ * left "unknown" — deterministic label matching is Task 7's job.
+ *
+ * Fix round (Task 5 review): the demo-ats fixture's `work_authorization`
+ * and `visa_sponsorship` <select> fields now map to their matching
+ * canonical fields via the `work_auth`/`sponsor` hints added above, instead
+ * of staying "unknown" as they did pre-review — see task-6-report.md's fix
+ * round section for why.
  */
 export function parseGreenhouse(page: RawFormPage): CanonicalForm {
   const generic = parseGenericForm(page, { atsType: "greenhouse", parseConfidence: 0.9 });
@@ -70,7 +101,7 @@ export function parseGreenhouse(page: RawFormPage): CanonicalForm {
     const raw = rawById.get(field.id);
     if (!raw) return field;
 
-    const hinted = matchNameHint(raw);
+    const hinted = matchNameHint(raw, field.kind);
     if (hinted) {
       return { ...field, canonicalField: hinted, mappingConfidence: 0.9 };
     }

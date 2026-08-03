@@ -85,6 +85,25 @@ describe("parseLever (committed fixture)", () => {
   });
 });
 
+describe("fix round: availability no longer collides with notice_period", () => {
+  it("maps a 'notice' field and an 'availability' field to their own distinct canonical fields", () => {
+    const html = `<html><body><form>
+      <input id="notice" name="notice" />
+      <input id="availability" name="availability" />
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://acme.example/lever/apply");
+    const form = parseLever(page);
+
+    const notice = form.fields.find((f) => f.id === idFor("#notice"));
+    expect(notice?.canonicalField).toBe("notice_period");
+    expect(notice?.mappingConfidence).toBe(0.9);
+
+    const availability = form.fields.find((f) => f.id === idFor("#availability"));
+    expect(availability?.canonicalField).toBe("availability");
+    expect(availability?.mappingConfidence).toBe(0.9);
+  });
+});
+
 describe("LEVER_FIXTURE_HASH (parser-drift tripwire)", () => {
   it("still matches the sha256 of the live demo-ats helper output", () => {
     const livePage = rawPageFromHtml(leverPage(job), url);

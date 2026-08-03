@@ -50,6 +50,23 @@ describe("parseGreenhouse (committed fixture)", () => {
     }
   });
 
+  // Fix round (Task 5 review): work_auth/sponsor hints added to close the
+  // "each maps to its own canonical field" gap alongside the
+  // location/relocation fix below — these two demo-ats <select> fields now
+  // map instead of staying "unknown" (see the "unmapped custom fields" test
+  // further down, which was narrowed to just legal_attestation).
+  it("maps work_authorization and visa_sponsorship selects to their canonical fields at 0.9", () => {
+    const cases: Array<[string, string]> = [
+      ["#work_authorization", "work_authorization"],
+      ["#visa_sponsorship", "visa_sponsorship"],
+    ];
+    for (const [selector, canonicalField] of cases) {
+      const field = form.fields.find((f) => f.id === idFor(selector));
+      expect(field?.canonicalField).toBe(canonicalField);
+      expect(field?.mappingConfidence).toBe(0.9);
+    }
+  });
+
   it("maps the demographics radios (gender, veteran_status) to demographics at 0.9", () => {
     const demographics = form.fields.filter((f) => f.canonicalField === "demographics");
     // 4 gender options (male/female/nonbinary/decline) + 3 veteran_status options
@@ -63,12 +80,10 @@ describe("parseGreenhouse (committed fixture)", () => {
     expect(field?.mappingConfidence).toBe(0.9);
   });
 
-  it("leaves unmapped custom fields (selects, attestation checkbox) unknown at 0", () => {
-    for (const selector of ["#work_authorization", "#visa_sponsorship", "#legal_attestation"]) {
-      const field = form.fields.find((f) => f.id === idFor(selector));
-      expect(field?.canonicalField).toBe("unknown");
-      expect(field?.mappingConfidence).toBe(0);
-    }
+  it("leaves the attestation checkbox unknown at 0 (no hint covers it)", () => {
+    const field = form.fields.find((f) => f.id === idFor("#legal_attestation"));
+    expect(field?.canonicalField).toBe("unknown");
+    expect(field?.mappingConfidence).toBe(0);
   });
 });
 
@@ -76,5 +91,58 @@ describe("GREENHOUSE_FIXTURE_HASH (parser-drift tripwire)", () => {
   it("still matches the sha256 of the live demo-ats helper output", () => {
     const livePage = rawPageFromHtml(greenhousePage(job), url);
     expect(hashRawFormPage(livePage)).toBe(GREENHOUSE_FIXTURE_HASH);
+  });
+});
+
+describe("fix round: location/relocation/sponsorship/work_authorization don't collide", () => {
+  it("maps each of a synthetic relocation, location, sponsorship, and work_authorization field to its own distinct canonical field", () => {
+    const html = `<html><body><form>
+      <input id="relocation" name="relocation" />
+      <input id="location" name="location" />
+      <input id="sponsorship" name="sponsorship" />
+      <input id="work_authorization" name="work_authorization" />
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://acme.example/careers/apply");
+    const form = parseGreenhouse(page);
+
+    const cases: Array<[string, string]> = [
+      ["#relocation", "relocation"],
+      ["#location", "location"],
+      ["#sponsorship", "visa_sponsorship"],
+      ["#work_authorization", "work_authorization"],
+    ];
+    const mapped = cases.map(([selector, expected]) => {
+      const field = form.fields.find((f) => f.id === idFor(selector));
+      expect(field?.canonicalField).toBe(expected);
+      expect(field?.mappingConfidence).toBe(0.9);
+      return field?.canonicalField;
+    });
+    // Belt-and-braces: all four resolved fields are pairwise distinct — no
+    // field silently shadows another's canonical field.
+    expect(new Set(mapped).size).toBe(4);
+  });
+});
+
+describe("fix round: cover_letter is kind-aware", () => {
+  it("maps a cover_letter file input to cover_letter_file", () => {
+    const html = `<html><body><form>
+      <input type="file" id="cover_letter" name="cover_letter" />
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://acme.example/careers/apply");
+    const form = parseGreenhouse(page);
+    const field = form.fields.find((f) => f.id === idFor("#cover_letter"));
+    expect(field?.canonicalField).toBe("cover_letter_file");
+    expect(field?.mappingConfidence).toBe(0.9);
+  });
+
+  it("maps a cover_letter textarea to cover_letter_text", () => {
+    const html = `<html><body><form>
+      <textarea id="cover_letter" name="cover_letter"></textarea>
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://acme.example/careers/apply");
+    const form = parseGreenhouse(page);
+    const field = form.fields.find((f) => f.id === idFor("#cover_letter"));
+    expect(field?.canonicalField).toBe("cover_letter_text");
+    expect(field?.mappingConfidence).toBe(0.9);
   });
 });
