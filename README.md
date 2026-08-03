@@ -6,7 +6,7 @@ This is a portfolio project built to demonstrate full-stack product engineering 
 
 ## Current status
 
-**P1 (Foundation, tracker, Fact Bank) and P2 (discovery ingestion and scoring) are complete.** Shipped so far:
+**P1 (Foundation, tracker, Fact Bank), P2 (discovery ingestion and scoring), and P3 (grounded AI materials generation) are complete.** Shipped so far:
 
 - Monorepo scaffold (pnpm workspaces + Turborepo), strict TypeScript, ESLint.
 - Compose stack (`postgres`, `mailpit`, `web`, `worker`) with a parameterized Postgres host port.
@@ -21,9 +21,14 @@ This is a portfolio project built to demonstrate full-stack product engineering 
 - **Optional LLM re-rank** (`packages/ai`): an OpenRouter `chatJson` client (JSON mode, tolerant extraction, Zod validation, never throws) with sequential model fallback and per-model 429 cooldown — see [ADR-0003](docs/adr/0003-openrouter-sequential-fallback.md). Re-ranks the top N keyword-scored jobs with a rationale and red flags, and never deletes or hides anything. With no `OPENROUTER_API_KEY`, the keyword order stands as-is and re-rank reports `skipped_no_key` — the whole feature works with zero AI configuration.
 - **`/jobs` discovery inbox**: ranked listings with score breakdown chips and LLM rationale where available, promote-to-application (links the discovery job onto the P1 tracker board), dismiss, collapsed duplicates, and the pipeline-health panel.
 - **`/settings`**: scoring-profile editor (roles/stack/boost/exclude/remote-only) and the ATS watchlist (add/remove companies the board fetcher polls next run).
+- **Grounded material generation** (`packages/core`'s grounding module, `packages/ai`'s `generate` task): `selectFactsForGeneration` hard-excludes sensitive and stale facts before anything is scored, caps the model's context to a small relevant subset, and `validateGeneration` deterministically re-checks the model's own citations against the facts it was actually given — never trusting the model's self-reported `factIds`/`confidence`. A result that fails validation, or has no facts to ground in, returns `NEEDS_FACTS` with reasons and persists nothing. See [ADR-0004](docs/adr/0004-grounding-contract-and-sensitive-answers.md).
+- **Sensitive-question policy**: a conservative, word-boundary keyword ruleset (`classifyQuestionSensitivity`) covering work authorization, disability, demographics, criminal history, compensation, availability, and relocation, with a fast-tier LLM tie-break that can only *widen* the block, never narrow it. A sensitive question is hard-blocked before the writing model is ever called; the only route to an answer is the manual form.
+- **Cover letters, email bodies, and application-question answers** (`/applications/[id]`'s Materials and Q&A panels): streamed token-by-token via `/api/generate/stream` with a non-streaming fallback, provenance chips resolving each cited fact id back to its claim text, and an "AI-generated — not yet approved" badge until a draft is explicitly approved or rejected. With no `OPENROUTER_API_KEY`, every panel still works as a manual-draft editor, and the pure keyword ruleset still warns on a sensitive question with zero AI configured.
+- **`/answers`**: a workspace-wide bank of approved, reusable answers with their source-fact count and approval date, flagged `STALE` once past their `reviewBy` date.
+- **AI record/replay layer** (`AI_MODE=record|replay`, `packages/ai/src/replay`): every AI call site can record a live response to a committed fixture keyed by a hash of its exact prompt, or replay that fixture with zero network calls — used to keep CI and demos deterministic without a live key.
 - CI (GitHub Actions): lint, typecheck, dependency-cruiser import-boundary checks, and the test suite against a real Postgres service container.
 
-Everything past this point — AI-assisted material generation, the live email channel, assisted auto-apply, the hosted demo, and the restricted-source connector — is **planned**, not built. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan (P3–P7) and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
+Everything past this point — the live email channel, assisted auto-apply, the hosted demo, and the restricted-source connector — is **planned**, not built. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan (P4–P7) and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
 
 ## Quickstart
 
@@ -46,8 +51,11 @@ Mailpit's web UI is at `http://localhost:8025` (dev/demo SMTP sink — nothing i
 
 **Discovery/AI env vars (all optional — every default keeps the deterministic floor working):**
 
-- `OPENROUTER_API_KEY` — unset by default. Without it, the keyword-score order stands as-is and the worker's re-rank pass reports `skipped_no_key`; nothing in discovery requires it to function.
-- `AI_FAST_MODELS` — comma-separated OpenRouter model ids tried in order for re-rank (and later fast-tier tasks), e.g. `google/gemini-2.0-flash-exp:free,meta-llama/llama-3.3-70b-instruct:free`. Defaults to two free-tier models; see [ADR-0003](docs/adr/0003-openrouter-sequential-fallback.md) for why fallback is sequential rather than raced.
+- `OPENROUTER_API_KEY` — unset by default. Without it, the keyword-score order stands as-is and the worker's re-rank pass reports `skipped_no_key`; nothing in discovery requires it to function, and materials/Q&A generation falls back to the manual-draft path with no error.
+- `AI_FAST_MODELS` — comma-separated OpenRouter model ids tried in order for re-rank and the sensitive-question tie-break, e.g. `google/gemini-2.0-flash-exp:free,meta-llama/llama-3.3-70b-instruct:free`. Defaults to two free-tier models; see [ADR-0003](docs/adr/0003-openrouter-sequential-fallback.md) for why fallback is sequential rather than raced.
+- `AI_WRITING_MODELS` — comma-separated OpenRouter model ids tried in order for the writing tier (cover letters, email bodies, question answers). Defaults to `deepseek/deepseek-chat:free,meta-llama/llama-3.3-70b-instruct:free,google/gemini-2.0-flash-001`; see [ADR-0004](docs/adr/0004-grounding-contract-and-sensitive-answers.md) for the grounding contract these calls are validated against.
+- `AI_MODE` — `live` (default), `record`, or `replay`. `record` persists a real response to a fixture keyed by prompt hash; `replay` returns the fixture with no network call at all — see ADR-0004.
+- `AI_REPLAY_DIR` — where recorded AI fixtures live. Defaults to `packages/ai/fixtures/replay`; relative paths resolve against the repo root, same rule as `FILE_STORAGE_DIR`.
 - `INGEST_CRON` — cron expression for the worker's `discovery.ingest` schedule. Defaults to `0 */6 * * *` (every 6 hours).
 
 **One `.env`, at the repo root.** Nothing in this repo auto-loads it: `drizzle-kit`, the seed (`tsx`), `next dev` (which would only look inside `apps/web`), and the worker each load `<repo root>/.env` explicitly at startup. Variables already exported in your shell win over the file, which is Node's own `--env-file` rule. Copying `.env.example` is therefore enough — no `export DATABASE_URL=…` needed. In Docker, no `.env` exists and Compose supplies the environment instead.
@@ -111,7 +119,7 @@ flowchart LR
     restricted -->|"proxy pool only"| boards["Restricted boards\nLinkedIn, Indeed, Glassdoor,\nGoogle Jobs, ZipRecruiter"]
 ```
 
-As of P2, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, the file volume, the keyless job **feeds** (Remotive, RemoteOK, Arbeitnow, WWR, The Muse, and watchlisted Greenhouse/Lever/Ashby boards), and, if `OPENROUTER_API_KEY` is set, **OpenRouter** for re-rank — everything else (live SMTP/IMAP, live company-site submission, the restricted connector) is architected for but not yet wired up.
+As of P3, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, the file volume, the keyless job **feeds** (Remotive, RemoteOK, Arbeitnow, WWR, The Muse, and watchlisted Greenhouse/Lever/Ashby boards), and, if `OPENROUTER_API_KEY` is set, **OpenRouter** from both `web` (grounded materials/Q&A generation) and `worker` (re-rank) — everything else (live SMTP/IMAP, live company-site submission, the restricted connector) is architected for but not yet wired up.
 
 ## Documentation
 
@@ -121,6 +129,7 @@ As of P2, the live parts of this diagram are `web`, `worker`, `postgres`, `mailp
 - [`docs/adr/0001-postgres-and-pg-boss.md`](docs/adr/0001-postgres-and-pg-boss.md) — why Postgres + pg-boss over SQLite/Redis.
 - [`docs/adr/0002-gated-mutation-protocol.md`](docs/adr/0002-gated-mutation-protocol.md) — the three-layer gated-mutation design (state machine shipped in P1, enforcement lands in P4).
 - [`docs/adr/0003-openrouter-sequential-fallback.md`](docs/adr/0003-openrouter-sequential-fallback.md) — the ported `chat-json` pattern and why fallback is sequential, not raced.
+- [`docs/adr/0004-grounding-contract-and-sensitive-answers.md`](docs/adr/0004-grounding-contract-and-sensitive-answers.md) — the grounding contract (deterministic citation post-validation, `NEEDS_FACTS`) and the conservative, widen-only sensitive-question policy.
 - [`docs/adr/0006-scraping-and-tos-boundaries.md`](docs/adr/0006-scraping-and-tos-boundaries.md) — the keyless-only core boundary and the isolated, opt-in restricted-source connector.
 
 ## Screenshots
