@@ -22,6 +22,14 @@ services:
       DATABASE_URL: postgres://careerhq:careerhq@postgres:5432/careerhq
       # Must match the volume mount below; web and worker share one file tree.
       FILE_STORAGE_DIR: /app/var/files
+      # AI materials-generation knobs. The images carry no .env, so without
+      # these the web service is permanently ai_unavailable. All optional:
+      # empty/unset passes through to the config defaults.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      AI_FAST_MODELS: ${AI_FAST_MODELS:-}
+      AI_WRITING_MODELS: ${AI_WRITING_MODELS:-}
+      AI_MODE: ${AI_MODE:-live}
+      AI_REPLAY_DIR: ${AI_REPLAY_DIR:-}
     ports: ["3000:3000"]
     volumes: [files:/app/var/files]
     depends_on:
