@@ -1,0 +1,661 @@
+import { createHash } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { loadConfig, type AppConfig } from "@careerhq/config";
+import type { GenerationResult, InterpretFieldResult, PlannedAnswer } from "@careerhq/contracts";
+import { rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
+import type { FallbackResult, GenerateInput, InterpretFieldInput } from "@careerhq/ai";
+import {
+  applicationEvents, applications, createApplication, createCvVariant, createDb, createFact,
+  getActiveConfirmation, getAttempt, getLatestSnapshot, listAttemptsForApplication,
+  transitionApplication, updateSnapshotAnswers, workspaces, type Db,
+} from "@careerhq/db";
+import {
+  confirmAndSubmitSite, prepareSiteApplication, previewSiteSubmission, updatePlannedAnswer,
+  type SiteDeps, type SiteSubmitResult,
+} from "./site-submission";
+
+const url = process.env.TEST_DATABASE_URL;
+const d = describe.skipIf(!url);
+
+/** `payload.host`: the hostname the user retypes, and what the sandbox allow-list names. */
+const APPLY_HOST = "demo-ats";
+
+const slugOf = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+/** One requisition per test: `findRequisitionAttempt` is workspace-wide, so URLs must not collide. */
+const urlFor = (name: string): string => `http://${APPLY_HOST}:3001/greenhouse/jobs/${slugOf(name)}`;
+const requisitionKeyFor = (name: string): string => `${APPLY_HOST}:3001/greenhouse/jobs/${slugOf(name)}`;
+
+const CV_BYTES = Buffer.from("%PDF-1.4 fake cv bytes for the site orchestrator test\n");
+const CV_SHA256 = createHash("sha256").update(CV_BYTES).digest("hex");
+
+let db: Db;
+let workspaceId: string;
+let otherWorkspaceId: string;
+let cvVariantId: string;
+let cvPath: string;
+
+function config(over: Record<string, string> = {}): AppConfig {
+  return loadConfig({
+    DATABASE_URL: url ?? "postgres://u:p@localhost:5432/careerhq",
+    SUBMISSIONS_LIVE_COMPANY_SITE: "true",
+    SANDBOX_SITE_ALLOWED_HOST: APPLY_HOST,
+    ...over,
+  });
+}
+
+function rawField(over: Partial<RawField> & { name: string }): RawField {
+  return {
+    selector: `#${over.name}`,
+    tag: "input",
+    type: "text",
+    id: over.name,
+    labelText: "",
+    nearbyText: "",
+    placeholder: "",
+    required: false,
+    maxLength: null,
+    accept: null,
+    options: [],
+    step: 0,
+    ...over,
+  };
+}
+
+const FIELDS: RawField[] = [
+  rawField({ name: "first_name", labelText: "First name", required: true }),
+  rawField({ name: "last_name", labelText: "Last name", required: true }),
+  rawField({ name: "email", type: "email", labelText: "Email", required: true }),
+  rawField({ name: "phone", type: "tel", labelText: "Phone" }),
+  rawField({ name: "resume", type: "file", accept: ".pdf,.docx", labelText: "Resume", required: true }),
+  rawField({
+    name: "work_authorization", tag: "select", type: "",
+    labelText: "Are you authorized to work in the United States?", required: true,
+    options: [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }],
+  }),
+  rawField({
+    name: "why_northwind", tag: "textarea", type: "",
+    labelText: "Why do you want to work at Northwind?", required: true,
+  }),
+  // Unmapped free text: the only field the interpreter has anything to say about.
+  rawField({ name: "other_notes", labelText: "Anything else we should know?" }),
+  rawField({ name: "utm_source", type: "hidden" }),
+];
+
+const fieldId = (name: string): string => rawFieldId(FIELDS.find((f) => f.name === name)!);
+
+function greenhousePage(pageUrl: string, over: Partial<RawFormPage> = {}): RawFormPage {
+  return {
+    url: pageUrl,
+    title: "Senior Backend Engineer at Northwind",
+    bodyText: "Apply for Senior Backend Engineer at Northwind. We review every application.",
+    rootMarkers: ["data-source=greenhouse", "id=application_form"],
+    fields: FIELDS,
+    buttons: [{ selector: "#btn_submit", id: "btn_submit", text: "Submit application" }],
+    totalSteps: 1,
+    ...over,
+  };
+}
+
+/** A page carrying a reCAPTCHA widget — `detectBlockers`' captcha rule. */
+function captchaPage(pageUrl: string): RawFormPage {
+  return greenhousePage(pageUrl, {
+    rootMarkers: ["data-source=greenhouse", "class=g-recaptcha"],
+    bodyText: "Please verify you are human before applying.",
+    fields: [rawField({ name: "email", type: "email", labelText: "Email", required: true })],
+  });
+}
+
+interface SubmitCall {
+  url: string;
+  answers: PlannedAnswer[];
+  files: Record<string, string>;
+}
+
+type SubmitBehaviour = { kind: "ok"; confirmationId?: string | null } | { kind: "throws" };
+
+function stubSubmit(calls: SubmitCall[], behaviour: SubmitBehaviour = { kind: "ok" }) {
+  return async (args: {
+    url: string; answers: PlannedAnswer[]; files: Record<string, string>;
+  }): Promise<SiteSubmitResult> => {
+    calls.push({ url: args.url, answers: args.answers, files: args.files });
+    if (behaviour.kind === "throws") throw new Error("chromium crashed after the submit click");
+    const confirmationId = behaviour.confirmationId === undefined ? "NR-1a2b3c4d" : behaviour.confirmationId;
+    return {
+      confirmationId,
+      finalUrl: `${args.url}/thanks`,
+      screenshotPath: "/app/var/files/shots/attempt.png",
+      pageText: `Thanks for applying! ${confirmationId ? `Confirmation ID: ${confirmationId}` : ""}`,
+    };
+  };
+}
+
+/**
+ * The AI tiers are always injected — a test that left one out would reach the
+ * real OpenRouter client the moment a key is configured.
+ */
+const noInterpretation = async (): Promise<FallbackResult<InterpretFieldResult>> => ({
+  ok: false, value: null, model: "stub-fast", latencyMs: 1, status: null, error: "not_useful", attempts: [],
+});
+
+function aiDeps(over: Partial<SiteDeps>): Partial<SiteDeps> {
+  return {
+    config: config({ OPENROUTER_API_KEY: "sk-test" }),
+    interpret: noInterpretation as SiteDeps["interpret"],
+    ...over,
+  };
+}
+
+function deps(over: Partial<SiteDeps> = {}): SiteDeps {
+  return {
+    db,
+    config: config(),
+    capture: async (pageUrl: string) => greenhousePage(pageUrl),
+    submit: stubSubmit([]),
+    ...over,
+  };
+}
+
+/** An application walked to READY_FOR_REVIEW through the real guarded transitions. */
+async function readyApplication(companyName: string, ws = workspaceId): Promise<string> {
+  const app = await createApplication(db, {
+    workspaceId: ws, companyName, jobTitle: "Senior Backend Engineer", jobUrl: urlFor(companyName),
+  });
+  for (const to of ["SHORTLISTED", "PREPARING"] as const) {
+    expect((await transitionApplication(db, { applicationId: app.id, to, trigger: "user" })).ok).toBe(true);
+  }
+  const ready = await transitionApplication(db, {
+    applicationId: app.id, to: "READY_FOR_REVIEW", trigger: "user", ctx: { hasMaterials: true },
+  });
+  expect(ready.ok).toBe(true);
+  return app.id;
+}
+
+interface Prepared {
+  applicationId: string;
+  attemptId: string;
+  snapshotId: string;
+  blocking: string[];
+  url: string;
+}
+
+async function prepare(companyName: string, over: Partial<SiteDeps> = {}): Promise<Prepared> {
+  const applicationId = await readyApplication(companyName);
+  const pageUrl = urlFor(companyName);
+  const outcome = await prepareSiteApplication(deps(over), { workspaceId, applicationId, url: pageUrl });
+  expect(outcome.status).toBe("ready");
+  if (outcome.status !== "ready") throw new Error(`prepare failed: ${JSON.stringify(outcome)}`);
+  return {
+    applicationId, attemptId: outcome.attemptId, snapshotId: outcome.snapshotId,
+    blocking: outcome.blocking, url: pageUrl,
+  };
+}
+
+/** Settles every field the planner left for the user, the way Task 12's review screen will. */
+async function settleBlocking(prepared: Prepared, over: Partial<SiteDeps> = {}): Promise<void> {
+  for (const [name, value] of [
+    ["work_authorization", "yes"],
+    ["why_northwind", "Because Northwind runs the event-driven systems I have built for five years."],
+    ["other_notes", ""],
+    ["utm_source", ""],
+  ] as const) {
+    const result = await updatePlannedAnswer(deps(over), {
+      workspaceId, snapshotId: prepared.snapshotId, fieldId: fieldId(name), value,
+    });
+    expect(result).toEqual({ ok: true });
+  }
+}
+
+/** Prepare → settle → preview, handing back the plaintext token. */
+async function previewed(companyName: string, over: Partial<SiteDeps> = {}): Promise<Prepared & { token: string }> {
+  const prepared = await prepare(companyName, over);
+  await settleBlocking(prepared, over);
+  const outcome = await previewSiteSubmission(deps(over), { workspaceId, attemptId: prepared.attemptId });
+  expect(outcome.status).toBe("ok");
+  if (outcome.status !== "ok") throw new Error(`preview failed: ${JSON.stringify(outcome)}`);
+  return { ...prepared, token: outcome.token };
+}
+
+beforeAll(async () => {
+  if (!url) return;
+  db = createDb(url);
+
+  const dir = mkdtempSync(path.join(tmpdir(), "careerhq-site-cv-"));
+  cvPath = path.join(dir, "alex-cv.pdf");
+  writeFileSync(cvPath, CV_BYTES);
+
+  const [ws] = await db.insert(workspaces).values({ name: `t-site-${Date.now()}`, kind: "personal" }).returning();
+  workspaceId = ws!.id;
+  const [other] = await db.insert(workspaces)
+    .values({ name: `t-site-other-${Date.now()}`, kind: "personal" }).returning();
+  otherWorkspaceId = other!.id;
+
+  cvVariantId = (await createCvVariant(db, {
+    workspaceId, label: "ATS CV", format: "ats", filePath: cvPath, sha256: CV_SHA256,
+  })).id;
+
+  const reviewBy = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+  const facts = [
+    { category: "identity" as const, claim: "Full legal name: Alex Rivera" },
+    { category: "contact" as const, claim: "Email: alex.rivera@example.com" },
+    { category: "contact" as const, claim: "Phone: +1-555-0142" },
+    { category: "contact" as const, claim: "Location: Athens, Greece" },
+    { category: "experience" as const, claim: "5 years as a backend engineer building event-driven systems" },
+  ];
+  for (const fact of facts) await createFact(db, { workspaceId, ...fact, reviewBy });
+  // A sensitive fact exists but must never reach an auto-filled answer.
+  await createFact(db, {
+    workspaceId, category: "authorization", claim: "US work authorization: citizen",
+    sensitivity: "sensitive", reviewBy,
+  });
+});
+
+afterAll(async () => {
+  if (!url) return;
+  await db.delete(workspaces).where(eq(workspaces.id, workspaceId));
+  await db.delete(workspaces).where(eq(workspaces.id, otherWorkspaceId));
+  await db.$client.end();
+});
+
+d("prepareSiteApplication", () => {
+  it("plans deterministic answers from the fact bank and leaves the sensitive field for the user", async () => {
+    const prepared = await prepare("Plan Co");
+
+    const snapshot = await getLatestSnapshot(db, prepared.attemptId);
+    expect(snapshot?.id).toBe(prepared.snapshotId);
+    const byId = new Map((snapshot!.plannedAnswers as PlannedAnswer[]).map((a) => [a.fieldId, a]));
+
+    expect(byId.get(fieldId("email"))).toMatchObject({
+      value: "alex.rivera@example.com", source: "profile", needsUser: false,
+    });
+    expect(byId.get(fieldId("first_name"))).toMatchObject({ value: "Alex", source: "profile" });
+    expect(byId.get(fieldId("last_name"))).toMatchObject({ value: "Rivera", source: "profile" });
+    expect(byId.get(fieldId("resume"))).toMatchObject({ value: cvVariantId, source: "document" });
+
+    const workAuth = byId.get(fieldId("work_authorization"))!;
+    expect(workAuth.needsUser).toBe(true);
+    expect(workAuth.source).not.toBe("ai");
+    expect(workAuth.value).toBe("");
+
+    // Every field the user must settle is reported, optional ones included.
+    expect(prepared.blocking).toEqual(expect.arrayContaining([
+      fieldId("work_authorization"), fieldId("why_northwind"), fieldId("other_notes"), fieldId("utm_source"),
+    ]));
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("DRAFT");
+  });
+
+  it("pauses on a blocker: captcha → blocked outcome and an attempt parked in BLOCKED", async () => {
+    const applicationId = await readyApplication("Captcha Co");
+    const outcome = await prepareSiteApplication(
+      deps({ capture: async (pageUrl: string) => captchaPage(pageUrl) }),
+      { workspaceId, applicationId, url: urlFor("Captcha Co") },
+    );
+
+    expect(outcome.status).toBe("blocked");
+    if (outcome.status !== "blocked") return;
+    expect(outcome.kind).toBe("captcha");
+    // User-legible: it says what to do, not just which rule matched.
+    expect(outcome.detail).toMatch(/browser/i);
+
+    const attempts = await listAttemptsForApplication(db, applicationId);
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.status).toBe("BLOCKED");
+    expect(attempts[0]?.failureReason).toMatch(/captcha/i);
+    // A paused attempt captured nothing to submit.
+    expect(await getLatestSnapshot(db, attempts[0]!.id)).toBeNull();
+  });
+
+  it("reports a duplicate requisition, and honours an explicit override with an audit event", async () => {
+    const first = await previewed("Duplicate Co");
+    const submitted = await confirmAndSubmitSite(deps(), {
+      workspaceId, attemptId: first.attemptId, presentedToken: first.token, retypedTarget: APPLY_HOST,
+    });
+    expect(submitted.status).toBe("submitted");
+
+    const applicationId = await readyApplication("Duplicate Second Co");
+    const duplicate = await prepareSiteApplication(deps(), { workspaceId, applicationId, url: first.url });
+    expect(duplicate).toEqual({ status: "duplicate", existingApplicationId: first.applicationId });
+    // Nothing was created for the refused prepare.
+    expect(await listAttemptsForApplication(db, applicationId)).toHaveLength(0);
+
+    const overridden = await prepareSiteApplication(deps(), {
+      workspaceId, applicationId, url: first.url, overrideDuplicate: true,
+    });
+    expect(overridden.status).toBe("ready");
+
+    const events = await db.select().from(applicationEvents)
+      .where(eq(applicationEvents.applicationId, applicationId));
+    const override = events.find((e) => (e.payload as { duplicateOverride?: boolean } | null)?.duplicateOverride);
+    expect(override?.trigger).toBe("user");
+    expect((override?.payload as { requisitionKey?: string } | null)?.requisitionKey)
+      .toBe(requisitionKeyFor("Duplicate Co"));
+  });
+
+  it("never asks a model about a sensitive field, and never drafts a hidden field", async () => {
+    const interpreted: string[] = [];
+    const generated: string[] = [];
+
+    const interpret = async (input: InterpretFieldInput): Promise<FallbackResult<InterpretFieldResult>> => {
+      interpreted.push(input.label);
+      // A model that would happily claim a sensitive mapping. The orchestrator
+      // must treat that as "the user answers this", never as a licence to fill.
+      return {
+        ok: true, value: { canonicalField: "work_authorization", confidence: 0.95 },
+        model: "stub-fast", latencyMs: 1, status: 200, error: null, attempts: [],
+      };
+    };
+    const generate = async (input: GenerateInput): Promise<FallbackResult<GenerationResult>> => {
+      generated.push(input.question ?? "");
+      return {
+        ok: true,
+        value: {
+          answer: "I have built event-driven systems for five years.",
+          factIds: input.facts.map((f) => f.id), confidence: 0.9, unsupportedClaims: [],
+        },
+        model: "stub-writer", latencyMs: 1, status: 200, error: null, attempts: [],
+      };
+    };
+
+    const prepared = await prepare("Sensitive Co", aiDeps({
+      interpret: interpret as SiteDeps["interpret"],
+      generate: generate as SiteDeps["generate"],
+    }));
+
+    const asked = [...interpreted, ...generated].join(" | ");
+    expect(asked).not.toMatch(/authorized to work/i);
+    expect(asked).not.toMatch(/utm_source/i);
+    // Only the unmapped free-text field is worth interpreting; only the
+    // screening question is worth drafting.
+    expect(interpreted).toEqual(["Anything else we should know?"]);
+    expect(generated).toEqual(["Why do you want to work at Northwind?"]);
+
+    const byId = new Map(
+      ((await getLatestSnapshot(db, prepared.attemptId))!.plannedAnswers as PlannedAnswer[])
+        .map((a) => [a.fieldId, a]),
+    );
+    expect(byId.get(fieldId("work_authorization"))).toMatchObject({ source: "user", needsUser: true, value: "" });
+    expect(byId.get(fieldId("utm_source"))).toMatchObject({ needsUser: true });
+    expect(byId.get(fieldId("utm_source"))?.source).not.toBe("ai");
+    // The field the interpreter mapped onto a sensitive category is now the
+    // user's too — an AI mapping can add a block, never remove one.
+    expect(byId.get(fieldId("other_notes"))).toMatchObject({ needsUser: true });
+    expect(byId.get(fieldId("other_notes"))?.source).not.toBe("ai");
+  });
+
+  it("marks an AI draft as such and clears it for review", async () => {
+    const generate = async (input: GenerateInput): Promise<FallbackResult<GenerationResult>> => ({
+      ok: true,
+      value: {
+        answer: "Northwind's event-driven platform is what I have spent five years building.",
+        factIds: input.facts.map((f) => f.id), confidence: 0.85, unsupportedClaims: [],
+      },
+      model: "stub-writer", latencyMs: 1, status: 200, error: null, attempts: [],
+    });
+    const prepared = await prepare("AI Draft Co", aiDeps({
+      generate: generate as SiteDeps["generate"],
+    }));
+
+    const answers = (await getLatestSnapshot(db, prepared.attemptId))!.plannedAnswers as PlannedAnswer[];
+    const draft = answers.find((a) => a.fieldId === fieldId("why_northwind"))!;
+    expect(draft.source).toBe("ai");
+    expect(draft.needsUser).toBe(false);
+    expect(draft.note).toMatch(/ai/i);
+    expect(draft.sourceFactIds.length).toBeGreaterThan(0);
+  });
+
+  it("leaves an ungrounded AI answer for the user instead of filling it", async () => {
+    const generate = async (): Promise<FallbackResult<GenerationResult>> => ({
+      ok: true,
+      // Cites nothing and admits an unsupported claim: P3 validation rejects it.
+      value: {
+        answer: "I led the Northwind acquisition.", factIds: [], confidence: 0.95,
+        unsupportedClaims: ["led the Northwind acquisition"],
+      },
+      model: "stub-writer", latencyMs: 1, status: 200, error: null, attempts: [],
+    });
+    const prepared = await prepare("Ungrounded Co", aiDeps({
+      generate: generate as SiteDeps["generate"],
+    }));
+
+    const answers = (await getLatestSnapshot(db, prepared.attemptId))!.plannedAnswers as PlannedAnswer[];
+    const draft = answers.find((a) => a.fieldId === fieldId("why_northwind"))!;
+    expect(draft.source).not.toBe("ai");
+    expect(draft.needsUser).toBe(true);
+    expect(draft.value).toBe("");
+  });
+
+  it("falls back to the deterministic plan when the AI pass blows up", async () => {
+    const generate = async (): Promise<FallbackResult<GenerationResult>> => {
+      throw new Error("openrouter is down");
+    };
+    const prepared = await prepare("AI Outage Co", aiDeps({
+      generate: generate as SiteDeps["generate"],
+    }));
+
+    const answers = (await getLatestSnapshot(db, prepared.attemptId))!.plannedAnswers as PlannedAnswer[];
+    expect(answers.find((a) => a.fieldId === fieldId("email"))?.value).toBe("alex.rivera@example.com");
+    expect(answers.find((a) => a.fieldId === fieldId("why_northwind"))).toMatchObject({ needsUser: true });
+  });
+
+  it("refuses an application from another workspace", async () => {
+    const applicationId = await readyApplication("Scoped Co");
+    const outcome = await prepareSiteApplication(deps(), {
+      workspaceId: otherWorkspaceId, applicationId, url: urlFor("Scoped Co"),
+    });
+    expect(outcome.status).toBe("failed");
+  });
+});
+
+d("updatePlannedAnswer", () => {
+  it("records the user's own value and clears the needs-you flag", async () => {
+    const prepared = await prepare("Edit Co");
+    const result = await updatePlannedAnswer(deps(), {
+      workspaceId, snapshotId: prepared.snapshotId, fieldId: fieldId("work_authorization"), value: "yes",
+    });
+    expect(result).toEqual({ ok: true });
+
+    const answers = (await getLatestSnapshot(db, prepared.attemptId))!.plannedAnswers as PlannedAnswer[];
+    expect(answers.find((a) => a.fieldId === fieldId("work_authorization"))).toMatchObject({
+      value: "yes", source: "user", confidence: 1, needsUser: false,
+    });
+  });
+
+  it("refuses to edit a file field — the CV is chosen elsewhere, not typed here", async () => {
+    const prepared = await prepare("File Edit Co");
+    const result = await updatePlannedAnswer(deps(), {
+      workspaceId, snapshotId: prepared.snapshotId, fieldId: fieldId("resume"), value: "/etc/passwd",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/file/i);
+  });
+
+  it("refuses an unknown field and a snapshot from another workspace", async () => {
+    const prepared = await prepare("Unknown Field Co");
+    expect((await updatePlannedAnswer(deps(), {
+      workspaceId, snapshotId: prepared.snapshotId, fieldId: "not-a-field", value: "x",
+    })).ok).toBe(false);
+    expect((await updatePlannedAnswer(deps(), {
+      workspaceId: otherWorkspaceId, snapshotId: prepared.snapshotId, fieldId: fieldId("phone"), value: "x",
+    })).ok).toBe(false);
+  });
+});
+
+d("previewSiteSubmission", () => {
+  it("refuses while a field still needs the user, naming the labels", async () => {
+    const prepared = await prepare("Unsettled Co");
+    const outcome = await previewSiteSubmission(deps(), { workspaceId, attemptId: prepared.attemptId });
+    expect(outcome.status).toBe("blocked");
+    if (outcome.status !== "blocked") return;
+    expect(outcome.reason).toMatch(/authorized to work/i);
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("DRAFT");
+  });
+
+  it("pins the fingerprint, stores only the token hash, and describes exactly what will be typed", async () => {
+    const prepared = await prepare("Preview Co");
+    await settleBlocking(prepared);
+    const outcome = await previewSiteSubmission(deps(), { workspaceId, attemptId: prepared.attemptId });
+
+    expect(outcome.status).toBe("ok");
+    if (outcome.status !== "ok") return;
+    expect(outcome.payload.host).toBe(APPLY_HOST);
+    expect(outcome.payload.url).toBe(prepared.url);
+    expect(outcome.payload.requisitionKey).toBe(requisitionKeyFor("Preview Co"));
+    expect(outcome.payload.applicationId).toBe(prepared.applicationId);
+    expect(outcome.payload.attachments).toEqual([
+      { fieldId: fieldId("resume"), filename: "ATS-CV.pdf", sha256: CV_SHA256 },
+    ]);
+    expect(outcome.payload.answers.find((a) => a.fieldId === fieldId("email"))?.value)
+      .toBe("alex.rivera@example.com");
+    expect(outcome.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(new Date(outcome.expiresAt).getTime()).toBeGreaterThan(Date.now());
+
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect(attempt?.payloadFingerprint).toBe(outcome.fingerprint);
+    const confirmation = await getActiveConfirmation(db, prepared.attemptId);
+    expect(confirmation?.tokenHash).not.toBe(outcome.token);
+    expect(confirmation?.payloadFingerprint).toBe(outcome.fingerprint);
+  });
+});
+
+d("confirmAndSubmitSite", () => {
+  it("submits once, records both receipts, and moves the application to SUBMITTED", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Happy Co");
+
+    const outcome = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+
+    expect(outcome).toEqual({
+      status: "submitted", confirmationId: "NR-1a2b3c4d", finalUrl: `${prepared.url}/thanks`,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(prepared.url);
+    expect(calls[0]?.files).toEqual({ [fieldId("resume")]: cvPath });
+
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("SUBMITTED");
+    expect((attempt?.pendingReceipt as { channel: string }).channel).toBe("company_site");
+    const receipt = attempt?.confirmedReceipt as {
+      confirmationId: string; finalUrl: string; screenshotPath: string; pageTextExcerpt: string;
+    };
+    expect(receipt.confirmationId).toBe("NR-1a2b3c4d");
+    expect(receipt.screenshotPath).toBe("/app/var/files/shots/attempt.png");
+    expect(receipt.pageTextExcerpt.length).toBeLessThanOrEqual(500);
+
+    const [application] = await db.select().from(applications).where(eq(applications.id, prepared.applicationId));
+    expect(application?.state).toBe("SUBMITTED");
+
+    // The token is spent: a replay of the same confirm cannot submit twice.
+    const replay = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(replay.status).toBe("blocked");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("blocks a confirm whose answers changed after the preview → fingerprint_mismatch", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Tampered Co");
+
+    const snapshot = await getLatestSnapshot(db, prepared.attemptId);
+    const answers = (snapshot!.plannedAnswers as PlannedAnswer[]).map((a) =>
+      a.fieldId === fieldId("email") ? { ...a, value: "someone.else@example.com" } : a);
+    await updateSnapshotAnswers(db, prepared.snapshotId, answers);
+
+    const outcome = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(outcome).toMatchObject({ status: "blocked", code: "fingerprint_mismatch" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("blocks a confirm whose retyped host does not match → target_mismatch", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Mistyped Co");
+    const outcome = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token,
+      retypedTarget: "careers.northwind.example",
+    });
+    expect(outcome).toMatchObject({ status: "blocked", code: "target_mismatch" });
+    expect(calls).toHaveLength(0);
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("PENDING_CONFIRMATION");
+  });
+
+  it("blocks while the env gate is off, leaving the preview intact → gate_closed", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Gated Co");
+
+    const outcome = await confirmAndSubmitSite(
+      deps({ config: config({ SUBMISSIONS_LIVE_COMPANY_SITE: "false" }), submit: stubSubmit(calls) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(outcome).toMatchObject({ status: "blocked", code: "gate_closed" });
+    expect(calls).toHaveLength(0);
+
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect(attempt?.pendingReceipt).toBeNull();
+    expect((await getActiveConfirmation(db, prepared.attemptId))?.consumedAt ?? null).toBeNull();
+
+    // Nothing was burned: the same token still works once the gate opens.
+    const retried = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(retried.status).toBe("submitted");
+  });
+
+  it("blocks when the application drifted out of READY_FOR_REVIEW → application_not_ready, nothing clicked", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Drifted Co");
+    await db.update(applications).set({ state: "PREPARING" }).where(eq(applications.id, prepared.applicationId));
+
+    const outcome = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(outcome).toMatchObject({ status: "blocked", code: "application_not_ready" });
+    expect(calls).toHaveLength(0);
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("PENDING_CONFIRMATION");
+  });
+
+  it("parks an attempt whose submit threw — the click may have landed, so never FAILED", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Crashed Co");
+
+    const outcome = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls, { kind: "throws" }) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(outcome.status).toBe("needs_reconcile");
+
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("NEEDS_RECONCILE");
+    expect(attempt?.failureReason).toMatch(/chromium crashed/i);
+    expect((attempt?.pendingReceipt as { channel: string }).channel).toBe("company_site");
+  });
+
+  it("parks an attempt the site accepted without a confirmation id — no evidence, no claim of success", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("No Receipt Co");
+
+    const outcome = await confirmAndSubmitSite(
+      deps({ submit: stubSubmit(calls, { kind: "ok", confirmationId: null }) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(outcome.status).toBe("needs_reconcile");
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("NEEDS_RECONCILE");
+  });
+
+  it("refuses to submit without a wired-up driver, before anything is burned", async () => {
+    const prepared = await previewed("No Driver Co");
+    const outcome = await confirmAndSubmitSite({ db, config: config() }, {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(outcome.status).toBe("blocked");
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("PENDING_CONFIRMATION");
+  });
+});

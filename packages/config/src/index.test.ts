@@ -191,6 +191,34 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...BASE, SANDBOX_SMTP_ALLOWED_HOST: "   " }).sandboxSmtpAllowedHost).toBe("mailpit");
   });
 
+  // The company-site twin of the SMTP allow-list: it gates a sandbox
+  // workspace's auto-apply target by hostname, so it must never come back
+  // empty either — an empty value would compare equal to nothing at all.
+  it("defaults sandboxSiteAllowedHost to the compose demo-ats service", () => {
+    expect(loadConfig(BASE).sandboxSiteAllowedHost).toBe("demo-ats");
+  });
+  it("takes an explicit SANDBOX_SITE_ALLOWED_HOST", () => {
+    expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: "localhost" }).sandboxSiteAllowedHost).toBe("localhost");
+  });
+  it("trims SANDBOX_SITE_ALLOWED_HOST", () => {
+    expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: " demo-ats " }).sandboxSiteAllowedHost).toBe("demo-ats");
+  });
+  it("treats an empty SANDBOX_SITE_ALLOWED_HOST as unset, not as an empty host", () => {
+    expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: "" }).sandboxSiteAllowedHost).toBe("demo-ats");
+    expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: "   " }).sandboxSiteAllowedHost).toBe("demo-ats");
+  });
+
+  // Both submission gates default OFF: an environment that was never told
+  // otherwise cannot mutate the outside world through either channel.
+  it("defaults both submission gates to off", () => {
+    expect(loadConfig(BASE).submissionsLiveEmail).toBe(false);
+    expect(loadConfig(BASE).submissionsLiveCompanySite).toBe(false);
+  });
+  it("opens the company-site gate only for SUBMISSIONS_LIVE_COMPANY_SITE=true", () => {
+    expect(loadConfig({ ...BASE, SUBMISSIONS_LIVE_COMPANY_SITE: "true" }).submissionsLiveCompanySite).toBe(true);
+    expect(loadConfig({ ...BASE, SUBMISSIONS_LIVE_COMPANY_SITE: "false" }).submissionsLiveCompanySite).toBe(false);
+  });
+
   // Auto-apply (spec §10): the Playwright driver's per-action budget and the
   // demo ATS it targets. Both are read by the worker in containers, where
   // Compose passes `${VAR:-}` for anything the user never set.

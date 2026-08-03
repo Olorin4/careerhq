@@ -54,6 +54,9 @@ importers:
       '@careerhq/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@careerhq/autoapply':
+        specifier: workspace:*
+        version: link:../../packages/autoapply
       '@careerhq/config':
         specifier: workspace:*
         version: link:../../packages/config

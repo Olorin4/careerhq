@@ -81,6 +81,16 @@ const DEFAULT_SANDBOX_SMTP_HOST = "mailpit";
 /** The compose service name of the fictional ATS (apps/demo-ats). */
 const DEFAULT_DEMO_ATS_URL = "http://demo-ats:3001";
 
+/**
+ * The compose service name of the fictional ATS, as a bare hostname. A sandbox
+ * workspace may only auto-apply to this host (spec §11's `sandbox_blocked`
+ * gate for the company-site channel), so — like the SMTP allow-list — the
+ * default has to name something that cannot reach a real employer. Compared
+ * against the target URL's `hostname`, which carries no port: the port is not
+ * a safety boundary, and the user retypes the host, not "demo-ats:3001".
+ */
+const DEFAULT_SANDBOX_SITE_HOST = "demo-ats";
+
 const envSchema = z.object({
   DATABASE_URL: z
     .string({
@@ -101,6 +111,12 @@ const envSchema = z.object({
     .string()
     .default(DEFAULT_SANDBOX_SMTP_HOST)
     .transform((v) => v.trim() || DEFAULT_SANDBOX_SMTP_HOST),
+  // The company-site equivalent, compared against the target URL's hostname.
+  // Same empty-value rule: Compose passes "" for anything the user never set.
+  SANDBOX_SITE_ALLOWED_HOST: z
+    .string()
+    .default(DEFAULT_SANDBOX_SITE_HOST)
+    .transform((v) => v.trim() || DEFAULT_SANDBOX_SITE_HOST),
   FOLLOW_UP_DAYS: z.coerce.number().int().positive().default(7),
   FILE_STORAGE_DIR: z.string().default("var/files").transform(resolveSharedDir),
   // AI features are off by default (deterministic floor) until a key is provisioned.
@@ -178,6 +194,8 @@ export interface AppConfig {
   sandboxForceSafe: boolean;
   /** Never empty: the only SMTP host a sandbox workspace may submit to. */
   sandboxSmtpAllowedHost: string;
+  /** Never empty: the only site hostname a sandbox workspace may auto-apply to. */
+  sandboxSiteAllowedHost: string;
   followUpDays: number;
   /** Always absolute: relative FILE_STORAGE_DIR values resolve against the repo root. */
   fileStorageDir: string;
@@ -217,6 +235,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     submissionsLiveCompanySite: parsed.SUBMISSIONS_LIVE_COMPANY_SITE,
     sandboxForceSafe: parsed.SANDBOX_FORCE_SAFE,
     sandboxSmtpAllowedHost: parsed.SANDBOX_SMTP_ALLOWED_HOST,
+    sandboxSiteAllowedHost: parsed.SANDBOX_SITE_ALLOWED_HOST,
     followUpDays: parsed.FOLLOW_UP_DAYS,
     fileStorageDir: parsed.FILE_STORAGE_DIR,
     openrouterApiKey: optionalString(parsed.OPENROUTER_API_KEY),

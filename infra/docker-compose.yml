@@ -39,11 +39,14 @@ services:
       # Credential encryption key (packages/db/src/crypto.ts). Unset disables
       # email connections; see .env.example for how to generate one.
       CAREERHQ_MASTER_KEY: ${CAREERHQ_MASTER_KEY:-}
-      # Submission gates (spec §11). Both default OFF: a container that is
-      # never told otherwise cannot send a real application email. The sandbox
-      # allow-list names the mailpit service on this network.
+      # Submission gates (spec §11). All default OFF: a container that is
+      # never told otherwise cannot send a real application email or type into
+      # a real company site. The sandbox allow-lists name the mailpit and
+      # demo-ats services on this network.
       SUBMISSIONS_LIVE_EMAIL: ${SUBMISSIONS_LIVE_EMAIL:-false}
+      SUBMISSIONS_LIVE_COMPANY_SITE: ${SUBMISSIONS_LIVE_COMPANY_SITE:-false}
       SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
+      SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-demo-ats}
       # Fictional ATS target for auto-apply demos (spec P5). The web app only
       # links to it; the worker is what drives a browser against it.
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
@@ -71,7 +74,9 @@ services:
       # Same gates as web: the worker shares the config schema, and follow-up
       # automation must never outrun the environment's send permission.
       SUBMISSIONS_LIVE_EMAIL: ${SUBMISSIONS_LIVE_EMAIL:-false}
+      SUBMISSIONS_LIVE_COMPANY_SITE: ${SUBMISSIONS_LIVE_COMPANY_SITE:-false}
       SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
+      SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-demo-ats}
       # Auto-apply (spec P5): the fictional ATS the Playwright driver targets,
       # and the driver's per-action budget (navigation, one field, the submit
       # wait) — not the budget for a whole attempt.

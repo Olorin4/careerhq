@@ -117,6 +117,42 @@ export async function listAttemptsForApplication(
 }
 
 /**
+ * The attempt is fully planned and nothing is waiting on the user, so it may be
+ * previewed. Purely advisory — `recordPreview` walks DRAFT→READY itself — but
+ * it lets a review screen tell "still being planned" from "ready when you are"
+ * without recomputing the plan. A refusal (already past READY) is an outcome,
+ * not a fault.
+ */
+export async function markAttemptReady(db: Db, attemptId: string): Promise<AttemptOutcome> {
+  return refusable(() => db.transaction(async (tx) => {
+    const attempt = await lockAttempt(tx, attemptId);
+    await advance(tx, attempt.id, attempt.status, "READY");
+  }));
+}
+
+/**
+ * Pauses an attempt and hands control back to the user: the page needs a human
+ * (captcha, sign-in wall, identity check, assessment, an upload control we
+ * cannot drive, a legal attestation). `reason` is stored verbatim as the
+ * failure reason and is shown to the user, so callers pass something legible.
+ *
+ * BLOCKED is not a failure: nothing was submitted, and the caller may not
+ * assume the site is unreachable forever — `login_required` in particular
+ * fires on account-creation steps that a human clears in seconds. A retry
+ * starts a fresh attempt (BLOCKED is terminal by design).
+ */
+export async function markAttemptBlocked(
+  db: Db,
+  attemptId: string,
+  reason: string,
+): Promise<AttemptOutcome> {
+  return refusable(() => db.transaction(async (tx) => {
+    const attempt = await lockAttempt(tx, attemptId);
+    await advance(tx, attempt.id, attempt.status, "BLOCKED", { failureReason: reason });
+  }));
+}
+
+/**
  * Records a reviewed preview: the attempt moves DRAFT→READY→PENDING_CONFIRMATION
  * as two separately guarded steps, its fingerprints are pinned, and a
  * single-use confirmation row is inserted — all in one transaction, so a
