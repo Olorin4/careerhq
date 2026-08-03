@@ -110,7 +110,13 @@ export type SitePreviewOutcome =
   | { status: "blocked"; reason: string };
 
 export type SiteConfirmOutcome =
-  | { status: "submitted"; confirmationId: string | null; finalUrl: string }
+  | {
+      status: "submitted";
+      confirmationId: string | null;
+      finalUrl: string;
+      /** Absolute path of the stored confirmation-page screenshot — the evidence, not yet a servable link (P6). */
+      screenshotPath: string | null;
+    }
   /** `code` is the `GateDecision` code when a gate denied, or one of the load/begin codes below. */
   | { status: "blocked"; code: string; reason: string }
   | { status: "failed"; reason: string }
@@ -962,7 +968,12 @@ export async function confirmAndSubmitSite(
     return { status: "needs_reconcile", reason };
   }
 
-  return { status: "submitted", confirmationId: result.confirmationId, finalUrl: result.finalUrl };
+  return {
+    status: "submitted",
+    confirmationId: result.confirmationId,
+    finalUrl: result.finalUrl,
+    screenshotPath: result.screenshotPath,
+  };
 }
 
 /**

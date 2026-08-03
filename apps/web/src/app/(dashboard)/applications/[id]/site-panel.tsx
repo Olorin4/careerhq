@@ -370,9 +370,19 @@ function ReviewForm({
 
   function commitAnswer(fieldId: string, value: string) {
     setSaveError(null);
-    setAnswers((prev) => prev.map((a) => (a.fieldId === fieldId
-      ? { ...a, value, source: "user", confidence: 1, needsUser: false, differsFromApproved: false, note: "" }
-      : a)));
+    setAnswers((prev) => prev.map((a) => {
+      if (a.fieldId !== fieldId) return a;
+      // Blanking a REQUIRED field still blocks Preview (`requiresUserBeforeSubmit` checks
+      // required-and-empty ahead of `needsUser`) — clearing the badge here would make the
+      // row look resolved while it still blocks. Only clear it when there is a value, or
+      // the field was never required in the first place.
+      const field = form.fields.find((f) => f.id === fieldId);
+      const stillNeedsUser = value.trim() === "" && (field?.required ?? false);
+      return {
+        ...a, value, source: "user", confidence: 1,
+        needsUser: stillNeedsUser, differsFromApproved: false, note: "",
+      };
+    }));
     startTransition(async () => {
       const result = await updatePlannedAnswerAction({ applicationId, snapshotId, fieldId, value });
       if (!result.ok) setSaveError(result.reason);
@@ -502,9 +512,15 @@ function FieldInput({
 }) {
   if (field.kind === "file") {
     // File fields are set by the CV selector, never by typing — `updatePlannedAnswer`
-    // refuses an edit here (see site-submission.ts), so this row is display-only.
+    // refuses an edit here (see site-submission.ts), so this row is display-only. Only
+    // the resume/CV field (or a value that happens to resolve to a known CV variant)
+    // is a CV — a different file field (e.g. `cover_letter_file`) has no CV to show and
+    // must not be mislabeled "No CV attached".
     const variant = answer.value ? cvVariants.find((v) => v.id === answer.value) : undefined;
-    return <span>{variant ? variant.label : "No CV attached"}</span>;
+    if (variant) return <span>{variant.label}</span>;
+    if (field.canonicalField === "resume_file") return <span>No CV attached</span>;
+    if (answer.value) return <span>{answer.value}</span>;
+    return <span>{answer.needsUser ? "No file attached yet — attach this in your browser" : "No file attached"}</span>;
   }
   if (field.kind === "checkbox") {
     return (
@@ -611,12 +627,17 @@ function SitePreviewPane({
         <dd><code>{payload.requisitionKey}</code></dd>
         <dt>Answers</dt>
         <dd>{payload.answers.length} fields</dd>
-        {payload.attachments[0] && (
+        {payload.attachments.length > 0 && (
           <>
-            <dt>Attachment</dt>
+            <dt>{payload.attachments.length === 1 ? "Attachment" : "Attachments"}</dt>
             <dd>
-              {payload.attachments[0].filename} — sha256{" "}
-              <code>{payload.attachments[0].sha256.slice(0, 12)}…</code>
+              <ul className="site-preview-attachments">
+                {payload.attachments.map((attachment) => (
+                  <li key={attachment.fieldId}>
+                    {attachment.filename} — sha256 <code>{attachment.sha256.slice(0, 12)}…</code>
+                  </li>
+                ))}
+              </ul>
             </dd>
           </>
         )}
@@ -672,6 +693,9 @@ function SiteConfirmOutcomePane({
         <div className="site-outcome site-outcome-submitted">
           <p>Submitted — confirmation <code>{outcome.confirmationId ?? "(none reported by the site)"}</code></p>
           <p><a href={outcome.finalUrl} target="_blank" rel="noreferrer">{outcome.finalUrl}</a></p>
+          {outcome.screenshotPath && (
+            <p className="site-outcome-hint">Evidence saved to <code>{outcome.screenshotPath}</code></p>
+          )}
         </div>
       );
     case "blocked":

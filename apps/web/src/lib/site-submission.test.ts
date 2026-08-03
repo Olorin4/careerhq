@@ -533,6 +533,7 @@ d("confirmAndSubmitSite", () => {
 
     expect(outcome).toEqual({
       status: "submitted", confirmationId: "NR-1a2b3c4d", finalUrl: `${prepared.url}/thanks`,
+      screenshotPath: "/app/var/files/shots/attempt.png",
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe(prepared.url);
