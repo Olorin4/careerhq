@@ -32,6 +32,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@careerhq/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@careerhq/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -44,6 +47,9 @@ importers:
       '@careerhq/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@careerhq/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
       drizzle-orm:
         specifier: ^0.44.0
         version: 0.44.7(pg@8.22.0)(postgres@3.4.9)

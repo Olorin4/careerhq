@@ -22,12 +22,14 @@ function findRepoRoot(): string {
 }
 
 /**
- * FILE_STORAGE_DIR must name one directory for every process — the seed writes
- * CVs there and the web upload action reads/writes the same tree, and in the
- * container it is the mounted volume. Absolute values are used as given;
- * relative ones resolve against the repo root, never against cwd.
+ * Shared-directory settings (FILE_STORAGE_DIR, AI_REPLAY_DIR) must name one
+ * directory for every process — the seed writes CVs there and the web upload
+ * action reads/writes the same tree, the replay fixtures are committed once
+ * and read by both web and worker, and in the container both are mounted
+ * paths. Absolute values are used as given; relative ones resolve against the
+ * repo root, never against cwd.
  */
-function resolveStorageDir(value: string): string {
+function resolveSharedDir(value: string): string {
   return path.isAbsolute(value) ? value : path.resolve(findRepoRoot(), value);
 }
 
@@ -83,7 +85,7 @@ const envSchema = z.object({
   SUBMISSIONS_LIVE_COMPANY_SITE: boolFromEnv,
   SANDBOX_FORCE_SAFE: boolFromEnv,
   FOLLOW_UP_DAYS: z.coerce.number().int().positive().default(7),
-  FILE_STORAGE_DIR: z.string().default("var/files").transform(resolveStorageDir),
+  FILE_STORAGE_DIR: z.string().default("var/files").transform(resolveSharedDir),
   // AI features are off by default (deterministic floor) until a key is provisioned.
   OPENROUTER_API_KEY: z.string().optional(),
   AI_FAST_MODELS: z
@@ -100,6 +102,9 @@ const envSchema = z.object({
       message: `AI_MODE must be one of: ${AI_MODES.join(", ")}`,
     }),
   }).default("live"),
+  // Where withReplay's filesystem store keeps recorded AI calls. Fixtures are
+  // committed, so the default points at the in-repo directory.
+  AI_REPLAY_DIR: z.string().default("packages/ai/fixtures/replay").transform(resolveSharedDir),
 });
 
 export interface AppConfig {
@@ -119,6 +124,8 @@ export interface AppConfig {
   ingestCron: string;
   /** Controls the AI record/replay layer; default "live" makes real calls. */
   aiMode: AiMode;
+  /** Always absolute: relative AI_REPLAY_DIR values resolve against the repo root. */
+  aiReplayDir: string;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
@@ -142,5 +149,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     aiWritingModels: parsed.AI_WRITING_MODELS,
     ingestCron: parsed.INGEST_CRON,
     aiMode: parsed.AI_MODE,
+    aiReplayDir: parsed.AI_REPLAY_DIR,
   };
 }

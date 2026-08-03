@@ -107,6 +107,7 @@ const baseConfig: AppConfig = {
   openrouterApiKey: null,
   aiFastModels: ["test/fast-model"],
   aiWritingModels: ["test/writing-model"],
+  aiReplayDir: "/tmp/careerhq-worker-test/replay",
   ingestCron: "0 */6 * * *",
   aiMode: "live",
 };

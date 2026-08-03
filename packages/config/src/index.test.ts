@@ -127,4 +127,20 @@ describe("loadConfig", () => {
   it("never returns an empty aiWritingModels list", () => {
     expect(loadConfig({ ...BASE, AI_WRITING_MODELS: "" }).aiWritingModels.length).toBeGreaterThan(0);
   });
+
+  // Recorded fixtures are committed under packages/ai/fixtures/replay and are
+  // read by the web app (cwd apps/web) and the worker alike, so the default
+  // must resolve against the repo root exactly like FILE_STORAGE_DIR.
+  it("defaults aiReplayDir to the committed fixtures dir, resolved against the repo root", () => {
+    const dir = loadConfig(BASE).aiReplayDir;
+    expect(path.isAbsolute(dir)).toBe(true);
+    expect(dir).toBe(path.resolve(process.cwd(), "../..", "packages/ai/fixtures/replay"));
+  });
+  it("resolves a relative AI_REPLAY_DIR against the repo root, not cwd", () => {
+    const dir = loadConfig({ ...BASE, AI_REPLAY_DIR: "var/replay" }).aiReplayDir;
+    expect(dir).toBe(path.resolve(process.cwd(), "../..", "var/replay"));
+  });
+  it("keeps an absolute AI_REPLAY_DIR as given (the container path)", () => {
+    expect(loadConfig({ ...BASE, AI_REPLAY_DIR: "/app/fixtures" }).aiReplayDir).toBe("/app/fixtures");
+  });
 });

@@ -17,9 +17,11 @@
     "react-dom": "^19.0.0",
     "drizzle-orm": "^0.44.0",
     "zod": "^3.25.0",
+    "@careerhq/ai": "workspace:*",
     "@careerhq/contracts": "workspace:*",
     "@careerhq/core": "workspace:*",
     "@careerhq/db": "workspace:*",
+    "@careerhq/ingest": "workspace:*",
     "@careerhq/config": "workspace:*"
   },
   "devDependencies": {
