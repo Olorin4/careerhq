@@ -63,9 +63,21 @@ export function matchInboundToApplication(
     for (const [key, applicationIds] of senderDomains) {
       normalizedDomains.set(key.trim().toLowerCase(), applicationIds);
     }
-    const applicationIds = normalizedDomains.get(domain);
-    if (applicationIds !== undefined && applicationIds.length === 1) {
-      const [applicationId] = applicationIds;
+
+    // Suffix matching only goes one way: a sender at a subdomain of an indexed
+    // domain (mail.acme.example → acme.example) is a plausible same-company
+    // match, but the reverse (acme.example → mail.acme.example) is not — a
+    // parent domain sending mail says nothing about who owns a subdomain of it.
+    // Candidates are gathered across every indexed domain that qualifies, and
+    // the never-guess rule is applied to the merged, deduplicated set.
+    const candidates = new Set<string>();
+    for (const [indexedDomain, applicationIds] of normalizedDomains) {
+      if (domain === indexedDomain || domain.endsWith(`.${indexedDomain}`)) {
+        for (const applicationId of applicationIds) candidates.add(applicationId);
+      }
+    }
+    if (candidates.size === 1) {
+      const [applicationId] = candidates;
       if (applicationId !== undefined) {
         return { applicationId, matchMethod: "sender" };
       }

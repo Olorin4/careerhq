@@ -429,6 +429,47 @@ d("runEmailSyncOnce", () => {
     expect(readdirSync(path.join(cfg.fileStorageDir, "mail"))).toHaveLength(0);
   });
 
+  it("persists the first folder's advanced uid even when a later folder in the same connection fails", async () => {
+    const workspaceId = await newWorkspace("perfolder");
+    const twoFolderImap: ImapConfig = {
+      host: "imap.test", port: 993, username: "alex", tls: "implicit", folders: ["INBOX", "ARCHIVE"],
+    };
+    const connection = await createEmailConnection(db, {
+      workspaceId, label: "PerFolder", fromAddress: OWN_ADDRESS,
+      smtp: { host: "smtp.test", port: 587, username: "alex", tls: "starttls" }, smtpPassword: "smtp-pw",
+      imap: twoFolderImap, imapPassword: IMAP_PASSWORD,
+      retention: { mode: "metadata_only" }, masterKeyB64: masterKey,
+    });
+    const connectionId = connection.id;
+
+    const client: ImapClientLike = {
+      connect: async () => {},
+      logout: async () => {},
+      fetchNewMessages: (folder: string) => {
+        if (folder === "ARCHIVE") {
+          throw new Error("ARCHIVE folder is unreachable");
+        }
+        const messages: RawFetchedMessage[] = [
+          { uid: 9, source: rfc822({ messageId: "<in-perfolder@x.test>", from: "a@perfolder.test", subject: "A" }) },
+        ];
+        return (async function* () {
+          for (const message of messages) yield message;
+        })();
+      },
+    };
+
+    const summary = await runEmailSyncOnce(db, workspaceId, config(), {
+      makeClient: makeClientReturning(client),
+    });
+    expect(summary.fetched).toBe(1);
+
+    const [afterRun] = await db.select().from(emailConnections).where(eq(emailConnections.id, connectionId));
+    // INBOX's progress must survive ARCHIVE's failure — not discarded by a
+    // single post-loop write that never runs.
+    expect(afterRun!.syncState).toEqual({ INBOX: 9 });
+    expect(afterRun!.health).toBe("error");
+  });
+
   it("records a redacted health error for a failing connection and keeps syncing the others", async () => {
     const workspaceId = await newWorkspace("broken");
     const brokenId = await newConnection(workspaceId, "Broken", { mode: "metadata_only" });

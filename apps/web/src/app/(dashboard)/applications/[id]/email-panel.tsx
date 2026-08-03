@@ -20,7 +20,9 @@ type Preview = Extract<PreviewOutcome, { status: "ok" }>;
 const EDITABLE_STATUSES = new Set<ApplicationAttempt["status"]>(["DRAFT", "READY", "PENDING_CONFIRMATION"]);
 
 /** Blocked codes where the confirmation token itself is spent or stale — nothing to retry, a fresh preview is required. */
-const REQUIRES_FRESH_PREVIEW = new Set(["fingerprint_mismatch", "token_expired", "token_consumed", "token_invalid"]);
+const REQUIRES_FRESH_PREVIEW = new Set([
+  "fingerprint_mismatch", "token_expired", "token_consumed", "token_invalid", "token_missing",
+]);
 
 /** What `createEmailAttempt`/`updateEmailDraft` store in `draft_payload`; re-validated, never trusted, same as the orchestrator's own parse. */
 const attemptDraftSchema = z.object({ draft: emailDraftSchema, connectionId: z.string().uuid() });

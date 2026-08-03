@@ -49,4 +49,15 @@ describe("crypto", () => {
     const shortKey = Buffer.from("too-short-not-32-bytes").toString("base64");
     await expect(openSecret(shortKey, sealed)).rejects.toThrow(CryptoError);
   });
+
+  it("uses a fresh nonce per seal", async () => {
+    const key = await generateMasterKeyB64();
+    const a = await sealSecret(key, "same-secret");
+    const b = await sealSecret(key, "same-secret");
+    expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
+  });
+  it("rejects a sealed buffer shorter than the nonce", async () => {
+    const key = await generateMasterKeyB64();
+    await expect(openSecret(key, new Uint8Array([1, 2, 3, 4, 5]))).rejects.toBeInstanceOf(CryptoError);
+  });
 });

@@ -299,8 +299,12 @@ async function syncConnection(deps: ConnectionRunDeps, connection: EmailConnecti
         syncState[folder] = await syncFolder(
           deps, client, connection, retention, folder, syncState[folder] ?? 0,
         );
+        // Persisted after EACH folder, not once after the loop: a folder that
+        // throws later in this same connection (a permissions error, a dropped
+        // socket) must not discard the progress already made by its healthy
+        // siblings.
+        await updateSyncState(db, connection.id, syncState);
       }
-      await updateSyncState(db, connection.id, syncState);
     } finally {
       // A logout failure must not undo a completed sync, nor mask a real error
       // from the fetch above.

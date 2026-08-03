@@ -457,4 +457,36 @@ d("email submission orchestrator", () => {
     expect(attempt?.status).toBe("NEEDS_RECONCILE");
     expect(attempt?.failureReason).toContain("<race@careerhq.test>");
   });
+
+  it("serializes two concurrent confirms on the SAME attempt/token: exactly one send", async () => {
+    // The genuinely concurrent case: two callers both hold the same
+    // still-unconsumed token and race `confirmAndSend` via Promise.all.
+    // `beginSubmission` takes a row lock on the attempt/confirmation and
+    // burns the token with a conditional UPDATE, so exactly one of the two
+    // transactions can advance PENDING_CONFIRMATION -> SUBMITTING; the other
+    // is refused before it ever reaches the transport.
+    const fixture = await draftedAttempt("Concurrent Co");
+    const token = await preview(fixture);
+    const sent: SentMail[] = [];
+
+    const [first, second] = await Promise.all([
+      confirmAndSend(
+        deps({ makeTransport: () => stubTransport({ kind: "sent" }, sent) }),
+        { workspaceId, attemptId: fixture.attemptId, presentedToken: token, retypedTarget: "careers@acme.test" },
+      ),
+      confirmAndSend(
+        deps({ makeTransport: () => stubTransport({ kind: "sent" }, sent) }),
+        { workspaceId, attemptId: fixture.attemptId, presentedToken: token, retypedTarget: "careers@acme.test" },
+      ),
+    ]);
+
+    const outcomes = [first, second];
+    expect(outcomes.filter((o) => o.status === "submitted")).toHaveLength(1);
+    expect(outcomes.filter((o) => o.status !== "submitted")).toHaveLength(1);
+    // The loser never reached the transport at all.
+    expect(sent).toHaveLength(1);
+
+    const attempt = await getEmailAttempt(db, fixture.attemptId);
+    expect(attempt?.status).toBe("SUBMITTED");
+  });
 });

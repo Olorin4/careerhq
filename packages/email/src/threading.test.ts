@@ -82,4 +82,34 @@ describe("matchInboundToApplication", () => {
     );
     expect(result).toEqual({ applicationId: "app-1", matchMethod: "headers" });
   });
+
+  it("matches a subdomain sender to its parent-domain application", () => {
+    const senderDomains = new Map([["acme.example", ["app-1"]]]);
+    const m = matchInboundToApplication(
+      { inReplyTo: null, references: [], fromAddr: "recruiting@mail.acme.example" },
+      new Map(), senderDomains,
+    );
+    expect(m).toEqual({ applicationId: "app-1", matchMethod: "sender" });
+  });
+  it("does not match a parent-domain sender to a subdomain entry", () => {
+    const senderDomains = new Map([["mail.acme.example", ["app-1"]]]);
+    const m = matchInboundToApplication(
+      { inReplyTo: null, references: [], fromAddr: "hr@acme.example" }, new Map(), senderDomains,
+    );
+    expect(m).toBeNull();
+  });
+  it("refuses when suffix matching makes the candidate set ambiguous", () => {
+    const senderDomains = new Map([["acme.example", ["app-1"]], ["mail.acme.example", ["app-2"]]]);
+    const m = matchInboundToApplication(
+      { inReplyTo: null, references: [], fromAddr: "x@mail.acme.example" }, new Map(), senderDomains,
+    );
+    expect(m).toBeNull();
+  });
+  it("still links when several suffix matches point at the SAME application", () => {
+    const senderDomains = new Map([["acme.example", ["app-1"]], ["mail.acme.example", ["app-1"]]]);
+    const m = matchInboundToApplication(
+      { inReplyTo: null, references: [], fromAddr: "x@mail.acme.example" }, new Map(), senderDomains,
+    );
+    expect(m).toEqual({ applicationId: "app-1", matchMethod: "sender" });
+  });
 });
