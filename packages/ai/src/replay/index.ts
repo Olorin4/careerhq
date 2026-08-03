@@ -61,18 +61,57 @@ interface RecordedCall<T> {
   model: string;
 }
 
+/** The failure result returned for both a store miss and a corrupt/malformed fixture. */
+function replayMiss<T>(): FallbackResult<T> {
+  return {
+    ok: false,
+    value: null,
+    model: "",
+    latencyMs: 0,
+    status: null,
+    error: "replay_miss",
+    attempts: [],
+  };
+}
+
+/**
+ * Parses and shape-checks a stored fixture. A fixture is only ever written by
+ * this module (see the `record` branch below), but the file on disk can
+ * still be hand-edited, truncated, or left over from an incompatible format,
+ * so this never trusts it blindly: invalid JSON or a missing/wrong-typed
+ * `value`/`model` is treated as absent (`null`), collapsing to the same
+ * `replay_miss` outcome as a file that was never written — never a thrown
+ * exception out of `withReplay`.
+ */
+function parseRecordedCall<T>(raw: string): RecordedCall<T> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const candidate = parsed as Record<string, unknown>;
+  if (!("value" in candidate) || typeof candidate.model !== "string") return null;
+  return { value: candidate.value as T, model: candidate.model };
+}
+
 /**
  * Wraps an AI call with record/replay semantics driven by `mode`:
  * - `live`: runs `run()` and returns its result untouched.
  * - `record`: runs `run()` and, only when it succeeds, persists
  *   `{value, model}` under `replayKey(taskId, prompt)` for later replay.
- *   Failures pass through without being recorded.
+ *   Failures pass through without being recorded. Persistence is
+ *   best-effort: a `store.write` failure is caught and logged, and the good
+ *   `run()` result is still returned rather than being discarded.
  * - `replay`: never calls `run()`. A stored hit is returned as an ok result
  *   with `model` prefixed `"replay:"` and zeroed-out timing/attempt fields
  *   (a replay isn't a live call, so those fields have no truthful value). A
- *   miss returns `error: "replay_miss"` rather than throwing, so a missing
- *   fixture degrades to a normal failure result instead of crashing whatever
- *   is running the replay suite.
+ *   miss — or a fixture that exists but is corrupt (invalid JSON, or valid
+ *   JSON missing `value`/a string `model`) — returns `error: "replay_miss"`
+ *   rather than throwing, so a missing or malformed fixture degrades to a
+ *   normal failure result instead of crashing whatever is running the
+ *   replay suite.
  */
 export async function withReplay<T>(args: {
   mode: AiMode;
@@ -91,7 +130,15 @@ export async function withReplay<T>(args: {
     const result = await run();
     if (result.ok) {
       const key = replayKey(taskId, prompt);
-      await store.write(key, JSON.stringify({ value: result.value, model: result.model }));
+      try {
+        await store.write(key, JSON.stringify({ value: result.value, model: result.model }));
+      } catch (error) {
+        // Persistence is best-effort: a good result must still reach the
+        // caller even if the fixture couldn't be written (e.g. read-only
+        // disk, permissions). Losing the recording just means the next
+        // replay run will miss for this key, not that this call failed.
+        console.warn(`withReplay: failed to persist recording for key "${key}":`, error);
+      }
     }
     return result;
   }
@@ -100,18 +147,14 @@ export async function withReplay<T>(args: {
   const key = replayKey(taskId, prompt);
   const raw = await store.read(key);
   if (raw === null) {
-    return {
-      ok: false,
-      value: null,
-      model: "",
-      latencyMs: 0,
-      status: null,
-      error: "replay_miss",
-      attempts: [],
-    };
+    return replayMiss<T>();
   }
 
-  const recorded = JSON.parse(raw) as RecordedCall<T>;
+  const recorded = parseRecordedCall<T>(raw);
+  if (recorded === null) {
+    return replayMiss<T>();
+  }
+
   return {
     ok: true,
     value: recorded.value,

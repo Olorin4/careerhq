@@ -106,6 +106,21 @@ describe("withReplay", () => {
       expect(result).toEqual(failResult);
       expect(writeSpy).not.toHaveBeenCalled();
     });
+
+    it("still returns the good run() result when store.write throws (persistence is best-effort)", async () => {
+      const run = vi.fn().mockResolvedValue(okResult);
+      const store: ReplayStore = {
+        read: async () => null,
+        write: async () => {
+          throw new Error("disk full");
+        },
+      };
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const result = await withReplay({ mode: "record", store, taskId: "t", prompt, run });
+      expect(result).toEqual(okResult);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      warnSpy.mockRestore();
+    });
   });
 
   describe("replay mode", () => {
@@ -142,6 +157,60 @@ describe("withReplay", () => {
       expect(result.latencyMs).toBe(0);
       expect(result.status).toBeNull();
       expect(result.attempts).toEqual([]);
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("returns replay_miss-shaped failure when the fixture holds invalid JSON, without calling run()", async () => {
+      const key = replayKey("t", prompt);
+      const store = makeMemoryStore({ [key]: "{not valid json" });
+      const run = vi.fn().mockResolvedValue(okResult);
+      const result = await withReplay({ mode: "replay", store, taskId: "t", prompt, run });
+      expect(result).toEqual({
+        ok: false,
+        value: null,
+        model: "",
+        latencyMs: 0,
+        status: null,
+        error: "replay_miss",
+        attempts: [],
+      });
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("returns replay_miss-shaped failure when the fixture is missing model, without calling run()", async () => {
+      const key = replayKey("t", prompt);
+      const store = makeMemoryStore({ [key]: JSON.stringify({ value: { answer: "hi" } }) });
+      const run = vi.fn().mockResolvedValue(okResult);
+      const result = await withReplay({ mode: "replay", store, taskId: "t", prompt, run });
+      expect(result).toEqual({
+        ok: false,
+        value: null,
+        model: "",
+        latencyMs: 0,
+        status: null,
+        error: "replay_miss",
+        attempts: [],
+      });
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("returns replay_miss-shaped failure when model is present but not a string", async () => {
+      const key = replayKey("t", prompt);
+      const store = makeMemoryStore({ [key]: JSON.stringify({ value: { answer: "hi" }, model: 123 }) });
+      const run = vi.fn().mockResolvedValue(okResult);
+      const result = await withReplay({ mode: "replay", store, taskId: "t", prompt, run });
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("replay_miss");
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("returns replay_miss-shaped failure when the fixture is valid JSON but not an object", async () => {
+      const key = replayKey("t", prompt);
+      const store = makeMemoryStore({ [key]: JSON.stringify("just a string") });
+      const run = vi.fn().mockResolvedValue(okResult);
+      const result = await withReplay({ mode: "replay", store, taskId: "t", prompt, run });
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("replay_miss");
       expect(run).not.toHaveBeenCalled();
     });
   });
