@@ -538,3 +538,137 @@ body {
   border-left: 3px solid #b00020;
   font-size: 0.85rem;
 }
+
+.materials {
+  margin: 2rem 0;
+}
+
+.materials-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 640px;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.materials-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.materials-doc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.materials-doc-date {
+  color: #777;
+  font-size: 0.8rem;
+}
+
+.materials-doc-content {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0;
+  padding: 0.75rem;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 4px;
+}
+
+.materials-doc-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.materials-empty {
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.badge-ai-draft {
+  background: #f5a623;
+  color: #fff;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.chip {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: #eef2ff;
+  color: #333;
+  border: 1px solid #d7ddf5;
+}
+
+.materials-generate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.materials-stream {
+  padding: 0.6rem 0.75rem;
+  background: #f5f8ff;
+  border: 1px dashed #b7c4e6;
+  border-radius: 4px;
+}
+
+.materials-stream pre {
+  white-space: pre-wrap;
+  margin: 0;
+  font-family: inherit;
+}
+
+.materials-fallback-note {
+  margin: 0 0 0.4rem;
+  color: #a15c00;
+  font-size: 0.85rem;
+}
+
+.materials-needs-facts {
+  padding: 0.6rem 0.75rem;
+  background: #fffaf0;
+  border-left: 3px solid #f5a623;
+  font-size: 0.9rem;
+}
+
+.materials-manual-note {
+  color: #777;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.materials-error {
+  color: #b00020;
+  font-size: 0.85rem;
+}
+
+.materials-manual-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.materials-manual-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.materials-manual-form textarea {
+  font-family: inherit;
+}

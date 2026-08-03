@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { getApplicationDetail, companies as companiesTable } from "@careerhq/db";
+import { getApplicationDetail, listDocuments, listFacts, companies as companiesTable } from "@careerhq/db";
+import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
 import { TransitionButtons } from "../transition-buttons.js";
+import { Materials } from "./materials.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -32,6 +34,16 @@ export default async function ApplicationDetailPage({
   const [company] = job.companyId
     ? await db.select().from(companiesTable).where(eq(companiesTable.id, job.companyId))
     : [];
+
+  const documents = await listDocuments(db, application.id);
+  // Includes archived facts: a document generated before a fact was archived
+  // should still show that fact's claim as a provenance chip, not "fact
+  // removed".
+  const facts = await listFacts(db, application.workspaceId, { includeArchived: true });
+  const factClaims: Record<string, string> = Object.fromEntries(
+    facts.map((fact) => [fact.id, fact.claim] as const),
+  );
+  const aiAvailable = loadConfig().openrouterApiKey !== null;
 
   return (
     <main>
@@ -62,6 +74,13 @@ export default async function ApplicationDetailPage({
         </p>
       )}
       <TransitionButtons applicationId={application.id} state={application.state} />
+
+      <Materials
+        applicationId={application.id}
+        documents={documents}
+        factClaims={factClaims}
+        aiAvailable={aiAvailable}
+      />
 
       <h2>Event timeline</h2>
       <ol className="detail-timeline">
