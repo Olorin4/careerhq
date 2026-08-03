@@ -5,6 +5,3 @@ export * from "./scoring/keyword.js";
 export * from "./grounding/sensitive.js";
 export * from "./grounding/select-facts.js";
 export * from "./grounding/validate.js";
-export * from "./gates/fingerprint.js";
-export * from "./gates/token.js";
-export * from "./gates/evaluate.js";

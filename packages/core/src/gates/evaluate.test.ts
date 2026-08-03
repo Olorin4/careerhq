@@ -119,6 +119,23 @@ const MATRIX: Row[] = [
     overrides: { retypedTarget: "HR@Acme.example ", expectedTarget: "hr@acme.example" },
     expected: null,
   },
+  {
+    name: "token_expired at the exact expiry boundary (now === expiresAt)",
+    overrides: {
+      tokenRecord: {
+        tokenHash: TOKEN_HASH,
+        payloadFingerprint: FINGERPRINT,
+        expiresAt: new Date(NOW.getTime()),
+        consumedAt: null,
+      },
+    },
+    expected: "token_expired",
+  },
+  {
+    name: "empty expectedTarget never silently matches — target_mismatch even when retypedTarget is also empty",
+    overrides: { expectedTarget: "   ", retypedTarget: "   " },
+    expected: "target_mismatch",
+  },
 ];
 
 describe("evaluateSubmissionGates matrix (spec §11, normative check order)", () => {

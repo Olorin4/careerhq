@@ -78,7 +78,11 @@ export function evaluateSubmissionGates(input: GateCheckInput): GateDecision {
   if (input.currentFingerprint !== tokenRecord.payloadFingerprint) {
     return deny("fingerprint_mismatch", "the submission payload changed since it was confirmed");
   }
-  if (normalizeTarget(input.retypedTarget) !== normalizeTarget(input.expectedTarget)) {
+  const normalizedExpected = normalizeTarget(input.expectedTarget);
+  const normalizedRetyped = normalizeTarget(input.retypedTarget);
+  // An empty/whitespace-only expectedTarget has nothing valid to confirm against — never treat
+  // that as a silent match, even if retypedTarget is also empty.
+  if (normalizedExpected === "" || normalizedRetyped !== normalizedExpected) {
     return deny("target_mismatch", "the retyped recipient does not match the expected target");
   }
 
