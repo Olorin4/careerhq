@@ -3,7 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -12,9 +17,12 @@
   },
   "dependencies": {
     "@careerhq/contracts": "workspace:*",
+    "imapflow": "^1.6.5",
+    "mailparser": "^3.9.14",
     "nodemailer": "^9.0.3"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.4.6",
     "@types/nodemailer": "^8.0.1",
     "vitest": "^3.2.0"
   }
