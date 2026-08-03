@@ -1216,3 +1216,273 @@ body {
   font-size: 0.8rem;
   font-style: italic;
 }
+
+.site-panel {
+  margin: 2rem 0;
+}
+
+.site-hint {
+  color: #555;
+  font-size: 0.85rem;
+}
+
+.site-empty {
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.site-error {
+  color: #b00020;
+  font-size: 0.85rem;
+}
+
+.site-url-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 560px;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.site-url-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.site-review {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.site-review-url {
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.site-cv-line {
+  font-size: 0.9rem;
+  margin: 0.5rem 0;
+}
+
+.site-summary {
+  font-weight: 600;
+  margin: 0.75rem 0;
+}
+
+.site-step {
+  margin-bottom: 1.25rem;
+}
+
+.site-step h4 {
+  margin-bottom: 0.4rem;
+}
+
+.site-field-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.site-field-table td {
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #eee;
+  vertical-align: top;
+}
+
+.site-field-label {
+  width: 22%;
+  font-weight: 600;
+}
+
+.site-field-required {
+  color: #b00020;
+  margin-left: 0.2rem;
+}
+
+.site-field-value {
+  width: 30%;
+}
+
+.site-field-value input,
+.site-field-value select,
+.site-field-value textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.site-field-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.site-field-confidence {
+  color: #777;
+  font-size: 0.75rem;
+}
+
+.site-field-note {
+  color: #666;
+  font-size: 0.75rem;
+  font-style: italic;
+  flex-basis: 100%;
+}
+
+.site-field-needs-you {
+  background: #fffaf0;
+}
+
+.site-badge-needs-you {
+  background: #f5a623;
+  color: #fff;
+}
+
+.site-badge-differs {
+  background: #6b5ce7;
+  color: #fff;
+}
+
+.site-badge-source-fact,
+.site-badge-source-saved_answer,
+.site-badge-source-profile,
+.site-badge-source-document {
+  background: #2c7a4b;
+  color: #fff;
+}
+
+.site-badge-source-ai {
+  background: #d98c00;
+  color: #fff;
+}
+
+.site-badge-source-user {
+  background: #555;
+  color: #fff;
+}
+
+.site-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 560px;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.site-preview-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.site-preview-fields dt {
+  font-weight: 600;
+  color: #555;
+}
+
+.site-preview-fields dd {
+  margin: 0;
+}
+
+.site-expired {
+  color: #b00020;
+  font-weight: 600;
+}
+
+.site-retype-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.site-preview-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.site-outcome {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.site-outcome-submitted {
+  background: #eafaf0;
+  border-left: 3px solid #1a7f37;
+}
+
+.site-outcome-blocked {
+  background: #fff8e6;
+  border-left: 3px solid #f5a623;
+}
+
+.site-outcome-failed {
+  background: #fff5f5;
+  border-left: 3px solid #b00020;
+}
+
+.site-outcome-reconcile {
+  background: #fff8e6;
+  border-left: 3px solid #f5a623;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.site-outcome-hint {
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.site-reconcile-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.site-attempt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.site-attempt-row {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.site-attempt-row-reconcile {
+  border-color: #f5a623;
+}
+
+.site-attempt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.site-attempt-date {
+  color: #777;
+}
+
+.site-attempt-url {
+  color: #555;
+}

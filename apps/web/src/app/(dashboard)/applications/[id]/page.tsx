@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import {
-  getApplicationDetail, listAnswers, listAttemptsForApplication, listCvVariants, listDocuments,
-  listEmailConnections, listFacts, listMessagesForApplication, companies as companiesTable,
+  getApplicationDetail, getLatestSnapshot, listAnswers, listAttemptsForApplication, listCvVariants,
+  listDocuments, listEmailConnections, listFacts, listMessagesForApplication, companies as companiesTable,
+  type ApplicationAttempt,
 } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
@@ -13,6 +14,10 @@ import { EmailPanel } from "./email-panel.js";
 import { Materials } from "./materials.js";
 import { Messages } from "./messages.js";
 import { QaPanel } from "./qa.js";
+import { SitePanel } from "./site-panel.js";
+
+/** Mirrors `SitePanel`'s own `EDITABLE_STATUSES` — the attempt whose snapshot page.tsx needs to fetch. */
+const EDITABLE_ATTEMPT_STATUSES = new Set<ApplicationAttempt["status"]>(["DRAFT", "READY", "PENDING_CONFIRMATION"]);
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -54,8 +59,16 @@ export default async function ApplicationDetailPage({
   const answers = await listAnswers(db, application.id);
   const cvVariants = await listCvVariants(db, application.workspaceId);
   const emailConnections = await listEmailConnections(db, application.workspaceId);
-  const emailAttempts = await listAttemptsForApplication(db, application.id);
+  const attempts = await listAttemptsForApplication(db, application.id);
+  // `EmailPanel` predates the company-site channel and picks its "current attempt" without
+  // filtering by channel — scope it to email attempts only so a site attempt can never be
+  // mistaken for an in-progress email draft (and vice versa for `SitePanel` below).
+  const emailAttempts = attempts.filter((a) => a.channel === "email");
   const messages = await listMessagesForApplication(db, application.id);
+
+  const currentSiteAttempt = [...attempts].reverse()
+    .find((a) => a.channel === "company_site" && EDITABLE_ATTEMPT_STATUSES.has(a.status)) ?? null;
+  const latestSiteSnapshot = currentSiteAttempt ? await getLatestSnapshot(db, currentSiteAttempt.id) : null;
 
   return (
     <main>
@@ -107,6 +120,14 @@ export default async function ApplicationDetailPage({
         connections={emailConnections}
         attempts={emailAttempts}
         documents={documents}
+        cvVariantId={application.cvVariantId}
+        cvVariants={cvVariants}
+      />
+
+      <SitePanel
+        applicationId={application.id}
+        attempts={attempts}
+        latestSnapshot={latestSiteSnapshot}
         cvVariantId={application.cvVariantId}
         cvVariants={cvVariants}
       />
