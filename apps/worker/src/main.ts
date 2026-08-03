@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import PgBoss from "pg-boss";
 import { loadConfig } from "@careerhq/config";
 import { createDb } from "@careerhq/db";
+import { runCaptureJob, runSubmitJob, type CaptureJobData, type SubmitJobData } from "./jobs/autoapply.js";
 import { runEmailSyncOnce } from "./jobs/email-sync.js";
 import { runIngestOnce } from "./jobs/ingest.js";
 import { runRerankOnce } from "./jobs/rerank.js";
@@ -23,6 +24,8 @@ const db = createDb(config.databaseUrl);
 const INGEST_QUEUE = "discovery.ingest";
 const RERANK_QUEUE = "discovery.rerank";
 const EMAIL_SYNC_QUEUE = "email.sync";
+const AUTOAPPLY_CAPTURE_QUEUE = "autoapply.capture";
+const AUTOAPPLY_SUBMIT_QUEUE = "autoapply.submit";
 
 boss.on("error", (err) => console.error("[worker] pg-boss error", err));
 
@@ -68,6 +71,25 @@ await boss.work(EMAIL_SYNC_QUEUE, async () => {
   }
   const summary = await runEmailSyncOnce(db, workspaceId, config);
   console.log(`[worker] ${EMAIL_SYNC_QUEUE}`, summary);
+});
+
+// No `schedule` for either queue — unlike ingest/rerank/email-sync, these run
+// on demand, one job per attempt, enqueued by whatever in `apps/web` decides
+// an attempt is ready to be captured or submitted (spec §10).
+await boss.createQueue(AUTOAPPLY_CAPTURE_QUEUE);
+await boss.work<CaptureJobData>(AUTOAPPLY_CAPTURE_QUEUE, async (jobs) => {
+  for (const job of jobs) {
+    await runCaptureJob(db, config, job.data);
+    console.log(`[worker] ${AUTOAPPLY_CAPTURE_QUEUE} attempt=${job.data.attemptId}`);
+  }
+});
+
+await boss.createQueue(AUTOAPPLY_SUBMIT_QUEUE);
+await boss.work<SubmitJobData>(AUTOAPPLY_SUBMIT_QUEUE, async (jobs) => {
+  for (const job of jobs) {
+    await runSubmitJob(db, config, job.data);
+    console.log(`[worker] ${AUTOAPPLY_SUBMIT_QUEUE} attempt=${job.data.attemptId}`);
+  }
 });
 
 console.log("[worker] started; queues registered");
