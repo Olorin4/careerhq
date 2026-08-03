@@ -125,7 +125,7 @@ As of P3, the live parts of this diagram are `web`, `worker`, `postgres`, `mailp
 
 - [`career-hq-product-spec.md`](career-hq-product-spec.md) — the normative product specification (v0.3).
 - [`docs/architecture.md`](docs/architecture.md) — system diagram, data model, monorepo layout, gated-submission sequence.
-- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P2 (done) through P7.
+- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P3 (done) through P7.
 - [`docs/adr/0001-postgres-and-pg-boss.md`](docs/adr/0001-postgres-and-pg-boss.md) — why Postgres + pg-boss over SQLite/Redis.
 - [`docs/adr/0002-gated-mutation-protocol.md`](docs/adr/0002-gated-mutation-protocol.md) — the three-layer gated-mutation design (state machine shipped in P1, enforcement lands in P4).
 - [`docs/adr/0003-openrouter-sequential-fallback.md`](docs/adr/0003-openrouter-sequential-fallback.md) — the ported `chat-json` pattern and why fallback is sequential, not raced.
