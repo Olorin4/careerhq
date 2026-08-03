@@ -8,8 +8,8 @@ import { attemptConfirmations } from "../schema/index.js";
 import { createApplication, getApplicationDetail, transitionApplication } from "./applications.js";
 import {
   beginSubmission, completeSubmission, createEmailAttempt, failSubmission, getActiveConfirmation,
-  getEmailAttempt, hasBlockingAttempt, listAttemptsForApplication, markNeedsReconcile, recordPreview,
-  resolveReconcile, updateEmailDraft,
+  getEmailAttempt, getLatestConfirmation, hasBlockingAttempt, listAttemptsForApplication,
+  markNeedsReconcile, recordPreview, resolveReconcile, updateEmailDraft,
 } from "./email-attempts.js";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -294,6 +294,53 @@ d("email attempts repo", () => {
     const first = await getEmailAttempt(db, attemptId);
     expect(first?.status).toBe("SUBMITTED");
     expect(first?.confirmedReceipt).toEqual({ messageId: "<first@test>" });
+  });
+
+  // A second preview supersedes the first: leaving the older token redeemable
+  // would let a user who still has the earlier confirmation dialog open send
+  // the payload the newer preview replaced.
+  it("supersedes prior unconsumed confirmations when a new preview is recorded", async () => {
+    const { attemptId, confirmationId: firstId } = await previewed("Supersede Co");
+
+    const second = await recordPreview(db, {
+      attemptId, payloadFingerprint: "fp-second", target: draft.to,
+      tokenHash: hashConfirmationToken("second-token"), expiresAt: new Date(Date.now() + 600_000),
+    });
+    expect(second).toEqual({ ok: true });
+
+    const rows = await db.select().from(attemptConfirmations)
+      .where(eq(attemptConfirmations.attemptId, attemptId));
+    expect(rows).toHaveLength(2);
+    const superseded = rows.find((r) => r.id === firstId);
+    expect(superseded?.consumedAt).not.toBeNull();
+
+    const active = await getActiveConfirmation(db, attemptId);
+    expect(active?.id).not.toBe(firstId);
+    expect(active?.payloadFingerprint).toBe("fp-second");
+
+    // The superseded token is dead at the repo level too, not just hidden.
+    const begun = await beginSubmission(db, { attemptId, confirmationId: firstId, pendingReceipt: {} });
+    expect(begun.ok).toBe(false);
+    if (!begun.ok) expect(begun.reason).toMatch(/consumed/i);
+  });
+
+  // getActiveConfirmation hides expired rows, which the gate matrix would read
+  // as token_missing; getLatestConfirmation keeps the distinction visible.
+  it("getLatestConfirmation returns the newest row regardless of expiry or consumption", async () => {
+    const applicationId = await readyApplication("Latest Co");
+    const attempt = await createEmailAttempt(db, { applicationId, draft, connectionId });
+    expect(await getLatestConfirmation(db, attempt.id)).toBeNull();
+
+    const preview = await recordPreview(db, {
+      attemptId: attempt.id, payloadFingerprint: "fp-latest", target: draft.to,
+      tokenHash: hashConfirmationToken("latest"), expiresAt: new Date(Date.now() - 1_000),
+    });
+    expect(preview).toEqual({ ok: true });
+
+    expect(await getActiveConfirmation(db, attempt.id)).toBeNull();
+    const latest = await getLatestConfirmation(db, attempt.id);
+    expect(latest?.payloadFingerprint).toBe("fp-latest");
+    expect(latest?.tokenHash).toBe(hashConfirmationToken("latest"));
   });
 
   it("returns null for an unknown attempt and refuses transitions on it", async () => {

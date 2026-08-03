@@ -170,6 +170,11 @@ export async function listAttemptsForApplication(
  * fingerprint is stored (the plaintext already lives in the draft payload).
  * `tokenHash` must already be `hashConfirmationToken(token)` — the plaintext
  * token is shown to the user once and never persisted.
+ *
+ * Re-previewing supersedes: every earlier unconsumed confirmation for the
+ * attempt is marked consumed before the new row is inserted, so a stale
+ * confirmation dialog still holding the previous token cannot redeem it. At
+ * most one confirmation for an attempt is ever redeemable.
  */
 export async function recordPreview(db: Db, input: {
   attemptId: string; payloadFingerprint: string; target: string; tokenHash: string; expiresAt: Date;
@@ -183,6 +188,13 @@ export async function recordPreview(db: Db, input: {
       targetFingerprint: payloadFingerprint(input.target.trim().toLowerCase()),
     });
 
+    await tx.update(attemptConfirmations)
+      .set({ consumedAt: sql`now()` })
+      .where(and(
+        eq(attemptConfirmations.attemptId, attempt.id),
+        isNull(attemptConfirmations.consumedAt),
+      ));
+
     await tx.insert(attemptConfirmations).values({
       attemptId: attempt.id,
       tokenHash: input.tokenHash,
@@ -190,6 +202,29 @@ export async function recordPreview(db: Db, input: {
       expiresAt: input.expiresAt,
     });
   }));
+}
+
+/**
+ * The newest confirmation for the attempt whatever its state — consumed,
+ * expired or live. The gate matrix needs the row itself to tell
+ * `token_consumed`/`token_expired` apart from `token_missing`;
+ * `getActiveConfirmation` cannot, because it hides both.
+ */
+export async function getLatestConfirmation(
+  db: Db,
+  attemptId: string,
+): Promise<AttemptConfirmation | null> {
+  const [row] = await db.select().from(attemptConfirmations)
+    .where(eq(attemptConfirmations.attemptId, attemptId))
+    // `created_at` defaults to now(), which is the transaction timestamp, so
+    // two previews could in principle tie. A live row wins that tie: reporting
+    // token_consumed for a token that still works would be a false denial.
+    .orderBy(
+      desc(attemptConfirmations.createdAt),
+      asc(sql`(${attemptConfirmations.consumedAt} is not null)`),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 /** The newest confirmation for the attempt that is neither consumed nor expired. */

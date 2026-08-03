@@ -33,6 +33,11 @@ services:
       # Credential encryption key (packages/db/src/crypto.ts). Unset disables
       # email connections; see .env.example for how to generate one.
       CAREERHQ_MASTER_KEY: ${CAREERHQ_MASTER_KEY:-}
+      # Submission gates (spec §11). Both default OFF: a container that is
+      # never told otherwise cannot send a real application email. The sandbox
+      # allow-list names the mailpit service on this network.
+      SUBMISSIONS_LIVE_EMAIL: ${SUBMISSIONS_LIVE_EMAIL:-false}
+      SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
     ports: ["3000:3000"]
     volumes: [files:/app/var/files]
     depends_on:
@@ -51,6 +56,10 @@ services:
       # Credential encryption key (packages/db/src/crypto.ts). Unset disables
       # email connections; see .env.example for how to generate one.
       CAREERHQ_MASTER_KEY: ${CAREERHQ_MASTER_KEY:-}
+      # Same gates as web: the worker shares the config schema, and follow-up
+      # automation must never outrun the environment's send permission.
+      SUBMISSIONS_LIVE_EMAIL: ${SUBMISSIONS_LIVE_EMAIL:-false}
+      SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
     volumes: [files:/app/var/files]
     depends_on:
       postgres: { condition: service_healthy }

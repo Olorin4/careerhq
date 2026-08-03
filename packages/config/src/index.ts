@@ -71,6 +71,13 @@ function optionalString(value: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+/**
+ * The compose service name of the local mail sink. A sandbox workspace may
+ * only send to this host (spec §11's `sandbox_blocked` gate), so the value has
+ * to point at something that cannot reach a real recruiter.
+ */
+const DEFAULT_SANDBOX_SMTP_HOST = "mailpit";
+
 const envSchema = z.object({
   DATABASE_URL: z
     .string({
@@ -84,6 +91,13 @@ const envSchema = z.object({
   SUBMISSIONS_LIVE_EMAIL: boolFromEnv,
   SUBMISSIONS_LIVE_COMPANY_SITE: boolFromEnv,
   SANDBOX_FORCE_SAFE: boolFromEnv,
+  // Compared against a connection's SMTP host by the sandbox gate. An empty
+  // value (what Compose passes for an unset variable) must not become an empty
+  // allow-list entry — it falls back to the default, like the model lists.
+  SANDBOX_SMTP_ALLOWED_HOST: z
+    .string()
+    .default(DEFAULT_SANDBOX_SMTP_HOST)
+    .transform((v) => v.trim() || DEFAULT_SANDBOX_SMTP_HOST),
   FOLLOW_UP_DAYS: z.coerce.number().int().positive().default(7),
   FILE_STORAGE_DIR: z.string().default("var/files").transform(resolveSharedDir),
   // AI features are off by default (deterministic floor) until a key is provisioned.
@@ -135,6 +149,8 @@ export interface AppConfig {
   submissionsLiveEmail: boolean;
   submissionsLiveCompanySite: boolean;
   sandboxForceSafe: boolean;
+  /** Never empty: the only SMTP host a sandbox workspace may submit to. */
+  sandboxSmtpAllowedHost: string;
   followUpDays: number;
   /** Always absolute: relative FILE_STORAGE_DIR values resolve against the repo root. */
   fileStorageDir: string;
@@ -167,6 +183,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     submissionsLiveEmail: parsed.SUBMISSIONS_LIVE_EMAIL,
     submissionsLiveCompanySite: parsed.SUBMISSIONS_LIVE_COMPANY_SITE,
     sandboxForceSafe: parsed.SANDBOX_FORCE_SAFE,
+    sandboxSmtpAllowedHost: parsed.SANDBOX_SMTP_ALLOWED_HOST,
     followUpDays: parsed.FOLLOW_UP_DAYS,
     fileStorageDir: parsed.FILE_STORAGE_DIR,
     openrouterApiKey: optionalString(parsed.OPENROUTER_API_KEY),

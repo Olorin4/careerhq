@@ -167,4 +167,21 @@ describe("loadConfig", () => {
     const key = Buffer.from(new Uint8Array(32).fill(7)).toString("base64");
     expect(loadConfig({ ...BASE, CAREERHQ_MASTER_KEY: key }).masterKey).toBe(key);
   });
+
+  // The sandbox_blocked gate compares a connection's SMTP host against this
+  // value, so it must never come back empty — an empty allow-list entry would
+  // match nothing (or, worse, an empty host) rather than the local sink.
+  it("defaults sandboxSmtpAllowedHost to the compose mailpit service", () => {
+    expect(loadConfig(BASE).sandboxSmtpAllowedHost).toBe("mailpit");
+  });
+  it("takes an explicit SANDBOX_SMTP_ALLOWED_HOST", () => {
+    expect(loadConfig({ ...BASE, SANDBOX_SMTP_ALLOWED_HOST: "localhost" }).sandboxSmtpAllowedHost).toBe("localhost");
+  });
+  it("trims SANDBOX_SMTP_ALLOWED_HOST", () => {
+    expect(loadConfig({ ...BASE, SANDBOX_SMTP_ALLOWED_HOST: " mailpit " }).sandboxSmtpAllowedHost).toBe("mailpit");
+  });
+  it("treats an empty SANDBOX_SMTP_ALLOWED_HOST as unset, not as an empty host", () => {
+    expect(loadConfig({ ...BASE, SANDBOX_SMTP_ALLOWED_HOST: "" }).sandboxSmtpAllowedHost).toBe("mailpit");
+    expect(loadConfig({ ...BASE, SANDBOX_SMTP_ALLOWED_HOST: "   " }).sandboxSmtpAllowedHost).toBe("mailpit");
+  });
 });

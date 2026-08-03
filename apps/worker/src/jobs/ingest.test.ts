@@ -102,6 +102,7 @@ const baseConfig: AppConfig = {
   submissionsLiveEmail: false,
   submissionsLiveCompanySite: false,
   sandboxForceSafe: false,
+  sandboxSmtpAllowedHost: "mailpit",
   followUpDays: 7,
   fileStorageDir: "/tmp/careerhq-worker-test",
   openrouterApiKey: null,
