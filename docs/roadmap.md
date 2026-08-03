@@ -2,7 +2,7 @@
 
 Six core phases plus an optional seventh. Each ends with green CI, a working demo, and an updated README — the repository is presentable to a prospective client at every point after P1. Spec references: [`career-hq-product-spec.md`](../career-hq-product-spec.md); structure: [`architecture.md`](architecture.md).
 
-## P1 — Foundation, tracker, Fact Bank
+## P1 — Foundation, tracker, Fact Bank (done)
 
 The skeleton that proves the architecture.
 
@@ -16,7 +16,7 @@ The skeleton that proves the architecture.
 
 **Demo:** seeded tracker walkthrough — board, guarded transitions, event log, fact bank.
 
-## P2 — Discovery ingestion and scoring
+## P2 — Discovery ingestion and scoring (done)
 
 - `packages/ingest`: normalizer, `(source, external_id)` + content-hash dedupe, expiry detection; fetchers for Remotive, RemoteOK, Arbeitnow, We Work Remotely, The Muse, and Greenhouse/Lever/Ashby board polling from a watchlist. Stretch: HN "Who is hiring", and bring-your-own-key fetchers (Adzuna, Reed.co.uk, USAJobs).
 - pg-boss scheduled ingestion; `ingest_runs` + pipeline-health panel.
@@ -27,7 +27,7 @@ The skeleton that proves the architecture.
 
 **Demo:** live feed pull → scored, re-ranked inbox → promote to tracker.
 
-## P3 — AI materials generation
+## P3 — AI materials generation (done)
 
 The headline AI demo.
 
@@ -43,9 +43,9 @@ The headline AI demo.
 
 Carried from the P2 final review (fix during P3): clear stale `llm_score` for inbox jobs outside the latest rerank batch so old reranks stop dominating ordering; surface duplicates whose canonical job expired or was dismissed; persist `salaryRaw`/`postedAt` (fetchers already map them — schema v3 columns); replace the dead `#` link when a job has no URL; extract `getOrCreateCompany` into a shared companies repo.
 
-## P4 — Email channel
+## P4 — Email channel (done)
 
-Carried from the P3 final review (land in P4): replace the hardcoded `hasMaterials: true` assertion in the tracker transition action with a real check (an approved document exists for the chosen channel — `generated_documents` now makes this implementable); schema-guard replay fixture values on read; reorder the LLM sensitivity tie-break after the application-scoping check; extract the duplicated `ProvenanceChips` component; add a two-workspace test for `listReusableAnswers`.
+Carried from the P3 final review (land in P4): replace the hardcoded `hasMaterials: true` assertion in the tracker transition action with a real check (an approved document exists for the chosen channel — `generated_documents` now makes this implementable); schema-guard replay fixture values on read; reorder the LLM sensitivity tie-break after the application-scoping check; extract the duplicated `ProvenanceChips` component; add a two-workspace test for `listReusableAnswers`. **Burned during P4** (commit `d229990`, verified in the Task 15 gate).
 
 First live external mutation — the gate framework becomes real.
 
@@ -60,6 +60,8 @@ First live external mutation — the gate framework becomes real.
 **Demo:** draft → preview → retype-target confirm → send → receipt in tracker → simulated reply auto-linked and classified in Mailpit.
 
 ## P5 — Assisted auto-apply (Greenhouse, Lever)
+
+Carried from the P4 final review (land in P5, all minor/deferred — no correctness gap blocks P4's own DoD): sender-domain reply matching treats a mail subdomain (e.g. `mail.acme.com`) and its parent domain (`acme.com`) as unrelated, so a legitimate ATS-relay sender falls through to no match rather than the sender-domain fallback — widen or deliberately scope `matchInboundToApplication` (`packages/email/src/threading.ts`); a per-folder IMAP fetch failure currently skips the sync-state advance for every folder on that connection, not just the failing one (safe — nothing already-fetched is lost — but wasteful, since a persistently broken folder blocks re-fetch progress on healthy siblings too); add the concurrency test proving two simultaneous `confirmAndSend` calls on the same token cannot both complete (the repo-layer compare-and-swap already enforces this — only the test is missing); add nonce-randomness and short-ciphertext-buffer unit tests for `sealSecret`/`openSecret` (`packages/db/src/crypto.ts` — manually verified correct, coverage deferred); the "please re-preview" UI copy omits `token_missing` from its reasons list (UX-only — the gate itself already denies it correctly).
 
 - Canonical application-form schema in `contracts`.
 - `apps/demo-ats`: fictional company careers site with Greenhouse-style multi-step and Lever-style single-page forms — CI e2e target and demo destination.

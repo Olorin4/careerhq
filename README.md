@@ -6,7 +6,7 @@ This is a portfolio project built to demonstrate full-stack product engineering 
 
 ## Current status
 
-**P1 (Foundation, tracker, Fact Bank), P2 (discovery ingestion and scoring), and P3 (grounded AI materials generation) are complete.** Shipped so far:
+**P1 (Foundation, tracker, Fact Bank), P2 (discovery ingestion and scoring), P3 (grounded AI materials generation), and P4 (the email channel) are complete.** Shipped so far:
 
 - Monorepo scaffold (pnpm workspaces + Turborepo), strict TypeScript, ESLint.
 - Compose stack (`postgres`, `mailpit`, `web`, `worker`) with a parameterized Postgres host port.
@@ -26,9 +26,18 @@ This is a portfolio project built to demonstrate full-stack product engineering 
 - **Cover letters, email bodies, and application-question answers** (`/applications/[id]`'s Materials and Q&A panels): streamed token-by-token via `/api/generate/stream` with a non-streaming fallback, provenance chips resolving each cited fact id back to its claim text, and an "AI-generated — not yet approved" badge until a draft is explicitly approved or rejected. With no `OPENROUTER_API_KEY`, every panel still works as a manual-draft editor, and the pure keyword ruleset still warns on a sensitive question with zero AI configured.
 - **`/answers`**: a workspace-wide bank of approved, reusable answers with their source-fact count and approval date, flagged `STALE` once past their `reviewBy` date.
 - **AI record/replay layer** (`AI_MODE=record|replay`, `packages/ai/src/replay`): every AI call site can record a live response to a committed fixture keyed by a hash of its exact prompt, or replay that fixture with zero network calls — used to keep CI and demos deterministic without a live key.
-- CI (GitHub Actions): lint, typecheck, dependency-cruiser import-boundary checks, and the test suite against a real Postgres service container.
+- **Encrypted mailbox credentials** (`packages/db/src/crypto.ts`): SMTP/IMAP passwords are sealed with libsodium `crypto_secretbox` under an env-supplied `CAREERHQ_MASTER_KEY`; the `credentials` table stores ciphertext only, every adapter/settings error is redacted before it is stored or rendered, and disconnecting a mailbox deletes its credential rows in the same transaction. See [ADR-0005](docs/adr/0005-credential-encryption.md).
+- **First live external mutation, gated three ways** (spec §11): the `SUBMISSIONS_LIVE_EMAIL` env flag must be on; a sandbox workspace may only send to `SANDBOX_SMTP_ALLOWED_HOST`; and every send needs a fresh preview → payload-fingerprint pin → single-use confirmation token → retyped-recipient match, evaluated in one order-dependent matrix (`evaluateSubmissionGates`, `packages/core/src/gates`) that denies `duplicate_submission`, `attempt_in_flight`, `gate_closed`, `sandbox_blocked`, or a token/fingerprint/target mismatch before anything is sent.
+- **Receipts around the send, not just after it**: a pending receipt (recipient, subject, attachment hashes) is written *before* the SMTP call, a confirmed receipt carries the real Message-ID once accepted, and an unclassifiable outcome (a stubbed DATA-phase failure, an ambiguous SMTP response) parks the attempt as `NEEDS_RECONCILE` — resolvable only by an explicit human action (`resolveReconcileAction`, `/applications/[id]`), never auto-retried.
+- **`/settings/email`**: connect a mailbox (SMTP + optional IMAP), a pre-save connection test, redacted health status on failure, and disconnect (hard-deletes the connection and its credentials). Shows an explanatory "set `CAREERHQ_MASTER_KEY`" state, with the generator command, when no key is configured.
+- **Email panel on `/applications/[id]`**: draft → preview → retype-target confirm → send, full attempt history, and the `NEEDS_RECONCILE` reconcile action inline.
+- **`/inbox`**: the classification/threading review queue — every inbound reply with its suggested classification, confidence, quoted evidence, and a one-click accept/reject onto the application's timeline.
+- **IMAP sync worker** (`apps/worker`'s `email-sync` job on `EMAIL_SYNC_CRON`, default every 15 minutes): polls every connected mailbox, threads replies onto an application by `In-Reply-To`/`References` headers first and sender-domain only when unambiguous, and enforces each connection's retention mode (`metadata_only` stores no body, `full_local` keeps it, `days_limited` keeps it until `purgeExpiredBodies` sweeps it). With no `CAREERHQ_MASTER_KEY` the sync is a no-op, not a failure.
+- **`classifyReply` + auto-acknowledge** (`packages/ai`): classifies a threaded reply (ack/rejection/other) with a confidence and quoted evidence; a classification at or above `AUTO_ACK_CONFIDENCE` (0.9) on a `SUBMITTED` application drives the tracker's own `classification` trigger straight to `ACKNOWLEDGED` — everything below that bar, or any other state, waits in `/inbox` for a human decision.
+- **Safe local demo recipe**: set `SUBMISSIONS_LIVE_EMAIL=true` and connect a mailbox pointed at Mailpit (`localhost:1025` for a host-run `pnpm dev`; the `mailpit` service name inside Compose) — the sandbox gate's `SANDBOX_SMTP_ALLOWED_HOST` allow-list means the worst a demo can do is land a message in Mailpit's own web UI (`http://localhost:8025`), never a real inbox.
+- CI (GitHub Actions): lint, typecheck, dependency-cruiser import-boundary checks, and the test suite against a real Postgres service container, including a Mailpit round-trip e2e suite (`apps/web/src/lib/email-e2e.test.ts`) that skips cleanly with no `TEST_DATABASE_URL` or unreachable Mailpit.
 
-Everything past this point — the live email channel, assisted auto-apply, the hosted demo, and the restricted-source connector — is **planned**, not built. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan (P4–P7) and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
+Everything past this point — assisted auto-apply, the hosted demo, and the restricted-source connector — is **planned**, not built. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan (P5–P7) and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
 
 ## Quickstart
 
@@ -57,6 +66,13 @@ Mailpit's web UI is at `http://localhost:8025` (dev/demo SMTP sink — nothing i
 - `AI_MODE` — `live` (default), `record`, or `replay`. `record` persists a real response to a fixture keyed by prompt hash; `replay` returns the fixture with no network call at all — see ADR-0004.
 - `AI_REPLAY_DIR` — where recorded AI fixtures live. Defaults to `packages/ai/fixtures/replay`; relative paths resolve against the repo root, same rule as `FILE_STORAGE_DIR`.
 - `INGEST_CRON` — cron expression for the worker's `discovery.ingest` schedule. Defaults to `0 */6 * * *` (every 6 hours).
+
+**Email channel env vars:**
+
+- `CAREERHQ_MASTER_KEY` — base64-encoded 32-byte libsodium `crypto_secretbox` key used to seal/open stored SMTP/IMAP passwords ([ADR-0005](docs/adr/0005-credential-encryption.md)). Unset by default, which disables email connections entirely (`/settings/email` shows a "set this to enable" state rather than erroring). Generate one with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+- `SUBMISSIONS_LIVE_EMAIL` — `false` by default (the deterministic-off gate, spec §11). Must be `true` for any real send to leave `PENDING_CONFIRMATION`; with it off, preview/draft/confirm-dialog UI still works end to end, it just cannot reach the gate's final `allowed` decision.
+- `SANDBOX_SMTP_ALLOWED_HOST` — the only SMTP host a `sandbox`-kind workspace may send to. Defaults to `mailpit` (the Compose service name); set to `localhost` when running a host `pnpm dev` process against the Compose Mailpit's exposed port.
+- `EMAIL_SYNC_CRON` — cron expression for the worker's IMAP-poll `email-sync` job. Defaults to `*/15 * * * *` (every 15 minutes).
 
 **One `.env`, at the repo root.** Nothing in this repo auto-loads it: `drizzle-kit`, the seed (`tsx`), `next dev` (which would only look inside `apps/web`), and the worker each load `<repo root>/.env` explicitly at startup. Variables already exported in your shell win over the file, which is Node's own `--env-file` rule. Copying `.env.example` is therefore enough — no `export DATABASE_URL=…` needed. In Docker, no `.env` exists and Compose supplies the environment instead.
 
@@ -119,17 +135,18 @@ flowchart LR
     restricted -->|"proxy pool only"| boards["Restricted boards\nLinkedIn, Indeed, Glassdoor,\nGoogle Jobs, ZipRecruiter"]
 ```
 
-As of P3, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, the file volume, the keyless job **feeds** (Remotive, RemoteOK, Arbeitnow, WWR, The Muse, and watchlisted Greenhouse/Lever/Ashby boards), and, if `OPENROUTER_API_KEY` is set, **OpenRouter** from both `web` (grounded materials/Q&A generation) and `worker` (re-rank) — everything else (live SMTP/IMAP, live company-site submission, the restricted connector) is architected for but not yet wired up.
+As of P4, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, the file volume, the keyless job **feeds** (Remotive, RemoteOK, Arbeitnow, WWR, The Muse, and watchlisted Greenhouse/Lever/Ashby boards), **user SMTP/IMAP** (gated by `SUBMISSIONS_LIVE_EMAIL` and, for a sandbox workspace, `SANDBOX_SMTP_ALLOWED_HOST` — Mailpit stands in for it in dev/demo), and, if `OPENROUTER_API_KEY` is set, **OpenRouter** from `web` (grounded materials/Q&A generation, reply classification's tie-break) and `worker` (re-rank, `classifyReply`) — live company-site submission and the restricted connector remain architected for but not yet wired up.
 
 ## Documentation
 
 - [`career-hq-product-spec.md`](career-hq-product-spec.md) — the normative product specification (v0.3).
 - [`docs/architecture.md`](docs/architecture.md) — system diagram, data model, monorepo layout, gated-submission sequence.
-- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P3 (done) through P7.
+- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P4 (done) through P7.
 - [`docs/adr/0001-postgres-and-pg-boss.md`](docs/adr/0001-postgres-and-pg-boss.md) — why Postgres + pg-boss over SQLite/Redis.
-- [`docs/adr/0002-gated-mutation-protocol.md`](docs/adr/0002-gated-mutation-protocol.md) — the three-layer gated-mutation design (state machine shipped in P1, enforcement lands in P4).
+- [`docs/adr/0002-gated-mutation-protocol.md`](docs/adr/0002-gated-mutation-protocol.md) — the three-layer gated-mutation design (state machine shipped in P1, enforced for real by the email channel in P4).
 - [`docs/adr/0003-openrouter-sequential-fallback.md`](docs/adr/0003-openrouter-sequential-fallback.md) — the ported `chat-json` pattern and why fallback is sequential, not raced.
 - [`docs/adr/0004-grounding-contract-and-sensitive-answers.md`](docs/adr/0004-grounding-contract-and-sensitive-answers.md) — the grounding contract (deterministic citation post-validation, `NEEDS_FACTS`) and the conservative, widen-only sensitive-question policy.
+- [`docs/adr/0005-credential-encryption.md`](docs/adr/0005-credential-encryption.md) — app-level libsodium secretbox for stored mail credentials, ciphertext-only rows, and the honest scope of what the master key does and doesn't protect against.
 - [`docs/adr/0006-scraping-and-tos-boundaries.md`](docs/adr/0006-scraping-and-tos-boundaries.md) — the keyless-only core boundary and the isolated, opt-in restricted-source connector.
 
 ## Screenshots
