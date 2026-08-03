@@ -45,6 +45,8 @@ Carried from the P2 final review (fix during P3): clear stale `llm_score` for in
 
 ## P4 — Email channel
 
+Carried from the P3 final review (land in P4): replace the hardcoded `hasMaterials: true` assertion in the tracker transition action with a real check (an approved document exists for the chosen channel — `generated_documents` now makes this implementable); schema-guard replay fixture values on read; reorder the LLM sensitivity tie-break after the application-scoping check; extract the duplicated `ProvenanceChips` component; add a two-workspace test for `listReusableAnswers`.
+
 First live external mutation — the gate framework becomes real.
 
 - `credentials` encryption (libsodium + master key), connection setup with pre-enable test and redacted errors, disconnect/delete.
