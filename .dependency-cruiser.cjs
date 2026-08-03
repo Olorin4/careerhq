@@ -9,9 +9,9 @@ module.exports = {
     },
     {
       name: "ingest-and-ai-purity",
-      comment: "ingest and ai are consumed by the worker/apps but must not reach into db or apps themselves",
+      comment: "ingest, ai, and email are consumed by the worker/apps but must not reach into db or apps themselves",
       severity: "error",
-      from: { path: "^packages/(ingest|ai)" },
+      from: { path: "^packages/(ingest|ai|email)" },
       to: { path: "^(packages/db|apps)" },
     },
     {
