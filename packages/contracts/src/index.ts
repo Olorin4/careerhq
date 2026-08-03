@@ -90,3 +90,27 @@ export const rerankResultSchema = z.object({
   })),
 });
 export type RerankResult = z.infer<typeof rerankResultSchema>;
+
+export const DOCUMENT_KINDS = ["cover_letter", "email_body"] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+export const documentKindSchema = z.enum(DOCUMENT_KINDS);
+
+export const APPROVAL_STATES = ["draft", "approved", "rejected"] as const;
+export type ApprovalState = (typeof APPROVAL_STATES)[number];
+export const approvalStateSchema = z.enum(APPROVAL_STATES);
+
+export const ANSWER_ORIGINS = ["deterministic", "ai", "user"] as const;
+export type AnswerOrigin = (typeof ANSWER_ORIGINS)[number];
+export const answerOriginSchema = z.enum(ANSWER_ORIGINS);
+
+export const generationResultSchema = z.object({
+  answer: z.string().min(1),
+  factIds: z.array(z.string()).default([]),
+  confidence: z.number().min(0).max(1),
+  unsupportedClaims: z.array(z.string()).default([]),
+  clarificationNeeded: z.string().optional(),
+});
+export type GenerationResult = z.infer<typeof generationResultSchema>;
+
+export const AI_MODES = ["live", "record", "replay"] as const;
+export type AiMode = (typeof AI_MODES)[number];
