@@ -1,0 +1,160 @@
+{
+  "url": "https://northwind.example/lever/jobs/eng-1",
+  "title": "Senior Robotics Engineer at Northwind Robotics",
+  "bodyText": "Senior Robotics Engineer at Northwind Robotics Full Name Email Phone Resume/CV LinkedIn URL Portfolio URL Notice Period -- Select -- Immediate 2 weeks 1 month 2 months or more Additional information Submit Application",
+  "rootMarkers": [
+    "data-source=lever",
+    "class=application-form"
+  ],
+  "fields": [
+    {
+      "selector": "#name",
+      "tag": "input",
+      "type": "text",
+      "name": "name",
+      "id": "name",
+      "labelText": "Full Name",
+      "nearbyText": "Full Name",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#email",
+      "tag": "input",
+      "type": "email",
+      "name": "email",
+      "id": "email",
+      "labelText": "Email",
+      "nearbyText": "Email",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#phone",
+      "tag": "input",
+      "type": "tel",
+      "name": "phone",
+      "id": "phone",
+      "labelText": "Phone",
+      "nearbyText": "Phone",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#resume",
+      "tag": "input",
+      "type": "file",
+      "name": "resume",
+      "id": "resume",
+      "labelText": "Resume/CV",
+      "nearbyText": "Resume/CV",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "input[name=\"cards[urls][LinkedIn]\"]",
+      "tag": "input",
+      "type": "url",
+      "name": "cards[urls][LinkedIn]",
+      "id": "cards[urls][LinkedIn]",
+      "labelText": "LinkedIn URL",
+      "nearbyText": "LinkedIn URL",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "input[name=\"cards[urls][Portfolio]\"]",
+      "tag": "input",
+      "type": "url",
+      "name": "cards[urls][Portfolio]",
+      "id": "cards[urls][Portfolio]",
+      "labelText": "Portfolio URL",
+      "nearbyText": "Portfolio URL",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    },
+    {
+      "selector": "#notice_period",
+      "tag": "select",
+      "type": "",
+      "name": "notice_period",
+      "id": "notice_period",
+      "labelText": "Notice Period",
+      "nearbyText": "Notice Period -- Select -- Immediate 2 weeks 1 month 2 months or more",
+      "placeholder": "",
+      "required": true,
+      "maxLength": null,
+      "accept": null,
+      "options": [
+        {
+          "value": "",
+          "label": "-- Select --"
+        },
+        {
+          "value": "immediate",
+          "label": "Immediate"
+        },
+        {
+          "value": "2_weeks",
+          "label": "2 weeks"
+        },
+        {
+          "value": "1_month",
+          "label": "1 month"
+        },
+        {
+          "value": "2_months",
+          "label": "2 months or more"
+        }
+      ],
+      "step": 0
+    },
+    {
+      "selector": "#comments",
+      "tag": "textarea",
+      "type": "",
+      "name": "comments",
+      "id": "comments",
+      "labelText": "Additional information",
+      "nearbyText": "Additional information",
+      "placeholder": "",
+      "required": false,
+      "maxLength": null,
+      "accept": null,
+      "options": [],
+      "step": 0
+    }
+  ],
+  "buttons": [
+    {
+      "selector": "#btn_submit",
+      "id": "btn_submit",
+      "text": "Submit Application"
+    }
+  ],
+  "totalSteps": 1
+}
