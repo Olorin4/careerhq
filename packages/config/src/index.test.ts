@@ -275,4 +275,14 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "0" })).toThrow(/DEMO_RATE_LIMIT_PER_MIN/);
     expect(() => loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "-1" })).toThrow(/DEMO_RATE_LIMIT_PER_MIN/);
   });
+
+  // The schedule the worker reseeds the demo workspace on (spec P6 §3). Read
+  // only when demoMode is on — a personal deployment never registers the
+  // queue — but parsed always, like every other cron in this file.
+  it("defaults demoResetCron to every 6 hours", () => {
+    expect(loadConfig(BASE).demoResetCron).toBe("0 */6 * * *");
+  });
+  it("passes through a custom DEMO_RESET_CRON", () => {
+    expect(loadConfig({ ...BASE, DEMO_RESET_CRON: "0 */2 * * *" }).demoResetCron).toBe("0 */2 * * *");
+  });
 });

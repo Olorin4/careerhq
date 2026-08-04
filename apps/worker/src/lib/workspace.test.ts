@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, workspaces, type Db } from "@careerhq/db";
+import { DEMO_WORKSPACE_NAME, createDb, workspaces, type Db } from "@careerhq/db";
 import { getPersonalWorkspaceId } from "./workspace.js";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -41,13 +41,23 @@ d("getPersonalWorkspaceId", () => {
     expect(await kindOf(id!)).toBe("personal");
   });
 
-  it("resolves a sandbox workspace's id in demo mode, not a personal one (spec P6 §3)", async () => {
-    const [sandbox] = await db.insert(workspaces).values({ name: `worker-t-sandbox-${Date.now()}`, kind: "sandbox" }).returning();
+  it("resolves the demo workspace's id in demo mode, not a personal one (spec P6 §3)", async () => {
+    const [sandbox] = await db.insert(workspaces).values({ name: DEMO_WORKSPACE_NAME, kind: "sandbox" }).returning();
     throwawayWorkspaceIds.push(sandbox!.id);
     const [personal] = await db.insert(workspaces).values({ name: `worker-t-personal2-${Date.now()}`, kind: "personal" }).returning();
     throwawayWorkspaceIds.push(personal!.id);
     const id = await getPersonalWorkspaceId(db, { demoMode: true });
     expect(id).not.toBeNull();
     expect(await kindOf(id!)).toBe("sandbox");
+  });
+
+  // The demo seed drops and recreates its workspace on every reset, so the demo
+  // row is always the newest sandbox one. Matching on kind alone would resolve
+  // an older, unrelated sandbox workspace instead — the e2e suites own several.
+  it("never resolves a sandbox workspace that is not the demo's", async () => {
+    const [other] = await db.insert(workspaces)
+      .values({ name: `worker-t-other-sandbox-${Date.now()}`, kind: "sandbox" }).returning();
+    throwawayWorkspaceIds.push(other!.id);
+    expect(await getPersonalWorkspaceId(db, { demoMode: true })).not.toBe(other!.id);
   });
 });

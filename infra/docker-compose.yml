@@ -61,7 +61,8 @@ services:
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
       AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
       # Deliberately absent from `web`, and audited as such: FOLLOW_UP_DAYS,
-      # INGEST_CRON and EMAIL_SYNC_CRON are read only by the worker's jobs.
+      # INGEST_CRON, EMAIL_SYNC_CRON and DEMO_RESET_CRON are read only by the
+      # worker's jobs and schedules.
       # Every other variable `packages/config` parses is set above.
     ports: ["3000:3000"]
     volumes: [files:/app/var/files]
@@ -103,6 +104,11 @@ services:
       # reads it; the limiter guards the web app's request path only.
       SANDBOX_FORCE_SAFE: ${SANDBOX_FORCE_SAFE:-false}
       DEMO_MODE: ${DEMO_MODE:-false}
+      # How often the demo workspace is wiped and reseeded. Worker-only —
+      # apps/worker/src/main.ts is the sole reader — and the `demo.reset` queue
+      # is registered only when DEMO_MODE is true, so this value is inert in a
+      # plain checkout.
+      DEMO_RESET_CRON: ${DEMO_RESET_CRON:-0 */6 * * *}
       # Auto-apply (spec P5): the fictional ATS the Playwright driver targets,
       # and the driver's per-action budget (navigation, one field, the submit
       # wait) — not the budget for a whole attempt. The worker carries the

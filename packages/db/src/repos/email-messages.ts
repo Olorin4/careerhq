@@ -40,6 +40,13 @@ export interface RecordOutboundMessageInput {
   toAddrs: string[];
   subject: string;
   applicationId: string;
+  /**
+   * When the message left. Defaults to now, which is right for every real send
+   * — the caller runs moments after SMTP accepted it. Only backdated by the
+   * demo seed, which builds a thread whose reply must sort after the message it
+   * replies to (`listMessagesForApplication` orders by `received_at`).
+   */
+  sentAt?: Date;
 }
 
 /**
@@ -64,7 +71,7 @@ export async function recordOutboundMessage(db: Db, input: RecordOutboundMessage
     subject: input.subject,
     applicationId: input.applicationId,
     matchMethod: "manual",
-    receivedAt: new Date(),
+    receivedAt: input.sentAt ?? new Date(),
   }).onConflictDoNothing({ target: [emailMessages.workspaceId, emailMessages.messageId] });
 }
 

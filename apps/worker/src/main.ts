@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import PgBoss from "pg-boss";
 import { loadConfig } from "@careerhq/config";
 import { createDb } from "@careerhq/db";
+import { runDemoResetOnce } from "./jobs/demo-reset.js";
 import { runEmailSyncOnce } from "./jobs/email-sync.js";
 import { runIngestOnce } from "./jobs/ingest.js";
 import { runRerankOnce } from "./jobs/rerank.js";
@@ -23,6 +24,7 @@ const db = createDb(config.databaseUrl);
 const INGEST_QUEUE = "discovery.ingest";
 const RERANK_QUEUE = "discovery.rerank";
 const EMAIL_SYNC_QUEUE = "email.sync";
+const DEMO_RESET_QUEUE = "demo.reset";
 const AUTOAPPLY_CAPTURE_QUEUE = "autoapply.capture";
 const AUTOAPPLY_SUBMIT_QUEUE = "autoapply.submit";
 
@@ -72,6 +74,20 @@ await boss.work(EMAIL_SYNC_QUEUE, async () => {
   console.log(`[worker] ${EMAIL_SYNC_QUEUE}`, summary);
 });
 
+// The demo reset (spec P6 §3) is registered ONLY in demo mode. It deletes and
+// rebuilds a whole workspace, so a personal deployment must never so much as
+// have the queue: `createQueue`/`schedule` are inside the branch too, not just
+// the consumer, because a scheduled row left behind by a one-off DEMO_MODE=true
+// run would keep firing against a worker that no longer expects it.
+if (config.demoMode) {
+  await boss.createQueue(DEMO_RESET_QUEUE);
+  await boss.schedule(DEMO_RESET_QUEUE, config.demoResetCron);
+  await boss.work(DEMO_RESET_QUEUE, async () => {
+    const result = await runDemoResetOnce(db, config);
+    console.log(`[worker] ${DEMO_RESET_QUEUE}`, result);
+  });
+}
+
 // INTENTIONALLY NOT REGISTERED (spec §11).
 //
 // `runCaptureJob`/`runSubmitJob` (./jobs/autoapply.ts) and their tests stay in
@@ -92,5 +108,6 @@ await boss.work(EMAIL_SYNC_QUEUE, async () => {
 const UNREGISTERED_QUEUES = [AUTOAPPLY_CAPTURE_QUEUE, AUTOAPPLY_SUBMIT_QUEUE] as const;
 
 console.log(
-  `[worker] started; queues registered (not registered: ${UNREGISTERED_QUEUES.join(", ")} — ungated until P6)`,
+  `[worker] started; queues registered${config.demoMode ? ` (demo mode: ${DEMO_RESET_QUEUE} on "${config.demoResetCron}")` : ""}`
+  + ` (not registered: ${UNREGISTERED_QUEUES.join(", ")} — ungated until P6)`,
 );

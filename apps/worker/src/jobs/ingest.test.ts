@@ -114,6 +114,7 @@ const baseConfig: AppConfig = {
   aiReplayDir: "/tmp/careerhq-worker-test/replay",
   ingestCron: "0 */6 * * *",
   emailSyncCron: "*/15 * * * *",
+  demoResetCron: "0 */6 * * *",
   aiMode: "live",
   masterKey: null,
   autoapplyBrowserTimeoutMs: 45_000,

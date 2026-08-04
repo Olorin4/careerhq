@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, workspaces, type Db } from "@careerhq/db";
+import { DEMO_WORKSPACE_NAME, createDb, workspaces, type Db } from "@careerhq/db";
 import { getActiveWorkspace } from "./workspace.js";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -29,9 +29,21 @@ afterAll(async () => {
 });
 
 d("getActiveWorkspace", () => {
-  it("resolves the sandbox workspace in demo mode", async () => {
+  it("resolves the demo workspace in demo mode", async () => {
     const ws = await getActiveWorkspace(db, { demoMode: true });
     expect(ws.kind).toBe("sandbox");
+    expect(ws.name).toBe(DEMO_WORKSPACE_NAME);
+  });
+
+  // Demo mode matches kind AND name. The demo seed drops and recreates its
+  // workspace on every reset, so the demo row is always the newest sandbox one:
+  // matching on kind alone would resolve an older, unrelated sandbox workspace
+  // (the site/email submission suites own several) and serve an empty demo.
+  it("never resolves a sandbox workspace that is not the demo's", async () => {
+    const [other] = await db.insert(workspaces)
+      .values({ name: `t-other-sandbox-${Date.now()}`, kind: "sandbox" }).returning();
+    throwawayWorkspaceIds.push(other!.id);
+    expect((await getActiveWorkspace(db, { demoMode: true })).id).not.toBe(other!.id);
   });
 
   // The review found this branch was named but never reached: against a shared
@@ -59,7 +71,7 @@ d("getActiveWorkspace", () => {
       const created = await getActiveWorkspace(tx, { demoMode: true });
       bootstrappedId = created.id;
       expect(created.kind).toBe("sandbox");
-      expect(created.name).toBe("CareerHQ Demo");
+      expect(created.name).toBe(DEMO_WORKSPACE_NAME);
 
       // Idempotent: a second call returns the same row, it does not bootstrap again.
       expect((await getActiveWorkspace(tx, { demoMode: true })).id).toBe(created.id);

@@ -141,6 +141,11 @@ const envSchema = z.object({
     .transform((value) => parseModelList(value, DEFAULT_AI_WRITING_MODELS)),
   INGEST_CRON: z.string().default("0 */6 * * *"),
   EMAIL_SYNC_CRON: z.string().default("*/15 * * * *"),
+  // How often the worker wipes and reseeds the demo workspace. Only scheduled
+  // when DEMO_MODE is on (apps/worker/src/main.ts) — a personal deployment must
+  // never register a job that deletes data — but parsed always, like the other
+  // crons, so a typo fails at startup rather than six hours later.
+  DEMO_RESET_CRON: z.string().default("0 */6 * * *"),
   AI_MODE: z.enum(AI_MODES, {
     errorMap: () => ({
       message: `AI_MODE must be one of: ${AI_MODES.join(", ")}`,
@@ -222,6 +227,8 @@ export interface AppConfig {
   ingestCron: string;
   /** Cron for the worker's IMAP poll; default every 15 minutes. */
   emailSyncCron: string;
+  /** Cron for the demo workspace reseed; scheduled only in demo mode, default every 6 hours. */
+  demoResetCron: string;
   /** Controls the AI record/replay layer; default "live" makes real calls. */
   aiMode: AiMode;
   /** Always absolute: relative AI_REPLAY_DIR values resolve against the repo root. */
@@ -259,6 +266,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     aiWritingModels: parsed.AI_WRITING_MODELS,
     ingestCron: parsed.INGEST_CRON,
     emailSyncCron: parsed.EMAIL_SYNC_CRON,
+    demoResetCron: parsed.DEMO_RESET_CRON,
     aiMode: parsed.AI_MODE,
     aiReplayDir: parsed.AI_REPLAY_DIR,
     masterKey: optionalString(parsed.CAREERHQ_MASTER_KEY),
