@@ -86,6 +86,38 @@ export const CONSENT_ONLY_FIELDS: ReadonlySet<CanonicalField> = new Set<Canonica
   "criminal_history",
 ]);
 
+/**
+ * Label terms that mark a question as consent-only regardless of what the
+ * adapter mapped it to.
+ *
+ * The canonical-field set alone is not enough. An ATS whose attestation or
+ * criminal-history question no adapter hint recognizes arrives with
+ * canonicalField "unknown"; `isSensitiveField` still catches it (the label
+ * ruleset is an independent signal, by design), but it would then fall to rule
+ * 1's saved-answer branch and be satisfied by consent given on a DIFFERENT
+ * application — the exact reuse this rule exists to forbid, escaping through
+ * the unmapped door.
+ *
+ * Deliberately narrower than the sensitivity ruleset: only attestations and
+ * criminal-history/background-check disclosures. Notice period, salary, work
+ * authorization and relocation are facts about the user that legitimately carry
+ * across applications, and must keep reusing their saved answers.
+ */
+export const CONSENT_ONLY_LABEL_RE =
+  /certif|attest|acknowledg|under penalty|legally binding|crimin|felony|convict|background check/i;
+
+/**
+ * True when a field may never be satisfied by a saved answer from another
+ * application — by canonical field OR by label. Two independent signals, same
+ * widen-only reasoning as `isSensitiveField`: neither can narrow the other, so
+ * an adapter mapping change can never weaken the refusal.
+ */
+export function isConsentOnlyField(
+  field: Pick<CanonicalFormField, "canonicalField" | "label">,
+): boolean {
+  return CONSENT_ONLY_FIELDS.has(field.canonicalField) || CONSENT_ONLY_LABEL_RE.test(field.label);
+}
+
 /** Canonical fields backed by a deterministic profile value. */
 const PROFILE_KEY_BY_CANONICAL_FIELD: Partial<Record<CanonicalField, keyof ProfileValues>> = {
   full_name: "full_name",
@@ -161,8 +193,10 @@ function planField(
   //
   // Consent-only fields go further and refuse the saved answer too: consent is
   // given per application, so it can never be carried over from another one.
+  // Keyed off `isConsentOnlyField`, not the canonical-field set alone, so an
+  // unmapped attestation cannot slip past on its label.
   if (isSensitiveField(field)) {
-    if (CONSENT_ONLY_FIELDS.has(field.canonicalField)) return userDraft(CONSENT_NOTE, false);
+    if (isConsentOnlyField(field)) return userDraft(CONSENT_NOTE, false);
     return saved ? savedAnswerDraft(saved) : userDraft(SENSITIVE_NOTE, false);
   }
 

@@ -3,6 +3,7 @@ import type { CanonicalForm, CanonicalFormField } from "@careerhq/contracts";
 import { normalizeQuestion } from "../grounding/select-facts.js";
 import {
   CONSENT_ONLY_FIELDS,
+  isConsentOnlyField,
   MIN_FILL_CONFIDENCE,
   planAnswers,
   requiresUserBeforeSubmit,
@@ -289,6 +290,71 @@ describe("planAnswers — rule 1a: consent-only fields are never reused across a
 
   it("names exactly the two consent-only canonical fields", () => {
     expect([...CONSENT_ONLY_FIELDS].sort()).toEqual(["criminal_history", "legal_attestation"]);
+  });
+
+  // The canonical-field set alone leaves an escape hatch: an ATS whose
+  // attestation/criminal-history question no adapter hint recognizes arrives
+  // with canonicalField "unknown". `isSensitiveField` still catches it via the
+  // label ruleset — but rule 1's saved-answer branch would then satisfy it from
+  // ANOTHER application's consent, which is exactly the reuse being forbidden.
+  it("refuses saved-answer reuse for an UNMAPPED criminal-history question", () => {
+    const label = "Have you ever been convicted of a felony?";
+    const result = planAnswers(
+      inputs({
+        form: form([
+          field({ id: "ch", kind: "select", required: true, label, canonicalField: "unknown", mappingConfidence: 0 }),
+        ]),
+        savedAnswers: [
+          { questionNorm: normalizeQuestion(label), answer: "No", sourceFactIds: [], staleForReuse: false },
+        ],
+      }),
+    );
+
+    const answer = answerFor(result, "ch");
+    expect(answer.source).toBe("user");
+    expect(answer.source).not.toBe("saved_answer");
+    expect(answer.needsUser).toBe(true);
+    expect(answer.value).toBe("");
+  });
+
+  it("refuses saved-answer reuse for an UNMAPPED attestation question", () => {
+    const label = "I certify the information is accurate";
+    const result = planAnswers(
+      inputs({
+        form: form([
+          field({ id: "ack", kind: "checkbox", required: true, label, canonicalField: "unknown", mappingConfidence: 0 }),
+        ]),
+        savedAnswers: [
+          { questionNorm: normalizeQuestion(label), answer: "true", sourceFactIds: [], staleForReuse: false },
+        ],
+      }),
+    );
+
+    const answer = answerFor(result, "ack");
+    expect(answer.source).toBe("user");
+    expect(answer.source).not.toBe("saved_answer");
+    expect(answer.needsUser).toBe(true);
+    expect(answer.value).toBe("");
+  });
+
+  it("isConsentOnlyField keys off the canonical field OR the label, and stays narrow", () => {
+    // Either signal alone is enough …
+    expect(isConsentOnlyField({ canonicalField: "legal_attestation", label: "" })).toBe(true);
+    expect(isConsentOnlyField({ canonicalField: "criminal_history", label: "" })).toBe(true);
+    expect(isConsentOnlyField({ canonicalField: "unknown", label: "Please attest to the above" })).toBe(true);
+    expect(isConsentOnlyField({ canonicalField: "unknown", label: "Consent to a background check?" })).toBe(true);
+
+    // … but ordinary sensitive questions are NOT consent-only: they are facts
+    // about the user that legitimately carry across applications.
+    for (const label of [
+      "What is your notice period?",
+      "What are your salary expectations?",
+      WORK_AUTH_LABEL,
+      "Would you relocate for this role?",
+      "Why do you want to work at Acme?",
+    ]) {
+      expect(isConsentOnlyField({ canonicalField: "unknown", label })).toBe(false);
+    }
   });
 });
 
