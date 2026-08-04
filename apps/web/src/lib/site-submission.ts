@@ -31,6 +31,7 @@ import {
 } from "@careerhq/db";
 import { redactError } from "@careerhq/email";
 import { stripHtml } from "@careerhq/ingest";
+import { effectiveWorkspaceKind, refuseCaptureTarget } from "./capture-target.js";
 
 /** What the driver hands back after the one submit click (worker `fillAndSubmit`, adapted). */
 export interface SiteSubmitResult {
@@ -513,6 +514,25 @@ export async function prepareSiteApplication(
     return { status: "failed", reason: "the auto-apply browser is not available in this process" };
   }
 
+  // Reading a page is not a mutation, but it IS a navigation the server
+  // performs on a caller's behalf, so the target is gated here and not only at
+  // confirm time (P6 task-2 review, BLOCKING 2): protocol, internal-network
+  // ranges, and — when the effective workspace kind is sandbox — the one
+  // configured host. `effectiveWorkspaceKind` is the same derivation
+  // `confirmAndSubmitSite` uses below, so the two layers cannot disagree about
+  // which workspace this is. The confirm-time gate is unchanged and still the
+  // authority at submit time; this is an additional, earlier layer.
+  const [workspace] = await db.select().from(workspacesTable)
+    .where(eq(workspacesTable.id, args.workspaceId));
+  if (!workspace) {
+    return { status: "failed", reason: "this workspace no longer exists" };
+  }
+  const refusal = refuseCaptureTarget(args.url, {
+    workspaceKind: effectiveWorkspaceKind(deps.config, workspace.kind),
+    sandboxSiteAllowedHost: deps.config.sandboxSiteAllowedHost,
+  });
+  if (refusal) return { status: "failed", reason: refusal };
+
   let page: RawFormPage;
   try {
     page = await capture(args.url);
@@ -911,8 +931,9 @@ export async function confirmAndSubmitSite(
     // independent layer so a regression in workspace resolution (which
     // workspace this really is) doesn't also disable the sandbox host
     // allow-list. Deliberately not derived from/coupled to DEMO_MODE; it is
-    // its own hard-safety switch.
-    workspaceKind: config.sandboxForceSafe ? "sandbox" : workspace.kind,
+    // its own hard-safety switch. Shared with the prepare-time layer through
+    // `effectiveWorkspaceKind` so the two can never derive it differently.
+    workspaceKind: effectiveWorkspaceKind(config, workspace.kind),
     // Only consulted for sandbox workspaces; a sandbox may reach exactly one host.
     sandboxTargetAllowed: payload.host === config.sandboxSiteAllowedHost,
     tokenRecord: confirmation

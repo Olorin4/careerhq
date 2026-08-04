@@ -1,6 +1,9 @@
 import type { WorkspaceKind } from "@careerhq/contracts";
 import { loadConfig } from "@careerhq/config";
-import { workspaces, type Db, type Workspace } from "@careerhq/db";
+// `DbOrTx`, not `Db`: the bootstrap branch can only be tested by first
+// establishing that no sandbox workspace exists, and doing that on a shared dev
+// database is only safe inside a transaction that rolls back.
+import { workspaces, type DbOrTx, type Workspace } from "@careerhq/db";
 import { asc, eq } from "drizzle-orm";
 
 export interface GetActiveWorkspaceOptions {
@@ -20,7 +23,7 @@ export interface GetActiveWorkspaceOptions {
  * not an empty one; in demo mode it is "CareerHQ Demo", bootstrapped the same
  * way the first time no sandbox workspace exists yet.
  */
-export async function getActiveWorkspace(db: Db, opts: GetActiveWorkspaceOptions = {}): Promise<Workspace> {
+export async function getActiveWorkspace(db: DbOrTx, opts: GetActiveWorkspaceOptions = {}): Promise<Workspace> {
   const demoMode = opts.demoMode ?? loadConfig().demoMode;
   const kind: WorkspaceKind = demoMode ? "sandbox" : "personal";
   const name = demoMode ? "CareerHQ Demo" : "My workspace";

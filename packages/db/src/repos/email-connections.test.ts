@@ -158,12 +158,27 @@ d("email connections repo", () => {
       smtp, smtpPassword: "pw", imap, imapPassword: "pw2", retention, masterKeyB64,
     });
 
-    await deleteEmailConnection(db, conn.id);
+    expect(await deleteEmailConnection(db, workspaceId, conn.id)).toBe(true);
 
     const [gone] = await db.select().from(emailConnections).where(eq(emailConnections.id, conn.id));
     expect(gone).toBeUndefined();
     const creds = await db.select().from(credentials)
       .where(inArray(credentials.id, [conn.smtpCredentialId, conn.imapCredentialId!]));
     expect(creds).toHaveLength(0);
+  });
+
+  it("refuses to delete another workspace's connection, credentials included", async () => {
+    const conn = await createEmailConnection(db, {
+      workspaceId: otherWorkspaceId, label: "Not Yours", fromAddress: "ny@test",
+      smtp, smtpPassword: "pw", imap, imapPassword: "pw2", retention, masterKeyB64,
+    });
+
+    expect(await deleteEmailConnection(db, workspaceId, conn.id)).toBe(false);
+
+    const [survivor] = await db.select().from(emailConnections).where(eq(emailConnections.id, conn.id));
+    expect(survivor?.label).toBe("Not Yours");
+    const creds = await db.select().from(credentials)
+      .where(inArray(credentials.id, [conn.smtpCredentialId, conn.imapCredentialId!]));
+    expect(creds).toHaveLength(2);
   });
 });

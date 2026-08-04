@@ -29,9 +29,48 @@ afterAll(async () => {
 });
 
 d("getActiveWorkspace", () => {
-  it("resolves the sandbox workspace in demo mode, creating it when absent", async () => {
+  it("resolves the sandbox workspace in demo mode", async () => {
     const ws = await getActiveWorkspace(db, { demoMode: true });
     expect(ws.kind).toBe("sandbox");
+  });
+
+  // The review found this branch was named but never reached: against a shared
+  // dev DB a "CareerHQ Demo" row already exists, so the bootstrap insert — and
+  // the name it chooses — had no coverage at all.
+  //
+  // Absence is established rather than assumed, and the whole thing runs inside
+  // a transaction that always rolls back: deleting every sandbox workspace for
+  // real would be visible to the suites running beside this one (site- and
+  // email-submission both own sandbox-kind fixtures), which is exactly the
+  // class of cross-suite race `72481c1` had to fix once already.
+  it("bootstraps 'CareerHQ Demo' when no sandbox workspace exists at all", async () => {
+    const before = await db.select().from(workspaces).where(eq(workspaces.kind, "sandbox"));
+    const ROLLBACK = new Error("rollback: this test must leave no trace");
+    let bootstrappedId = "";
+
+    await expect(db.transaction(async (tx) => {
+      // Reclassified rather than deleted: `workspaces` cascades into
+      // applications/facts/attempts, and locking that whole subtree is a far
+      // bigger blast radius than this test needs. `getActiveWorkspace` selects
+      // on `kind`, so this is absence as far as it is concerned.
+      await tx.update(workspaces).set({ kind: "personal" }).where(eq(workspaces.kind, "sandbox"));
+      expect(await tx.select().from(workspaces).where(eq(workspaces.kind, "sandbox"))).toHaveLength(0);
+
+      const created = await getActiveWorkspace(tx, { demoMode: true });
+      bootstrappedId = created.id;
+      expect(created.kind).toBe("sandbox");
+      expect(created.name).toBe("CareerHQ Demo");
+
+      // Idempotent: a second call returns the same row, it does not bootstrap again.
+      expect((await getActiveWorkspace(tx, { demoMode: true })).id).toBe(created.id);
+      throw ROLLBACK;
+    })).rejects.toBe(ROLLBACK);
+
+    // The bootstrapped row went with the rollback, and every pre-existing
+    // sandbox workspace is a sandbox workspace again.
+    const after = await db.select().from(workspaces).where(eq(workspaces.kind, "sandbox"));
+    expect(after.map((w) => w.id).sort()).toEqual(before.map((w) => w.id).sort());
+    expect(after.map((w) => w.id)).not.toContain(bootstrappedId);
   });
 
   it("resolves the personal workspace when demo mode is off", async () => {

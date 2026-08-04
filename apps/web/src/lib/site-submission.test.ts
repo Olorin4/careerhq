@@ -15,7 +15,7 @@ import {
 } from "@careerhq/db";
 import {
   confirmAndSubmitSite, prepareSiteApplication, previewSiteSubmission, updatePlannedAnswer,
-  type SiteDeps, type SiteSubmitResult,
+  type PrepareOutcome, type SiteDeps, type SiteSubmitResult,
 } from "./site-submission";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -572,6 +572,113 @@ d("prepareSiteApplication", () => {
     });
     expect(outcome.status).toBe("failed");
   });
+
+  // -------------------------------------------------------------------------
+  // Capture-target gating (P6 task-2 review, BLOCKING 2).
+  //
+  // `prepareSiteApplication` drives a REAL headless Chromium at a
+  // caller-supplied URL, and the whole prepare step is reachable by an
+  // anonymous visitor on the hosted demo. Before this gate the sandbox
+  // allow-list was consulted only at *confirm* time, so the reviewer proved
+  // that `file:///etc/passwd` came back in `bodyText` and that
+  // `http://169.254.169.254/latest/meta-data/` was navigated with DEMO_MODE
+  // and SANDBOX_FORCE_SAFE both ON.
+  //
+  // Every assertion below is on `captured` — "the browser was never pointed
+  // at this" — not merely on the outcome status: a refusal that still
+  // navigated first would be no fix at all.
+  // -------------------------------------------------------------------------
+
+  interface RefusalProbe { outcome: PrepareOutcome; captured: string[] }
+
+  async function probePrepare(
+    companyName: string,
+    pageUrl: string,
+    over: Partial<SiteDeps> = {},
+    ws = workspaceId,
+  ): Promise<RefusalProbe> {
+    const captured: string[] = [];
+    const applicationId = await readyApplication(companyName, ws);
+    const outcome = await prepareSiteApplication(
+      deps({
+        capture: async (target: string) => {
+          captured.push(target);
+          return greenhousePage(target);
+        },
+        ...over,
+      }),
+      { workspaceId: ws, applicationId, url: pageUrl },
+    );
+    return { outcome, captured };
+  }
+
+  it.each([
+    ["Local File Co", "file:///etc/passwd"],
+    ["Local File Authority Co", "file://localhost/etc/passwd"],
+    ["Javascript Co", "javascript:fetch('http://169.254.169.254/latest/meta-data/')"],
+    ["Data Url Co", "data:text/html,<script>alert(1)</script>"],
+  ])("never opens a non-http(s) URL (%s): %s", async (companyName, target) => {
+    const { outcome, captured } = await probePrepare(companyName, target);
+    expect(captured).toEqual([]);
+    expect(outcome).toMatchObject({ status: "failed" });
+    if (outcome.status !== "failed") return;
+    expect(outcome.reason).toMatch(/http\(s\)/);
+  });
+
+  it("never opens the cloud metadata endpoint, with demo mode and force-safe both on", async () => {
+    const { outcome, captured } = await probePrepare(
+      "Metadata Co",
+      "http://169.254.169.254/latest/meta-data/",
+      { config: config({ DEMO_MODE: "true", SANDBOX_FORCE_SAFE: "true" }) },
+      sandboxWorkspaceId,
+    );
+    expect(captured).toEqual([]);
+    expect(outcome).toMatchObject({ status: "failed" });
+  });
+
+  it("never opens an internal address even in a personal workspace with every demo switch off", async () => {
+    // Not a demo-only rule: a self-hosted install must not be usable as an
+    // SSRF proxy for its own network either.
+    const { outcome, captured } = await probePrepare(
+      "Private Range Co", "http://10.0.0.5:8080/greenhouse/jobs/private",
+    );
+    expect(captured).toEqual([]);
+    expect(outcome).toMatchObject({ status: "failed" });
+    if (outcome.status !== "failed") return;
+    expect(outcome.reason).toMatch(/internal network/);
+  });
+
+  it("refuses a public host that is not the sandbox host when SANDBOX_FORCE_SAFE forces the sandbox path", async () => {
+    // The workspace row is PERSONAL — only the forced kind can block this, so
+    // this pins that prepare uses the same derivation confirm does.
+    const { outcome, captured } = await probePrepare(
+      "Forced Prepare Co",
+      "https://careers.northwind.example/greenhouse/jobs/forced",
+      { config: config({ SANDBOX_FORCE_SAFE: "true" }) },
+    );
+    expect(captured).toEqual([]);
+    expect(outcome).toMatchObject({ status: "failed" });
+    if (outcome.status !== "failed") return;
+    expect(outcome.reason).toContain(APPLY_HOST);
+  });
+
+  it("still opens the configured sandbox host — the demo flow itself must keep working", async () => {
+    const pageUrl = urlFor("Sandbox Allowed Co");
+    const { outcome, captured } = await probePrepare(
+      "Sandbox Allowed Co", pageUrl,
+      { config: config({ DEMO_MODE: "true", SANDBOX_FORCE_SAFE: "true" }) },
+      sandboxWorkspaceId,
+    );
+    expect(captured).toEqual([pageUrl]);
+    expect(outcome.status).toBe("ready");
+  });
+
+  it("still opens an ordinary public host for a personal workspace with force-safe off", async () => {
+    const pageUrl = "https://careers.northwind.example/greenhouse/jobs/personal-ok";
+    const { outcome, captured } = await probePrepare("Personal Public Co", pageUrl);
+    expect(captured).toEqual([pageUrl]);
+    expect(outcome.status).toBe("ready");
+  });
 });
 
 d("updatePlannedAnswer", () => {
@@ -751,25 +858,21 @@ d("confirmAndSubmitSite", () => {
 
   it("blocks a sandbox workspace applying to a host outside the allow-list → sandbox_blocked", async () => {
     const calls: SubmitCall[] = [];
-    // `config()` names APPLY_HOST as SANDBOX_SITE_ALLOWED_HOST, so any other
-    // hostname is out of bounds for a sandbox-kind workspace.
-    const outsideUrl = "http://careers.northwind.example/greenhouse/jobs/sandbox-co";
-    const outsideHost = "careers.northwind.example";
-
-    const captured: string[] = [];
-    const capture = async (pageUrl: string) => {
-      captured.push(pageUrl);
-      return greenhousePage(pageUrl);
-    };
+    // A sandbox workspace can no longer even PREPARE against a host outside
+    // the allow-list (that gap was P6 task-2's BLOCKING 2), so the confirm-time
+    // gate is exercised the way it can still be reached in production: the
+    // attempt was prepared while APPLY_HOST was allowed, and the allow-list
+    // narrowed underneath it before the human confirmed. The gate must catch
+    // that on its own, without help from the prepare-time layer.
     const prepared = await previewed(
-      "Sandbox Co", { capture, submit: stubSubmit(calls) }, sandboxWorkspaceId, outsideUrl,
+      "Sandbox Co", { submit: stubSubmit(calls) }, sandboxWorkspaceId,
     );
-    // Reading the page is not a mutation, so prepare is allowed to have run.
-    expect(captured).toEqual([outsideUrl]);
 
-    const outcome = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+    const outcome = await confirmAndSubmitSite(deps({
+      config: config({ SANDBOX_SITE_ALLOWED_HOST: "some-other-ats" }), submit: stubSubmit(calls),
+    }), {
       workspaceId: sandboxWorkspaceId, attemptId: prepared.attemptId,
-      presentedToken: prepared.token, retypedTarget: outsideHost,
+      presentedToken: prepared.token, retypedTarget: APPLY_HOST,
     });
     expect(outcome).toMatchObject({ status: "blocked", code: "sandbox_blocked" });
 

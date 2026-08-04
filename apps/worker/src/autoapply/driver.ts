@@ -111,6 +111,31 @@ export async function openSession(): Promise<BrowserSession> {
   };
 }
 
+/**
+ * The last line of defence before Chromium is pointed at anything.
+ *
+ * Callers are supposed to have gated the target already (apps/web's
+ * `refuseCaptureTarget` does protocol, internal-network ranges and the sandbox
+ * allow-list). This check exists because a caller that FORGETS must still not
+ * be able to read the server's filesystem: `file:///etc/passwd` returned its
+ * contents in `bodyText` in the P6 task-2 review. Deliberately duplicated
+ * rather than deduplicated — it is the redundancy that makes it a layer.
+ *
+ * Only the protocol is checked here: this module has no config and no notion
+ * of workspaces, so host policy stays with the caller that has both.
+ */
+function assertNavigable(url: string): void {
+  let protocol: string;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    throw new DriverError(`refusing to open ${url}: not an absolute URL`, "navigation");
+  }
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new DriverError(`refusing to open a ${protocol} URL: only http(s) targets can be driven`, "navigation");
+  }
+}
+
 async function gotoOrThrow(page: Page, url: string, deps: DriverDeps): Promise<void> {
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: deps.timeoutMs });
@@ -132,6 +157,9 @@ async function extract(page: Page, url: string): Promise<ExtractedPage> {
  * (a redirect to a login wall is itself a signal the blocker rules read).
  */
 export async function capturePage(session: BrowserSession, url: string, deps: DriverDeps): Promise<RawFormPage> {
+  // Before a page is opened, not merely before it is navigated: a refused
+  // target must cost nothing and leave nothing behind.
+  assertNavigable(url);
   const page = await session.newPage();
   page.setDefaultTimeout(deps.timeoutMs);
   try {
@@ -235,6 +263,7 @@ async function readConfirmationId(page: Page, pageText: string): Promise<string 
  */
 export async function fillAndSubmit(session: BrowserSession, args: FillAndSubmitArgs): Promise<SubmitResult> {
   const { url, form, answers, files, deps } = args;
+  assertNavigable(url);
   const page = await session.newPage();
   page.setDefaultTimeout(deps.timeoutMs);
 

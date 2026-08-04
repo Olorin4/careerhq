@@ -7,7 +7,7 @@ import {
 } from "@careerhq/contracts";
 import {
   createEmailConnection, deleteEmailConnection, getConnectionSecrets,
-  updateConnectionHealth, type Db,
+  listEmailConnections, updateConnectionHealth, type Db,
 } from "@careerhq/db";
 import { makeSmtpTransport, verifySmtpConnection } from "@careerhq/email";
 import { loadConfig } from "@careerhq/config";
@@ -177,6 +177,21 @@ export async function createConnectionAction(formData: FormData): Promise<Action
 
 const connectionIdSchema = z.object({ connectionId: z.string().uuid() });
 
+/** The refusal for a connection id that is not this workspace's — indistinguishable from "no such id". */
+const NOT_FOUND_REFUSAL: ActionResult = { ok: false, reason: "that connection no longer exists" };
+
+/**
+ * Whether `connectionId` belongs to the active workspace. `getConnectionSecrets`
+ * and `deleteEmailConnection` are reached by id, and a server action is callable
+ * with any id a caller cares to guess, so every id-keyed action here checks
+ * ownership first — the same rule T1 applied to the fact/document/answer
+ * mutations.
+ */
+async function ownedByActiveWorkspace(db: Db, connectionId: string): Promise<boolean> {
+  const ws = await getActiveWorkspace(db);
+  return (await listEmailConnections(db, ws.id)).some((c) => c.id === connectionId);
+}
+
 export async function testConnectionAction(raw: { connectionId: string }): Promise<ActionResult> {
   // Same server-side gate as createConnectionAction: testing a connection
   // opens a real SMTP transport, which the demo must never do.
@@ -186,6 +201,7 @@ export async function testConnectionAction(raw: { connectionId: string }): Promi
   const masterKeyB64 = requireMasterKey();
 
   const db = getDb();
+  if (!await ownedByActiveWorkspace(db, connectionId)) return NOT_FOUND_REFUSAL;
   const { connection, smtpPassword } = await getConnectionSecrets(db, connectionId, masterKeyB64);
   const smtp = smtpConfigSchema.parse(connection.smtp);
   const result = await verifyAndRecordHealth(db, connectionId, smtp, smtpPassword);
@@ -193,8 +209,21 @@ export async function testConnectionAction(raw: { connectionId: string }): Promi
   return result;
 }
 
-export async function disconnectAction(raw: { connectionId: string }): Promise<void> {
+/**
+ * Demo-gated for the same reason the other two are, and for a sharper one: the
+ * hosted demo has no login, and this action destroys the seeded connection AND
+ * its credential rows (ON DELETE RESTRICT means they go together), breaking
+ * reply-parsing for every visitor until the next 6-hourly reset. "Deleting a
+ * connection isn't credential setup" was the reasoning that left it open in
+ * `bcbc6ea`; it exercises a credential by destroying one, which is worse.
+ */
+export async function disconnectAction(raw: { connectionId: string }): Promise<ActionResult> {
+  if (loadConfig().demoMode) return DEMO_MODE_REFUSAL;
+
   const { connectionId } = connectionIdSchema.parse(raw);
-  await deleteEmailConnection(getDb(), connectionId);
+  const db = getDb();
+  const ws = await getActiveWorkspace(db);
+  const deleted = await deleteEmailConnection(db, ws.id, connectionId);
   revalidatePath(EMAIL_SETTINGS_PATH);
+  return deleted ? { ok: true } : NOT_FOUND_REFUSAL;
 }

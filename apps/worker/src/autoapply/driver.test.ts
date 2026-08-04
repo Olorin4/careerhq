@@ -158,6 +158,51 @@ describe("DriverError's cross-app contract", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The driver's own protocol floor (P6 task-2 review, BLOCKING 2). apps/web
+// gates the target before it ever gets here, but a caller that forgets must
+// still not be able to make this process read local files — the review proved
+// `capturePage(session, "file:///…")` returned the file's contents in
+// `bodyText`. Browser-free: the refusal must land BEFORE a page is opened, so
+// a stub session that would explode if used is the assertion.
+// ---------------------------------------------------------------------------
+describe("capturePage's protocol floor", () => {
+  const explodingSession: BrowserSession = {
+    newPage: () => Promise.reject(new Error("capturePage opened a page for a URL it should have refused")),
+    close: () => Promise.resolve(),
+  };
+
+  it.each([
+    "file:///etc/passwd",
+    "file://localhost/etc/passwd",
+    "javascript:fetch('http://169.254.169.254/')",
+    "data:text/html,<script>alert(1)</script>",
+    "blob:https://example.com/1234",
+    "chrome://settings",
+    "ftp://files.example.com/x",
+  ])("refuses %s as a navigation-phase DriverError", async (url) => {
+    const err = await capturePage(explodingSession, url, { timeoutMs: 1000 }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DriverError);
+    expect((err as DriverError).kind).toBe("navigation");
+    expect((err as DriverError).message).toMatch(/refusing to open/);
+  });
+
+  it.each(["not a url", "/relative/path", "//example.com/protocol-relative"])(
+    "refuses %s, which is not an absolute URL at all",
+    async (url) => {
+      const err = await capturePage(explodingSession, url, { timeoutMs: 1000 }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(DriverError);
+      expect((err as DriverError).kind).toBe("navigation");
+    },
+  );
+
+  it("lets an http(s) URL through to the session, proving the refusal is about the protocol", async () => {
+    const err = await capturePage(explodingSession, "https://careers.northwind.example/apply", { timeoutMs: 1000 })
+      .catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/should have refused/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Integration: a real Chromium against a running demo-ats. Both are probed up
 // front — a machine without the browser binary or without the demo server
 // skips cleanly instead of failing.

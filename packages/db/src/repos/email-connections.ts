@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { ImapConfig, RetentionSetting, SmtpConfig } from "@careerhq/contracts";
 import type { Db } from "../client.js";
 import { credentials, emailConnections } from "../schema/index.js";
@@ -126,17 +126,23 @@ export async function updateSyncState(
  * go once nothing references them. The connection is deleted first and the
  * credentials second, inside one transaction — a failure anywhere rolls back
  * to a connection that still has its secrets rather than one that cannot log in.
+ *
+ * Scoped to `workspaceId` for the same reason the fact/document/answer
+ * mutations are: a bare id is guessable, and this one destroys credentials.
+ * Returns whether anything was deleted, so a caller can tell "not yours" from
+ * "already gone" without a second read.
  */
-export async function deleteEmailConnection(db: Db, id: string): Promise<void> {
-  await db.transaction(async (tx) => {
+export async function deleteEmailConnection(db: Db, workspaceId: string, id: string): Promise<boolean> {
+  return db.transaction(async (tx) => {
     const [connection] = await tx.select().from(emailConnections)
-      .where(eq(emailConnections.id, id));
-    if (!connection) return;
+      .where(and(eq(emailConnections.id, id), eq(emailConnections.workspaceId, workspaceId)));
+    if (!connection) return false;
 
     await tx.delete(emailConnections).where(eq(emailConnections.id, id));
     await tx.delete(credentials).where(eq(credentials.id, connection.smtpCredentialId));
     if (connection.imapCredentialId) {
       await tx.delete(credentials).where(eq(credentials.id, connection.imapCredentialId));
     }
+    return true;
   });
 }

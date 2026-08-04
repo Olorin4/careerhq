@@ -15,6 +15,7 @@ import type { RawFormPage } from "@careerhq/autoapply";
 // writes the raw screenshot buffer to disk (the one adapter step the
 // orchestrator explicitly leaves to its caller — see Task 11's report).
 import { capturePage, fillAndSubmit, openSession } from "@careerhq/worker/autoapply";
+import { safeExternalHref } from "./safe-url.js";
 import type { SiteSubmitArgs, SiteSubmitResult } from "./site-submission.js";
 
 /**
@@ -28,6 +29,15 @@ import type { SiteSubmitArgs, SiteSubmitResult } from "./site-submission.js";
  */
 export function makeSiteCapture(config: AppConfig): (url: string) => Promise<RawFormPage> {
   return async (url: string) => {
+    // Defence in depth, not the primary gate: `prepareSiteApplication` already
+    // refused everything but http(s) on an allowed host before it called this
+    // (`refuseCaptureTarget`). Repeating the protocol check here means a future
+    // caller wired straight to the driver still cannot make the server read
+    // `file:///…` — the hole the P6 task-2 review proved. Deliberately kept as
+    // its own layer rather than collapsed into the orchestrator's check.
+    if (safeExternalHref(url) === null) {
+      throw new Error("refusing to open a non-http(s) URL");
+    }
     const session = await openSession();
     try {
       return await capturePage(session, url, { timeoutMs: config.autoapplyBrowserTimeoutMs });

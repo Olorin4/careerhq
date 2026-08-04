@@ -60,6 +60,9 @@ services:
       # which is why Dockerfile.web is built on the Playwright base image.
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
       AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
+      # Deliberately absent from `web`, and audited as such: FOLLOW_UP_DAYS,
+      # INGEST_CRON and EMAIL_SYNC_CRON are read only by the worker's jobs.
+      # Every other variable `packages/config` parses is set above.
     ports: ["3000:3000"]
     volumes: [files:/app/var/files]
     depends_on:
@@ -72,9 +75,17 @@ services:
       # Discovery/AI knobs. The images carry no .env, so without these the
       # worker can never re-rank (skipped_no_key) and INGEST_CRON is fixed.
       # All optional: empty passes through to the config defaults.
+      # AI_WRITING_MODELS / AI_MODE / AI_REPLAY_DIR are deliberately absent:
+      # only the web app generates materials or replays recorded calls
+      # (apps/web/src/lib/generation.ts); the worker's one AI pass is the fast
+      # tier in rerank/email-sync.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       AI_FAST_MODELS: ${AI_FAST_MODELS:-}
       INGEST_CRON: ${INGEST_CRON:-0 */6 * * *}
+      # How long after submitting an application the follow-up nudge is due.
+      # Worker-only: apps/worker/src/jobs/email-sync.ts is the sole reader
+      # (`config.followUpDays`), so it is deliberately absent from `web`.
+      FOLLOW_UP_DAYS: ${FOLLOW_UP_DAYS:-7}
       # Cron for the IMAP poll that links replies to applications (email.sync).
       EMAIL_SYNC_CRON: ${EMAIL_SYNC_CRON:-*/15 * * * *}
       # Credential encryption key (packages/db/src/crypto.ts). Unset disables
