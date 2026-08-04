@@ -16,12 +16,13 @@ than no runbook at all because it is trusted.
 | Host | Hetzner CX23, `ssh hetzner-staging` (IPv4 `167.233.94.188`) — **shared** with the owner's other live services |
 | Checkout | `/home/nick-kalas/apps/careerhq` |
 | Compose project | `careerhq` (set by `name:` in the base compose file — not derived from the directory) |
-| Compose files | `infra/docker-compose.yml` **plus** `infra/docker-compose.demo.yml`, always both |
+| Compose files | `infra/docker-compose.yml` **plus** `infra/docker-compose.demo.yml` **plus** `infra/docker-compose.edge.yml` — all three, on this box |
 | Env file | `infra/.env`, copied from `infra/demo.env.example` |
-| Published port | `127.0.0.1:3100` → `web:3000`. Nothing else is published at all |
-| Public entry | the box's existing `edge-nginx` terminates TLS on 443 and proxies to `127.0.0.1:3100` |
+| Published port | **none.** The demo overlay alone would publish `127.0.0.1:3100`; the edge overlay removes it, because the proxy reaches the container directly |
+| Public entry | the box's existing `edge-nginx` terminates TLS on 443 and proxies to `http://careerhq-web:3000` over the shared external `edge` network |
+| TLS | self-signed origin cert `~/infra/edge/certs/careerhq-selfsigned.{pem,key}` (key `0600`, valid to 2036-08-01), with the `nickkalas.dev` zone on Cloudflare **Full**, not Full (strict) — see the vhost's own comment for why |
 | Volumes | `careerhq_pgdata` (Postgres), `careerhq_files` (CVs, screenshots, message bodies) |
-| Containers | `careerhq-postgres-1`, `careerhq-mailpit-1`, `careerhq-demo-ats-1`, `careerhq-web-1`, `careerhq-worker-1` |
+| Containers | `careerhq-postgres-1`, `careerhq-mailpit-1`, `careerhq-demo-ats-1`, **`careerhq-web`** (fixed name — the vhost proxies to it), `careerhq-worker-1` |
 
 **The neighbours matter.** The same box runs `edge-nginx` on 80/443, kelevo-tms
 staging (api + postgres + redis), outreach, iwd-backend and twilio-app on
@@ -31,13 +32,20 @@ neighbouring container, and never reload nginx without `nginx -t` passing first
 
 ### The command prefix
 
-Every compose command in this document needs both files. Set this once per shell
-and the rest of the runbook reads cleanly:
+Every compose command in this document needs all three files **on the VPS**. Set
+this once per shell and the rest of the runbook reads cleanly:
 
 ```bash
 cd /home/nick-kalas/apps/careerhq
-dc() { docker compose -f infra/docker-compose.yml -f infra/docker-compose.demo.yml "$@"; }
+dc() { docker compose \
+  -f infra/docker-compose.yml \
+  -f infra/docker-compose.demo.yml \
+  -f infra/docker-compose.edge.yml "$@"; }
 ```
+
+Drop the third `-f` anywhere there is no `edge` network — a laptop, a fresh box —
+or compose refuses with *"network edge declared as external, but could not be
+found"*. That is why it is a separate file rather than part of the demo overlay.
 
 Omitting the second `-f` is the single most likely mistake here, and it is a
 dangerous one: the base file alone publishes Postgres, Mailpit and `demo-ats` on
@@ -67,7 +75,7 @@ dc up -d --build
 # Wait for health. `web`'s healthcheck asks only "is the HTTP server
 # answering"; it does not judge the database.
 dc ps
-curl -sI http://127.0.0.1:3100/overview
+curl -skI -H 'Host: careerhq.nickkalas.dev' https://127.0.0.1/overview | head -1   # through the edge; no host port exists
 ```
 
 The worker seeds the demo workspace itself, once at boot and again on
@@ -96,7 +104,7 @@ dc --profile tools run --rm migrate
 
 dc up -d --build
 dc ps
-curl -sI http://127.0.0.1:3100/overview
+curl -skI -H 'Host: careerhq.nickkalas.dev' https://127.0.0.1/overview | head -1   # through the edge; no host port exists
 ```
 
 Two notes that save an outage:
@@ -258,7 +266,7 @@ docker run --rm \
 
 dc start web worker
 dc ps
-curl -sI http://127.0.0.1:3100/overview
+curl -skI -H 'Host: careerhq.nickkalas.dev' https://127.0.0.1/overview | head -1   # through the edge; no host port exists
 ```
 
 `pg_restore --clean` prints errors for objects it cannot drop cleanly, and a
@@ -286,7 +294,7 @@ cd /home/nick-kalas/apps/careerhq
 git log --oneline -10                  # find the last good commit
 git checkout <sha>                     # detached HEAD is fine and honest here
 dc up -d --build
-dc ps && curl -sI http://127.0.0.1:3100/overview
+dc ps && curl -skI -H 'Host: careerhq.nickkalas.dev' https://127.0.0.1/overview | head -1
 ```
 
 To return to the branch afterwards: `git checkout main && dc up -d --build`.
@@ -360,7 +368,7 @@ means the browser failed to launch. Usually `/dev/shm` or memory:
 
 ```bash
 dc logs --tail=50 web | grep -i chromium
-docker stats --no-stream careerhq-web-1
+docker stats --no-stream careerhq-web
 ```
 
 The overlay sets `shm_size: 256m` on `web` and `worker`. If that was lost, a tab
@@ -370,7 +378,7 @@ crashes mid-capture.
 preferable to pushing a neighbour into swap:
 
 ```bash
-docker inspect careerhq-web-1 --format '{{.State.OOMKilled}} {{.State.ExitCode}}'
+docker inspect careerhq-web --format '{{.State.OOMKilled}} {{.State.ExitCode}}'
 ```
 
 The budget is 900 (web) + 1200 (worker) + 400 (postgres) + 128 + 128 = 2756 MB
@@ -396,10 +404,10 @@ Every command above runs identically against a local copy, which is how they
 were verified. From a clean clone:
 
 ```bash
-docker compose -f infra/docker-compose.yml -f infra/docker-compose.demo.yml \
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.demo.yml -f infra/docker-compose.edge.yml \
   --profile tools run --rm migrate
 docker compose -f infra/docker-compose.yml -f infra/docker-compose.demo.yml up -d --build
-curl -sI http://127.0.0.1:3100/overview
+curl -skI -H 'Host: careerhq.nickkalas.dev' https://127.0.0.1/overview | head -1   # through the edge; no host port exists
 ```
 
 The only difference is the edge proxy and the DNS name. Rehearse a restore
