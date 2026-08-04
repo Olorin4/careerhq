@@ -196,13 +196,17 @@ function errorMessage(err: unknown): string {
  *   - "navigation" — the page never opened, never extracted, or Chromium never
  *     launched at all (`openSession` reports every launch failure as this
  *     kind, timeouts included — a launch has no click to be ambiguous about).
- *   - "fill" — a field action failed; no button has been touched.
+ *   - "fill" — a field action failed; no button has been touched. This holds
+ *     even when the underlying cause was a Playwright timeout: filling is an
+ *     interaction with a form CONTROL (typing, ticking, unticking), and none
+ *     of that can submit a form, so `driverErrorKind` deliberately does NOT
+ *     collapse the fill phase onto "timeout" the way it collapses the others.
  * Everything else stays ambiguous on purpose. "submit" is the click itself;
  * "advance" is the between-steps click, which was dispatched before its error
  * surfaced and may have been the real submit on an ATS whose next-labelled
- * button the step heuristics misplaced; "timeout" has already lost which phase
- * it came from (`driverError` collapses every Playwright TimeoutError onto
- * it), and a click that timed out may still have landed.
+ * button the step heuristics misplaced; "timeout" is what a CLICK-phase
+ * timeout collapses to, and a click that timed out may still have landed —
+ * which is exactly why it must not be widened into this set.
  */
 const PRE_CLICK_DRIVER_ERROR_KINDS: ReadonlySet<string> = new Set(["navigation", "fill"]);
 

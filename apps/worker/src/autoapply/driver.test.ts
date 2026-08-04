@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseHTML } from "linkedom";
-import { chromium } from "playwright";
-import { consentPage, greenhousePage, leverPage, type DemoJob } from "@careerhq/demo-ats";
+import { chromium, errors } from "playwright";
+import { consentPage, greenhousePage, hiddenConsentPage, leverPage, type DemoJob } from "@careerhq/demo-ats";
 import { rawPageFromHtml } from "@careerhq/autoapply/testing";
 import { detectBlockers, parseForm, rawFieldId, type RawFormPage } from "@careerhq/autoapply";
 import type { PlannedAnswer } from "@careerhq/contracts";
@@ -18,7 +18,7 @@ import {
   type ExtractedPage,
 } from "./extract.js";
 import {
-  capturePage, DriverError, fillAndSubmit, openSession,
+  capturePage, DriverError, driverErrorKind, fillAndSubmit, openSession,
   type BrowserSession, type DriverErrorKind,
 } from "./driver.js";
 
@@ -48,6 +48,14 @@ describe("EXTRACT_SCRIPT parity with rawPageFromHtml", () => {
     // deliberately does not carry, so both implementations must agree on
     // ignoring it rather than one of them quietly reading it.
     { name: "consent (pre-ticked boxes)", html: consentPage(JOB), url: "http://demo-ats:3001/consent/jobs/eng-1" },
+    // A display:none wrapper: neither implementation reads layout, so both
+    // must still report the field — it is the DRIVER that discovers it cannot
+    // be acted on, at fill time, and says so with `kind: "fill"`.
+    {
+      name: "hidden consent (display:none)",
+      html: hiddenConsentPage(JOB),
+      url: "http://demo-ats:3001/hidden-consent/jobs/eng-1",
+    },
   ];
 
   for (const { name, html, url } of cases) {
@@ -117,6 +125,35 @@ describe("DriverError's cross-app contract", () => {
     for (const kind of ambiguous) {
       expect(preClick).not.toContain(kind);
     }
+  });
+
+  /**
+   * The other half of that contract: which kind a TIMEOUT gets. "timeout" is
+   * excluded from the pre-click set because a click that timed out may still
+   * have landed — so any phase that collapses onto it is asserting real
+   * post-click ambiguity. Filling a form control has no click in it and must
+   * not make that claim.
+   */
+  describe("driverErrorKind", () => {
+    const timeout = new errors.TimeoutError("Timeout 30000ms exceeded.");
+
+    it("keeps a fill-phase TimeoutError as \"fill\" — ticking a box cannot submit the form", () => {
+      expect(driverErrorKind("fill", timeout)).toBe("fill");
+    });
+
+    it.each(["navigation", "advance", "submit"] as const)(
+      "still collapses a %s-phase TimeoutError onto \"timeout\"",
+      (phase) => {
+        expect(driverErrorKind(phase, timeout)).toBe("timeout");
+      },
+    );
+
+    it("carries the phase through for anything that is not a TimeoutError", () => {
+      const boom = new Error("element is not attached to the DOM");
+      for (const phase of ["navigation", "fill", "advance", "submit"] as const) {
+        expect(driverErrorKind(phase, boom)).toBe(phase);
+      }
+    });
   });
 });
 
@@ -349,6 +386,60 @@ live("driver against demo-ats", () => {
     expect(created?.fields["talent_pool_opt_in"]).toBe("true");
     // The load-bearing assertion: the declined consent is NOT in the posted body.
     expect(created?.fields["background_check_consent"]).toBeUndefined();
+  }, 60_000);
+
+  /**
+   * The counterpart failure, reproduced against real Chromium: the same
+   * pre-ticked box inside a `display:none` wrapper. Playwright waits for
+   * actionability and throws a `TimeoutError`, and the kind that failure
+   * carries decides the attempt's fate in apps/web — "fill" is FAILED (nothing
+   * was sent), anything outside PRE_CLICK_DRIVER_ERROR_KINDS is
+   * NEEDS_RECONCILE (a human reconciles a submission by hand). Unticking a
+   * checkbox cannot submit a form, so this must be "fill".
+   *
+   * A short timeout keeps the test honest AND fast: the failure is the point,
+   * so there is nothing to wait 30s for.
+   */
+  it("reports an un-tickable consent box as a FILL failure, not an ambiguous timeout", async () => {
+    const jobId = "hidden-consent-1";
+    const url = `${DEMO_ATS_URL}/hidden-consent/jobs/${jobId}`;
+    const shortDeps = { timeoutMs: 2_000 };
+    const raw = await capturePage(session, url, shortDeps);
+    const form = parseForm(raw);
+
+    const idFor = (name: string): string => {
+      const field = raw.fields.find((f) => f.name === name);
+      if (!field) throw new Error(`no raw field named ${name}`);
+      return rawFieldId(field);
+    };
+
+    const answers: PlannedAnswer[] = [
+      [idFor("name"), "Ada Lovelace"],
+      [idFor("email"), "ada@example.com"],
+      // Declined — and the box cannot be reached to clear it.
+      [idFor("background_check_consent"), ""],
+    ].map(([fieldId, value]) => ({
+      fieldId: fieldId!,
+      value: value!,
+      source: "user" as const,
+      sourceFactIds: [],
+      confidence: 1,
+      needsUser: false,
+      differsFromApproved: false,
+      note: "",
+    }));
+
+    const failure = await fillAndSubmit(session, { url, form, answers, files: {}, deps: shortDeps })
+      .catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(DriverError);
+    const kind = (failure as DriverError).kind;
+    expect(kind).toBe("fill");
+    // Stated the other way round, because this is the bit that regressed: the
+    // orchestrator's pre-click set contains "fill" and excludes "timeout".
+    expect(kind).not.toBe("timeout");
+    // And nothing reached the site.
+    expect(await submissionsFor(jobId)).toEqual([]);
   }, 60_000);
 });
 

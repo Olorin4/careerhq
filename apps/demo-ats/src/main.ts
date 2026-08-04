@@ -5,6 +5,7 @@ import {
   confirmationPage,
   consentPage,
   greenhousePage,
+  hiddenConsentPage,
   indexPage,
   leverPage,
   loginPage,
@@ -34,6 +35,7 @@ app.get("/captcha/jobs/:id", (c) => c.html(captchaPage(jobFor(c.req.param("id"))
 app.get("/login/jobs/:id", (c) => c.html(loginPage(jobFor(c.req.param("id")))));
 app.get("/signature/jobs/:id", (c) => c.html(signaturePage(jobFor(c.req.param("id")))));
 app.get("/consent/jobs/:id", (c) => c.html(consentPage(jobFor(c.req.param("id")))));
+app.get("/hidden-consent/jobs/:id", (c) => c.html(hiddenConsentPage(jobFor(c.req.param("id")))));
 
 async function handleApply(source: "greenhouse" | "lever", jobId: string, body: unknown) {
   const fields: Record<string, string> = {};
@@ -70,6 +72,12 @@ app.post("/signature/apply/:id", async (c) => {
 });
 
 app.post("/consent/apply/:id", async (c) => {
+  const body = await c.req.parseBody({ all: true });
+  const submission = await handleApply("lever", c.req.param("id"), body);
+  return c.html(confirmationPage(submission.id));
+});
+
+app.post("/hidden-consent/apply/:id", async (c) => {
   const body = await c.req.parseBody({ all: true });
   const submission = await handleApply("lever", c.req.param("id"), body);
   return c.html(confirmationPage(submission.id));

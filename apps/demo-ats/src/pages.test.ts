@@ -4,6 +4,7 @@ import {
   confirmationPage,
   consentPage,
   greenhousePage,
+  hiddenConsentPage,
   leverPage,
   loginPage,
   signaturePage,
@@ -70,6 +71,17 @@ describe("demo-ats pages", () => {
     );
     expect(html).toContain('name="resume"');
     expect(html).not.toContain('type="password"');
+  });
+
+  it("hidden-consent page ships the same pre-ticked box inside a display:none wrapper", () => {
+    const html = hiddenConsentPage(job);
+    expect(html).toContain('<div class="field" style="display:none">');
+    expect(html).toContain(
+      '<input type="checkbox" id="background_check_consent" name="background_check_consent" value="true" checked />',
+    );
+    // No custom widget stands in for it — the point is a control Playwright
+    // cannot act on, so uncheck() times out.
+    expect(html).toContain('id="btn_submit"');
   });
 
   it("signature page carries a typed-signature and date attestation, no checkbox", () => {

@@ -61,14 +61,33 @@ const TRUTHY_VALUES = new Set(["true", "yes", "on", "1", "checked"]);
 const FALSY_VALUES = new Set(["", "false", "no", "off", "0", "unchecked"]);
 
 /**
- * A Playwright timeout is always reported as `kind: "timeout"` — it says
- * something different about the site than "the click failed" and the
- * orchestrator retries it differently. Everything else carries the kind of the
- * phase it happened in.
+ * Which kind a failure in `phase` carries, given what threw.
+ *
+ * A Playwright timeout normally collapses onto `kind: "timeout"`: it says
+ * something different about the site than "the click failed", and — the part
+ * that matters — a click that timed out may still have LANDED, so apps/web has
+ * to treat it as post-click ambiguity.
+ *
+ * `"fill"` is the exception, and deliberately so. Filling a field is an
+ * interaction with a form CONTROL: typing, selecting, ticking, unticking. None
+ * of that can submit the form, so there is no ambiguity to preserve, whether it
+ * failed instantly or after the full timeout. Collapsing it lost that: an
+ * `uncheck()` on a hidden or disabled checkbox throws a `TimeoutError`, which
+ * became `"timeout"`, which apps/web excludes from
+ * `PRE_CLICK_DRIVER_ERROR_KINDS` — so a field that could not be ticked parked
+ * the attempt in NEEDS_RECONCILE for a human to reconcile a submission that
+ * never happened. It is a plain FAILED: nothing was sent.
+ *
+ * Exported for the unit matrix in driver.test.ts — this rule is half of a
+ * cross-app contract with site-submission.ts and must be pinned from both ends.
  */
+export function driverErrorKind(phase: Exclude<DriverErrorKind, "timeout">, cause: unknown): DriverErrorKind {
+  if (!(cause instanceof errors.TimeoutError)) return phase;
+  return phase === "fill" ? "fill" : "timeout";
+}
+
 function driverError(phase: Exclude<DriverErrorKind, "timeout">, message: string, cause: unknown): DriverError {
-  const kind: DriverErrorKind = cause instanceof errors.TimeoutError ? "timeout" : phase;
-  return new DriverError(`${message}: ${detailOf(cause)}`, kind, { cause });
+  return new DriverError(`${message}: ${detailOf(cause)}`, driverErrorKind(phase, cause), { cause });
 }
 
 function detailOf(cause: unknown): string {

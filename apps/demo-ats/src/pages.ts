@@ -305,6 +305,45 @@ export function consentPage(job: DemoJob): string {
 }
 
 /**
+ * Un-tickable-consent fixture: the same pre-ticked consent box as
+ * `consentPage`, but `display:none` — the shape an ATS produces when a custom
+ * widget renders the real control and hides the native input.
+ *
+ * Playwright cannot `uncheck()` a hidden control: it waits for actionability
+ * and throws a `TimeoutError`. This page exists so that failure is exercised
+ * for real, because collapsing it onto `kind: "timeout"` made a field-fill
+ * failure indistinguishable from a submit click that may have landed, and
+ * parked the attempt in NEEDS_RECONCILE over a form nothing was ever sent to.
+ * Nothing here can be submitted successfully; that is the point.
+ */
+export function hiddenConsentPage(job: DemoJob): string {
+  const action = `/hidden-consent/apply/${escapeHtml(job.id)}`;
+  const body = `<h1>${escapeHtml(job.title)} at ${escapeHtml(job.company)}</h1>
+<form class="application-form" data-source="lever" action="${action}" method="post" enctype="multipart/form-data">
+  <div class="field">
+    <label for="name">Full Name</label>
+    <input type="text" id="name" name="name" aria-required="true" required />
+  </div>
+  <div class="field">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" aria-required="true" required />
+  </div>
+  <div class="field">
+    <label for="resume">Resume/CV</label>
+    <input type="file" id="resume" name="resume" aria-required="true" required />
+  </div>
+  <div class="field" style="display:none">
+    <label for="background_check_consent">
+      <input type="checkbox" id="background_check_consent" name="background_check_consent" value="true" checked />
+      I consent to Northwind Robotics carrying out a background check.
+    </label>
+  </div>
+  <button type="submit" id="btn_submit">Submit Application</button>
+</form>`;
+  return layout(`${job.title} at ${job.company}`, body);
+}
+
+/**
  * Pause-and-return fixture: a CAPTCHA blocker that auto-apply cannot solve.
  */
 export function captchaPage(job: DemoJob): string {

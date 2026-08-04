@@ -549,6 +549,59 @@ d("company-site end-to-end round trip against demo-ats", () => {
   );
 
   it(
+    "reports a consent box it cannot untick as FAILED, never as needs_reconcile",
+    async () => {
+      // The fixture ships the consent box pre-ticked inside a display:none
+      // wrapper, so `uncheck()` waits for actionability and throws a
+      // TimeoutError. Every Playwright timeout used to collapse onto
+      // `kind: "timeout"`, which sits OUTSIDE PRE_CLICK_DRIVER_ERROR_KINDS —
+      // so a field that could not be ticked took the assume-the-worst branch
+      // and parked the attempt for a human to reconcile a submission that was
+      // never made. Interacting with a form control cannot submit the form.
+      const jobUrl = `${DEMO_ATS_URL}/hidden-consent/jobs/e2e-hidden-consent`;
+      const applicationId = await readyApplication("Untickable Robotics Co", jobUrl);
+      const before = await submissionsFor("e2e-hidden-consent");
+
+      // Short browser timeout: the failure IS the assertion, so there is
+      // nothing worth waiting the 45s default for.
+      const fastConfig = config({ AUTOAPPLY_BROWSER_TIMEOUT_MS: "2000" });
+      const fastDeps = deps({ config: fastConfig });
+
+      const outcome = await prepareSiteApplication(fastDeps, { workspaceId, applicationId, url: jobUrl });
+      expect(outcome.status).toBe("ready");
+      if (outcome.status !== "ready") throw new Error(`prepare failed: ${JSON.stringify(outcome)}`);
+
+      const consentField = outcome.form.fields.find((f) => f.label.includes("background check"));
+      if (!consentField) throw new Error("no background-check consent field on the hidden-consent fixture");
+      // Declined, the same way the review screen's consent row commits it.
+      for (const fieldId of outcome.blocking) {
+        const result = await updatePlannedAnswer(fastDeps, {
+          workspaceId, snapshotId: outcome.snapshotId, fieldId, value: "",
+        });
+        expect(result).toEqual({ ok: true });
+      }
+      expect(outcome.blocking).toContain(consentField.id);
+
+      const preview = await previewSiteSubmission(fastDeps, { workspaceId, attemptId: outcome.attemptId });
+      expect(preview.status).toBe("ok");
+      if (preview.status !== "ok") throw new Error(`preview failed: ${JSON.stringify(preview)}`);
+
+      const confirm = await confirmAndSubmitSite(fastDeps, {
+        workspaceId, attemptId: outcome.attemptId, presentedToken: preview.token, retypedTarget: HOST,
+      });
+      expect(confirm.status).toBe("failed");
+      expect(confirm.status).not.toBe("needs_reconcile");
+
+      // FAILED, not NEEDS_RECONCILE: nothing reached the site, so there is
+      // nothing for a human to reconcile.
+      const attempt = await getAttempt(db, outcome.attemptId);
+      expect(attempt?.status).toBe("FAILED");
+      expect(await submissionsFor("e2e-hidden-consent")).toHaveLength(before.length);
+    },
+    BROWSER_TIMEOUT_MS,
+  );
+
+  it(
     "pauses on a captcha page -> blocked with kind captcha, no submission recorded",
     async () => {
       const jobUrl = captchaUrl("e2e-captcha");
