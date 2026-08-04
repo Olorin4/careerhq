@@ -17,7 +17,10 @@ import {
   type ExtractDocument,
   type ExtractedPage,
 } from "./extract.js";
-import { capturePage, DriverError, fillAndSubmit, openSession, type BrowserSession } from "./driver.js";
+import {
+  capturePage, DriverError, fillAndSubmit, openSession,
+  type BrowserSession, type DriverErrorKind,
+} from "./driver.js";
 
 const JOB: DemoJob = { id: "eng-1", title: "Senior Robotics Engineer", company: "Northwind Robotics" };
 const JOB_2: DemoJob = { id: "eng-2", title: "Autonomy Software Engineer", company: "Northwind Robotics" };
@@ -77,6 +80,36 @@ describe("EXTRACT_SCRIPT parity with rawPageFromHtml", () => {
       ["btn_submit", 2],
     ]);
     expect(runScript<number[]>(BUTTON_STEPS_SCRIPT, doc)).toEqual(steps);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The cross-app contract. `apps/web`'s site orchestrator classifies a driver
+// failure as pre-click (→ FAILED) or ambiguous (→ NEEDS_RECONCILE) by reading
+// `name` and `kind` off the thrown error STRUCTURALLY — it takes its driver by
+// injection and must not pull `playwright` into its own module graph to run an
+// `instanceof`. These two properties are therefore a published contract, not an
+// implementation detail: renaming either silently downgrades every provably
+// pre-click failure into a human reconciliation task.
+// ---------------------------------------------------------------------------
+describe("DriverError's cross-app contract", () => {
+  it('reports name "DriverError" and a string kind', () => {
+    const err = new DriverError("could not open http://example.invalid", "navigation");
+    expect(err.name).toBe("DriverError");
+    expect(err.kind).toBe("navigation");
+  });
+
+  it("keeps the kinds apps/web treats as provably pre-click", () => {
+    // Mirrors PRE_CLICK_DRIVER_ERROR_KINDS in apps/web/src/lib/site-submission.ts.
+    const preClick: DriverErrorKind[] = ["navigation", "fill"];
+    for (const kind of preClick) {
+      expect(new DriverError("x", kind).kind).toBe(kind);
+    }
+    // "submit" and "timeout" must stay OUT of that set — the click may have landed.
+    const ambiguous: DriverErrorKind[] = ["submit", "timeout"];
+    for (const kind of ambiguous) {
+      expect(preClick).not.toContain(kind);
+    }
   });
 });
 
@@ -153,8 +186,24 @@ live("driver against demo-ats", () => {
     expect((failure as DriverError).kind).toBe("navigation");
   });
 
+  /**
+   * The demo-ats store is process-global and shared with apps/web's
+   * site-e2e.test.ts, which runs as a separate turbo task against the same
+   * server. Neither suite may wipe it or assert on its total size — that race is
+   * what made the documented gate reproducible only at TURBO_CONCURRENCY=1.
+   * Scope every assertion to the job id this suite submits to instead.
+   */
+  async function submissionsFor(jobId: string): Promise<Array<{
+    id: string; jobId: string; fields: Record<string, string>; files: Array<{ filename: string }>;
+  }>> {
+    const all = (await (await fetch(`${DEMO_ATS_URL}/api/submissions`)).json()) as Array<{
+      id: string; jobId: string; fields: Record<string, string>; files: Array<{ filename: string }>;
+    }>;
+    return all.filter((submission) => submission.jobId === jobId);
+  }
+
   it("walks all three steps, uploads the CV and submits exactly once", async () => {
-    await fetch(`${DEMO_ATS_URL}/api/submissions`, { method: "DELETE" });
+    const before = await submissionsFor("eng-1");
 
     const url = `${DEMO_ATS_URL}/greenhouse/jobs/eng-1`;
     const raw = await capturePage(session, url, deps);
@@ -211,19 +260,17 @@ live("driver against demo-ats", () => {
     expect(result.pageText).toContain("Application received");
     expect(result.screenshotPng.subarray(0, 4).toString("latin1")).toBe("\x89PNG");
 
-    const submissions = (await (await fetch(`${DEMO_ATS_URL}/api/submissions`)).json()) as Array<{
-      id: string;
-      fields: Record<string, string>;
-      files: Array<{ filename: string }>;
-    }>;
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0]?.id).toBe(result.confirmationId);
-    expect(submissions[0]?.fields["email"]).toBe("ada@example.com");
-    expect(submissions[0]?.fields["first_name"]).toBe("Ada");
-    expect(submissions[0]?.fields["work_authorization"]).toBe("yes");
-    expect(submissions[0]?.fields["legal_attestation"]).toBe("true");
-    expect(submissions[0]?.fields["gender"]).toBe("decline");
-    expect(submissions[0]?.files[0]?.filename).toBe("resume.pdf");
+    // Exactly one new row for this job, and it is the one this click created.
+    const after = await submissionsFor("eng-1");
+    expect(after.length).toBe(before.length + 1);
+    const created = after.find((submission) => submission.id === result.confirmationId);
+    expect(created).toBeDefined();
+    expect(created?.fields["email"]).toBe("ada@example.com");
+    expect(created?.fields["first_name"]).toBe("Ada");
+    expect(created?.fields["work_authorization"]).toBe("yes");
+    expect(created?.fields["legal_attestation"]).toBe("true");
+    expect(created?.fields["gender"]).toBe("decline");
+    expect(created?.files[0]?.filename).toBe("resume.pdf");
   }, 60_000);
 });
 
