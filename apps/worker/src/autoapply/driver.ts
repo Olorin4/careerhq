@@ -5,8 +5,8 @@
 // 11) works off the results returned here. This module's whole job is to turn
 // a URL into a `RawFormPage`, and a `CanonicalForm` + `PlannedAnswer[]` back
 // into keystrokes, one submit click, and the evidence of what happened.
-import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
-import { fieldIdentityHash, rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
+import type { CanonicalForm, FieldKind, PlannedAnswer } from "@careerhq/contracts";
+import { fieldIdentityHash, fieldKindFor, rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
 import { chromium, errors, type Browser, type Page } from "playwright";
 import { acquireBrowserSlot, type BrowserSlot } from "./browser-limit.js";
 import { BUTTON_STEPS_SCRIPT, deriveTotalSteps, EXTRACT_SCRIPT, type ExtractedPage } from "./extract.js";
@@ -565,6 +565,100 @@ function assertQuestionsUnchanged(fills: PlannedFill[], form: CanonicalForm): vo
   }
 }
 
+/** The two kinds whose empty planned value is a DECISION rather than an absence. */
+const TICKABLE_KINDS: ReadonlySet<FieldKind> = new Set<FieldKind>(["checkbox", "radio"]);
+
+/**
+ * The same check, asked from the REVIEWED side — and the half that was missing.
+ *
+ * `assertQuestionsUnchanged` above can only judge fields that survived
+ * `plannedFills`, and `plannedFills` reads the LIVE page: it drops any control
+ * whose planned value is empty unless the control is tickable *right now*. So a
+ * page could neutralise the whole check on one control by changing one
+ * attribute. The reviewer proved it: a pre-ticked consent box the user UNTICKED
+ * (planned value `""`) served back as
+ * `<input type="hidden" … value="true">` under the same id, name, selector and
+ * label. Identical field id, identical identity hash, dropped before the
+ * comparison, and demo-ats recorded `background_check_consent: "true"` while the
+ * receipt recorded `""`. A receipt that says "declined" while the employer is
+ * told "consented" is the worst thing this application can produce, because
+ * nobody finds out.
+ *
+ * So this iterates the fields the USER REVIEWED, not the fields the page is
+ * offering now, and for every one the user made a decision about it requires:
+ *
+ *   1. the control is still there (same `id`, i.e. same selector);
+ *   2. it still asks the same question (`identityHash`);
+ *   3. it is still the same KIND of control (`kind`).
+ *
+ * (3) is what catches the checkbox→hidden swap, and it is compared against a
+ * value every snapshot already stores — no re-hashing, so snapshots written
+ * before this existed are judged by exactly the same rule.
+ *
+ * (1) also covers the two neighbours: a consent field REMOVED between review and
+ * submit used to submit the rest of the form regardless, and a required text
+ * field whose id MOVED used to be silently not typed, fail HTML5 validation and
+ * come back `confirmationId: null` — which apps/web parks NEEDS_RECONCILE,
+ * sending a human to reconcile a submission that provably never happened. Both
+ * are now `kind: "fill"`: pre-click, honest, and retryable.
+ *
+ * What is deliberately NOT required:
+ *
+ * - A field with no recorded `identityHash` (snapshot from before this existed,
+ *   or a form built by hand) — absent is "nothing to compare against".
+ * - A field the user made no decision about: no planned answer at all, or an
+ *   empty answer on a control whose reviewed kind is not tickable, which is the
+ *   planner's way of saying "leave whatever the page has alone". The driver
+ *   types nothing there, so there is nothing to misattribute.
+ * - A field on a step the current extraction has not rendered. A multi-step form
+ *   whose later controls only exist after a "Next" click is legitimate and
+ *   common; refusing it would break every such ATS. Step 0 is always treated as
+ *   rendered — it is the step the browser landed on, so "no fields at all" is a
+ *   changed page, not an unrendered step.
+ */
+function assertReviewedFieldsIntact(
+  form: CanonicalForm,
+  liveFields: RawField[],
+  answersByFieldId: Map<string, PlannedAnswer>,
+  files: Record<string, string>,
+): void {
+  const liveById = new Map(liveFields.map((field) => [rawFieldId(field), field]));
+  const renderedSteps = new Set<number>([0, ...liveFields.map((field) => field.step)]);
+
+  for (const reviewed of form.fields) {
+    if (reviewed.identityHash === undefined) continue;
+    const answer = answersByFieldId.get(reviewed.id);
+    if (answer === undefined) continue;
+    const decided = answer.value !== "" || files[reviewed.id] !== undefined || TICKABLE_KINDS.has(reviewed.kind);
+    if (!decided) continue;
+
+    const live = liveById.get(reviewed.id);
+    if (live === undefined) {
+      if (!renderedSteps.has(reviewed.step)) continue;
+      throw new DriverError(
+        `refusing to fill the form at ${form.url}: the control the user answered `
+        + `("${shortLabel(reviewed.label)}") is no longer on the page`,
+        "fill",
+      );
+    }
+    if (fieldIdentityHash(live) !== reviewed.identityHash) {
+      throw new DriverError(
+        `refusing to fill ${live.selector} ("${shortLabel(live.labelText)}"): `
+        + "the question under it changed since this form was reviewed",
+        "fill",
+      );
+    }
+    const liveKind = fieldKindFor(live);
+    if (liveKind !== reviewed.kind) {
+      throw new DriverError(
+        `refusing to fill ${live.selector} ("${shortLabel(live.labelText)}"): `
+        + `it was a ${reviewed.kind} when this form was reviewed and is a ${liveKind} now`,
+        "fill",
+      );
+    }
+  }
+}
+
 interface StepButtons {
   next: string | null;
   submit: string | null;
@@ -632,7 +726,11 @@ export async function fillAndSubmit(session: BrowserSession, args: FillAndSubmit
     const answersByFieldId = new Map(answers.map((answer) => [answer.fieldId, answer]));
     const fills = plannedFills(extracted.fields, answersByFieldId, files);
     // Before anything is typed, ticked or uploaded — and therefore before there
-    // is anything to undo.
+    // is anything to undo. Both directions, because neither subsumes the other:
+    // the reviewed side covers every field the user decided about, including the
+    // ones `plannedFills` drops; the live side additionally covers a control the
+    // driver will act on with no planned answer at all (a tickable is cleared).
+    assertReviewedFieldsIntact(form, extracted.fields, answersByFieldId, files);
     assertQuestionsUnchanged(fills, form);
 
     let buttonSteps: number[];

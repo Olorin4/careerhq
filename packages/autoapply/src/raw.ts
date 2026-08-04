@@ -6,6 +6,7 @@
 // detect.ts/blockers.ts/generic.ts never need to know whether the page came
 // from a real browser or a static HTML fixture.
 import { createHash } from "node:crypto";
+import type { FieldKind } from "@careerhq/contracts";
 
 export interface RawField {
   selector: string; // unique CSS selector the driver can re-find
@@ -58,7 +59,44 @@ export function rawFieldId(field: RawField): string {
  *
  * The label is whitespace-collapsed first: a reflow is not a reword, and the
  * same sentence wrapped differently must not refuse a legitimate submission.
+ *
+ * This hash is NOT the whole re-verification, and must not be relied on as if
+ * it were: it deliberately covers only the selector and the question, so a page
+ * that keeps both and changes the control's TYPE hashes identically. That case
+ * (`type="checkbox"` → `type="hidden"` on a consent box) is caught by comparing
+ * {@link fieldKindFor} against the snapshot's recorded `kind`, alongside this.
  */
+const INPUT_KIND_BY_TYPE: Partial<Record<string, FieldKind>> = {
+  email: "email",
+  tel: "tel",
+  url: "url",
+  checkbox: "checkbox",
+  radio: "radio",
+  file: "file",
+  date: "date",
+  hidden: "hidden",
+};
+
+/**
+ * What KIND of control this is — the parser's `CanonicalFormField.kind`.
+ *
+ * Lives beside `fieldIdentityHash` because the two are asked together: the hash
+ * says "this control, asking this question", and the kind says "and it is still
+ * the same sort of control". A page can keep a checkbox's id, name, selector and
+ * label and change nothing but `type="checkbox"` → `type="hidden"`, which leaves
+ * the hash identical while turning a box the user unticked into a value the
+ * browser cannot untick. Comparing the kind is what makes that a refusal, and it
+ * compares against a field the snapshot ALREADY records — no re-hashing, so
+ * snapshots taken before this existed keep working.
+ */
+export function fieldKindFor(field: Pick<RawField, "tag" | "type">): FieldKind {
+  if (field.tag === "textarea") return "textarea";
+  if (field.tag === "select") return "select";
+  // Any other/unrecognized input type (text, password, number, ...) falls
+  // back to plain "text" — there is no dedicated FieldKind for e.g. password.
+  return INPUT_KIND_BY_TYPE[field.type] ?? "text";
+}
+
 export function fieldIdentityHash(field: Pick<RawField, "selector" | "labelText">): string {
   const label = field.labelText.replace(/\s+/g, " ").trim();
   // "\n" separates the two parts; the selector can contain one, so it is

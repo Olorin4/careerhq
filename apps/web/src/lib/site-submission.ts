@@ -218,13 +218,17 @@ function errorMessage(err: unknown): string {
  *     so `driverErrorKind` deliberately does NOT collapse the fill phase onto
  *     "timeout" the way it collapses the others.
  *
- *     The refusal case is the live-page re-verification (P6 task 6): the
- *     answers below were planned against the page as it was when the user
- *     reviewed it, and the driver re-extracts the page and checks that every
- *     control it is about to touch still asks the same question
- *     (`fieldIdentityHash`) before it types anything. A consent tick's whole
- *     meaning is the statement beside it, so a page edited between review and
- *     confirm must not receive an answer planned for a different question.
+ *     The refusal case is the live-page re-verification (P6 task 6, widened by
+ *     the t6 review): the answers below were planned against the page as it was
+ *     when the user reviewed it, and the driver re-extracts the page and checks
+ *     — before it types anything — that every field the user made a decision
+ *     about is still there, still asks the same question (`fieldIdentityHash`)
+ *     and is still the same kind of control. A consent tick's whole meaning is
+ *     the statement beside it, so a page edited between review and confirm must
+ *     not receive an answer planned for a different question; and a consent box
+ *     that is REMOVED, MOVED or turned into a hidden input must not let the
+ *     rest of the form through, because the receipt written below would then
+ *     record a decision the employer never received (or the opposite one).
  *     Reported as "fill" because it is strictly stronger than one: nothing on
  *     the page was touched at all, so the attempt is FAILED and retryable —
  *     re-run auto-apply, review the question as it now reads, submit again —

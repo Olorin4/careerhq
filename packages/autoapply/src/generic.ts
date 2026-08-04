@@ -1,25 +1,6 @@
-import { canonicalFormSchema, type CanonicalForm, type FieldKind } from "@careerhq/contracts";
-import { fieldIdentityHash, PARSER_VERSION, rawFieldId, type RawField, type RawFormPage } from "./raw.js";
+import { canonicalFormSchema, type CanonicalForm } from "@careerhq/contracts";
+import { fieldIdentityHash, fieldKindFor, PARSER_VERSION, rawFieldId, type RawFormPage } from "./raw.js";
 import { detectBlockers } from "./blockers.js";
-
-const INPUT_KIND_BY_TYPE: Partial<Record<string, FieldKind>> = {
-  email: "email",
-  tel: "tel",
-  url: "url",
-  checkbox: "checkbox",
-  radio: "radio",
-  file: "file",
-  date: "date",
-  hidden: "hidden",
-};
-
-function kindFor(field: RawField): FieldKind {
-  if (field.tag === "textarea") return "textarea";
-  if (field.tag === "select") return "select";
-  // Any other/unrecognized input type (text, password, number, ...) falls
-  // back to plain "text" — there is no dedicated FieldKind for e.g. password.
-  return INPUT_KIND_BY_TYPE[field.type] ?? "text";
-}
 
 function firstLine(text: string): string {
   return (text.split(/\r?\n/, 1)[0] ?? "").trim();
@@ -54,7 +35,7 @@ export function parseGenericForm(
       // Captured here, at the moment the form the user will review is built,
       // and re-checked by the driver against the live page before it types.
       identityHash: fieldIdentityHash(field),
-      kind: kindFor(field),
+      kind: fieldKindFor(field),
       label: field.labelText || field.placeholder || firstLine(field.nearbyText),
       required: field.required,
       options: field.options,

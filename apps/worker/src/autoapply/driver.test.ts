@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -245,6 +246,22 @@ const demoAtsUp = await probeDemoAts();
 const browserAvailable = await probeBrowser();
 const live = describe.skipIf(!demoAtsUp || !browserAvailable);
 
+/**
+ * The demo-ats store is process-global and shared with apps/web's
+ * site-e2e.test.ts, which runs as a separate turbo task against the same
+ * server. Neither suite may wipe it or assert on its total size — that race is
+ * what made the documented gate reproducible only at TURBO_CONCURRENCY=1.
+ * Scope every assertion to the job id the suite submits to instead.
+ */
+async function submissionsFor(jobId: string): Promise<Array<{
+  id: string; jobId: string; fields: Record<string, string>; files: Array<{ filename: string }>;
+}>> {
+  const all = (await (await fetch(`${DEMO_ATS_URL}/api/submissions`)).json()) as Array<{
+    id: string; jobId: string; fields: Record<string, string>; files: Array<{ filename: string }>;
+  }>;
+  return all.filter((submission) => submission.jobId === jobId);
+}
+
 live("driver against demo-ats", () => {
   const deps = { timeoutMs: 30_000, isNavigationAllowed: ALLOW_ANY };
   let session: BrowserSession;
@@ -287,22 +304,6 @@ live("driver against demo-ats", () => {
     expect(failure).toBeInstanceOf(DriverError);
     expect((failure as DriverError).kind).toBe("navigation");
   });
-
-  /**
-   * The demo-ats store is process-global and shared with apps/web's
-   * site-e2e.test.ts, which runs as a separate turbo task against the same
-   * server. Neither suite may wipe it or assert on its total size — that race is
-   * what made the documented gate reproducible only at TURBO_CONCURRENCY=1.
-   * Scope every assertion to the job id this suite submits to instead.
-   */
-  async function submissionsFor(jobId: string): Promise<Array<{
-    id: string; jobId: string; fields: Record<string, string>; files: Array<{ filename: string }>;
-  }>> {
-    const all = (await (await fetch(`${DEMO_ATS_URL}/api/submissions`)).json()) as Array<{
-      id: string; jobId: string; fields: Record<string, string>; files: Array<{ filename: string }>;
-    }>;
-    return all.filter((submission) => submission.jobId === jobId);
-  }
 
   it("walks all three steps, uploads the CV and submits exactly once", async () => {
     const before = await submissionsFor("eng-1");
@@ -632,6 +633,223 @@ live("driver against demo-ats", () => {
     expect(result.confirmationId).toMatch(/^NR-[0-9a-f]{8}$/);
     const created = (await submissionsFor(jobId)).find((s) => s.id === result.confirmationId);
     expect(created?.fields["legal_attestation"]).toBe("true");
+  }, 60_000);
+});
+
+
+// ---------------------------------------------------------------------------
+// A page that really CHANGES between review and submit (P6 t6 review, B1).
+//
+// The suite above simulates drift from the snapshot's side. That is enough to
+// exercise the comparison, but it cannot reach the bug the reviewer found: the
+// live page turning a control into a different KIND of control under the same
+// id, selector and label. So this suite puts a mutating proxy in front of
+// demo-ats — it serves the real page unchanged while `capturePage` reads it,
+// serves a mutated page when `fillAndSubmit` reads it, and FORWARDS the POST to
+// demo-ats, so `/api/submissions` is still the ground truth for "did anything
+// reach the site". Every assertion here is on that store, never merely on an
+// exception: a refusal that still submitted would be worse than no refusal.
+// ---------------------------------------------------------------------------
+live("driver against a page that mutates between review and submit", () => {
+  // demo-ats's store is process-global and lives as long as the server, so a
+  // re-run inside the same server would find its own previous rows and make
+  // "nothing reached the site" unfalsifiable. Every job id here is unique to
+  // this run.
+  const RUN = randomUUID().slice(0, 8);
+  const deps = { timeoutMs: 30_000, isNavigationAllowed: ALLOW_ANY };
+  let session: BrowserSession;
+  let proxy: Server;
+  let proxyPort = 0;
+  let resumePath: string;
+  /** Armed AFTER the capture, so review and submit genuinely see different HTML. */
+  let mutate: ((html: string) => string) | null = null;
+
+  beforeAll(async () => {
+    session = await openSession();
+    const dir = mkdtempSync(path.join(tmpdir(), "careerhq-mutate-"));
+    resumePath = path.join(dir, "resume.pdf");
+    writeFileSync(resumePath, "%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<<>>\n%%EOF\n");
+
+    proxy = createServer((req, res) => {
+      void (async () => {
+        const target = `${DEMO_ATS_URL}${req.url ?? "/"}`;
+        if (req.method === "POST") {
+          // Forwarded verbatim: the multipart body the browser built is what
+          // demo-ats stores, so the recorded fields are the posted fields.
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(chunk as Buffer);
+          const upstream = await fetch(target, {
+            method: "POST",
+            headers: { "content-type": req.headers["content-type"] ?? "" },
+            body: Buffer.concat(chunks),
+          });
+          const forwarded = await upstream.text();
+          res.writeHead(upstream.status, { "content-type": "text/html" });
+          res.end(forwarded);
+          return;
+        }
+        const upstream = await fetch(target);
+        const html = await upstream.text();
+        res.writeHead(upstream.status, { "content-type": "text/html" });
+        res.end(mutate ? mutate(html) : html);
+      })().catch((cause: unknown) => {
+        res.writeHead(502, { "content-type": "text/plain" });
+        res.end(String(cause));
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    proxyPort = (proxy.address() as AddressInfo).port;
+  }, 60_000);
+
+  afterAll(async () => {
+    await session?.close();
+    proxy?.close();
+  });
+
+  beforeEach(() => {
+    mutate = null;
+  });
+
+  /** A mutation that silently matched nothing would turn every case below green. */
+  function mustReplace(html: string, pattern: RegExp, replacement: string): string {
+    if (!pattern.test(html)) throw new Error(`mutation did not match the served page: ${String(pattern)}`);
+    return html.replace(pattern, replacement);
+  }
+
+  interface Outcome {
+    /** The DriverError kind, or null when the driver went through with it. */
+    refused: DriverErrorKind | null;
+    confirmationId: string | null;
+    /** What demo-ats actually stored for this job — the ground truth. */
+    recorded: Array<Record<string, string>>;
+    message: string;
+  }
+
+  /**
+   * Review the real page, arm the mutation, then fill and submit against the
+   * mutated one. The plan is the consent case verbatim: attestation given,
+   * background check DECLINED (`""` — what the review screen commits on untick),
+   * talent pool kept.
+   */
+  async function reviewThenSubmit(jobId: string, mutation: (html: string) => string): Promise<Outcome> {
+    const url = `http://localhost:${proxyPort}/consent/jobs/${jobId}`;
+    const raw = await capturePage(session, url, deps);
+    const form = parseForm(raw);
+
+    const idFor = (name: string): string => {
+      const field = raw.fields.find((f) => f.name === name);
+      if (!field) throw new Error(`no raw field named ${name}`);
+      return rawFieldId(field);
+    };
+
+    const answers: PlannedAnswer[] = ([
+      [idFor("name"), "Ada Lovelace"],
+      [idFor("email"), "ada@example.com"],
+      [idFor("resume"), "cv-variant-1"],
+      [idFor("legal_attestation"), "true"],
+      [idFor("background_check_consent"), ""],
+      [idFor("talent_pool_opt_in"), "true"],
+    ] as Array<[string, string]>).map(([fieldId, value]) => ({
+      fieldId,
+      value,
+      source: "user" as const,
+      sourceFactIds: [],
+      confidence: 1,
+      needsUser: false,
+      differsFromApproved: false,
+      note: "",
+    }));
+
+    mutate = mutation;
+    const outcome = await fillAndSubmit(session, {
+      url, form, answers, files: { [idFor("resume")]: resumePath }, deps,
+    }).then(
+      (result) => ({ refused: null, confirmationId: result.confirmationId, message: "" }),
+      (cause: unknown) => ({
+        refused: cause instanceof DriverError ? cause.kind : null,
+        confirmationId: null,
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
+    );
+
+    return { ...outcome, recorded: (await submissionsFor(jobId)).map((s) => s.fields) };
+  }
+
+  /**
+   * The reviewer's probe D, verbatim. One attribute changes — `type="checkbox"`
+   * becomes `type="hidden"` — and the id, the name, the selector and the label
+   * all stay identical, so the field id and the identity hash both still match.
+   * The old check never saw the field at all: `plannedFills` dropped it (empty
+   * value, not tickable ANY MORE) before the comparison ran, the hidden input
+   * kept its `value="true"`, and demo-ats recorded a consent the user declined
+   * while the receipt recorded `""`.
+   */
+  it("refuses when a declined consent box becomes a hidden input under the same selector", async () => {
+    const jobId = `consent-kind-swap-${RUN}`;
+    const outcome = await reviewThenSubmit(jobId, (html) =>
+      mustReplace(
+        html,
+        /<input type="checkbox" id="background_check_consent"[^>]*>/,
+        '<input type="hidden" id="background_check_consent" name="background_check_consent" value="true" />',
+      ),
+    );
+
+    // Asserted as one object so a regression prints WHAT demo-ats stored.
+    expect({ refused: outcome.refused, confirmationId: outcome.confirmationId, recorded: outcome.recorded })
+      .toEqual({ refused: "fill", confirmationId: null, recorded: [] });
+    expect(outcome.message).toContain("background_check_consent");
+  }, 60_000);
+
+  /** Probe E: the same control, gone. A decision the user made has nowhere to land. */
+  it("refuses when the consent box the user decided about is removed entirely", async () => {
+    const jobId = `consent-removed-${RUN}`;
+    const outcome = await reviewThenSubmit(jobId, (html) =>
+      mustReplace(html, /<input type="checkbox" id="background_check_consent"[^>]*>/, ""),
+    );
+
+    expect({ refused: outcome.refused, confirmationId: outcome.confirmationId, recorded: outcome.recorded })
+      .toEqual({ refused: "fill", confirmationId: null, recorded: [] });
+    // Names the question the user answered, since the control itself is gone.
+    expect(outcome.message).toContain("carrying out a background check");
+  }, 60_000);
+
+  /**
+   * Probe H, and the reason this refusal is a *fix* rather than a new failure
+   * mode: a required field whose id moved was silently not typed, HTML5
+   * validation blocked the submit, and `fillAndSubmit` returned
+   * `confirmationId: null` — which apps/web parks as NEEDS_RECONCILE, sending a
+   * human to reconcile a submission that provably never happened. `kind: "fill"`
+   * is pre-click and honest, and the attempt is retryable.
+   */
+  it("refuses when a required field's id moves, instead of typing nothing and parking a reconcile", async () => {
+    const jobId = `consent-id-shift-${RUN}`;
+    const outcome = await reviewThenSubmit(jobId, (html) =>
+      mustReplace(html, /id="email"/, 'id="email_address"').replace(/for="email"/, 'for="email_address"'),
+    );
+
+    expect({ refused: outcome.refused, confirmationId: outcome.confirmationId, recorded: outcome.recorded })
+      .toEqual({ refused: "fill", confirmationId: null, recorded: [] });
+    expect(outcome.message).toContain('("Email")');
+  }, 60_000);
+
+  /**
+   * The half that must not break: through the very same proxy, with the very
+   * same plan, an UNMUTATED page still fills and submits — and the declined
+   * consent is still absent from the posted body. Without this, "refuse
+   * everything" would pass the three cases above.
+   */
+  it("still fills and submits when the proxy serves the page unchanged", async () => {
+    const jobId = `consent-proxy-nodrift-${RUN}`;
+    const outcome = await reviewThenSubmit(jobId, (html) => html);
+
+    expect(outcome.refused).toBeNull();
+    expect(outcome.confirmationId).toMatch(/^NR-[0-9a-f]{8}$/);
+    expect(outcome.recorded).toEqual([{
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      legal_attestation: "true",
+      talent_pool_opt_in: "true",
+    }]);
   }, 60_000);
 });
 
