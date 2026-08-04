@@ -105,8 +105,11 @@ describe("DriverError's cross-app contract", () => {
     for (const kind of preClick) {
       expect(new DriverError("x", kind).kind).toBe(kind);
     }
-    // "submit" and "timeout" must stay OUT of that set — the click may have landed.
-    const ambiguous: DriverErrorKind[] = ["submit", "timeout"];
+    // "submit", "timeout" and "advance" must stay OUT of that set — the click
+    // may have landed. "advance" is the between-steps click: it is dispatched
+    // before its error surfaces, and a next-labelled button can turn out to be
+    // the real submit on ATSs whose step heuristics misplace it.
+    const ambiguous: DriverErrorKind[] = ["submit", "timeout", "advance"];
     for (const kind of ambiguous) {
       expect(preClick).not.toContain(kind);
     }

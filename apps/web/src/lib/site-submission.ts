@@ -194,13 +194,15 @@ function errorMessage(err: unknown): string {
  * `DriverError.kind`s (apps/worker/src/autoapply/driver.ts) that are provably
  * raised BEFORE the one submit click:
  *   - "navigation" — the page never opened, never extracted, or Chromium never
- *     launched at all (`openSession` reports a launch failure as this kind).
- *   - "fill" — a field action or a between-steps "Next" click failed; the
- *     submit button has not been touched.
+ *     launched at all (`openSession` reports every launch failure as this
+ *     kind, timeouts included — a launch has no click to be ambiguous about).
+ *   - "fill" — a field action failed; no button has been touched.
  * Everything else stays ambiguous on purpose. "submit" is the click itself;
- * "timeout" has already lost which phase it came from (`driverError` collapses
- * every Playwright TimeoutError onto it), and a click that timed out may still
- * have landed.
+ * "advance" is the between-steps click, which was dispatched before its error
+ * surfaced and may have been the real submit on an ATS whose next-labelled
+ * button the step heuristics misplaced; "timeout" has already lost which phase
+ * it came from (`driverError` collapses every Playwright TimeoutError onto
+ * it), and a click that timed out may still have landed.
  */
 const PRE_CLICK_DRIVER_ERROR_KINDS: ReadonlySet<string> = new Set(["navigation", "fill"]);
 
@@ -1001,7 +1003,10 @@ export async function confirmAndSubmitSite(
     // Anything else is unclassified and the attempt has already begun — assume
     // the worst (the application may be in) and park it for a human rather than
     // guessing.
-    const reason = `the submission failed in an unexpected way: ${errorMessage(err)}`;
+    // Redacted like its FAILED sibling: a raw Playwright error escaping the
+    // post-click evidence phase carries call logs, and strict-mode violations
+    // embed element snapshots that can include values typed into the form.
+    const reason = `the submission failed in an unexpected way: ${redactError(err, [])}`;
     await markNeedsReconcileSafely(deps, attempt.id, reason);
     return { status: "needs_reconcile", reason };
   }

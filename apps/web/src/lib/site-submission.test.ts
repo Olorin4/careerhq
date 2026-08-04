@@ -794,6 +794,42 @@ d("confirmAndSubmitSite", () => {
     expect((await getAttempt(db, prepared.attemptId))?.status).toBe("NEEDS_RECONCILE");
   });
 
+  it("treats a failed between-steps advance as ambiguous — that click was dispatched, and it may have been the real submit", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Advance Co");
+
+    const error = new FakeDriverError("could not advance past step 1: Execution context was destroyed", "advance");
+    const outcome = await confirmAndSubmitSite(
+      deps({ submit: stubSubmit(calls, { kind: "throws", error }) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(outcome.status).toBe("needs_reconcile");
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("NEEDS_RECONCILE");
+  });
+
+  it("bounds and redacts the reason stored for an unrecognised post-click throw — raw driver errors can embed form values", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Raw Error Co");
+
+    // The shape of a strict-mode violation escaping the evidence-gathering
+    // phase: a long call log whose tail embeds an element snapshot carrying a
+    // value the user typed into the form.
+    const error = new Error(
+      `locator resolved to 2 elements${"\n<intermediate line> ".repeat(20)}\n<input value="applicant-pii@example.com">`,
+    );
+    const outcome = await confirmAndSubmitSite(
+      deps({ submit: stubSubmit(calls, { kind: "throws", error }) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(outcome.status).toBe("needs_reconcile");
+
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("NEEDS_RECONCILE");
+    expect(attempt?.failureReason).toMatch(/locator resolved/);
+    expect(attempt?.failureReason).not.toMatch(/applicant-pii@example\.com/);
+    expect(attempt?.failureReason?.length ?? 0).toBeLessThan(400);
+  });
+
   it("treats a driver timeout as ambiguous — a click that timed out may still have landed", async () => {
     const calls: SubmitCall[] = [];
     const prepared = await previewed("Timeout Co");

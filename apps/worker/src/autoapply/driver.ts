@@ -10,7 +10,7 @@ import { rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply
 import { chromium, errors, type Browser, type Page } from "playwright";
 import { BUTTON_STEPS_SCRIPT, deriveTotalSteps, EXTRACT_SCRIPT, type ExtractedPage } from "./extract.js";
 
-export type DriverErrorKind = "navigation" | "timeout" | "fill" | "submit";
+export type DriverErrorKind = "navigation" | "timeout" | "fill" | "submit" | "advance";
 
 /** Every failure crossing this module's boundary is one of these. */
 export class DriverError extends Error {
@@ -68,8 +68,11 @@ const FALSY_VALUES = new Set(["", "false", "no", "off", "0", "unchecked"]);
  */
 function driverError(phase: Exclude<DriverErrorKind, "timeout">, message: string, cause: unknown): DriverError {
   const kind: DriverErrorKind = cause instanceof errors.TimeoutError ? "timeout" : phase;
-  const detail = cause instanceof Error ? cause.message.split("\n")[0] : String(cause);
-  return new DriverError(`${message}: ${detail}`, kind, { cause });
+  return new DriverError(`${message}: ${detailOf(cause)}`, kind, { cause });
+}
+
+function detailOf(cause: unknown): string {
+  return cause instanceof Error ? (cause.message.split("\n")[0] ?? cause.message) : String(cause);
 }
 
 export async function openSession(): Promise<BrowserSession> {
@@ -77,7 +80,11 @@ export async function openSession(): Promise<BrowserSession> {
   try {
     browser = await chromium.launch({ headless: true });
   } catch (cause) {
-    throw driverError("navigation", "could not launch chromium", cause);
+    // NOT via driverError: a launch has no click to be ambiguous about, so
+    // even a launch TIMEOUT must stay provably pre-click ("navigation"), not
+    // collapse onto "timeout" and park the attempt for a browser that never
+    // existed.
+    throw new DriverError(`could not launch chromium: ${detailOf(cause)}`, "navigation", { cause });
   }
   return {
     newPage: () => browser.newPage(),
@@ -259,7 +266,11 @@ export async function fillAndSubmit(session: BrowserSession, args: FillAndSubmit
           await page.locator(firstNextField.selector).first().waitFor({ state: "attached", timeout: deps.timeoutMs });
         }
       } catch (cause) {
-        throw driverError("fill", `could not advance past step ${step}`, cause);
+        // "advance", not "fill": the click was dispatched before this error
+        // surfaced, and on a real ATS a next-labelled button can turn out to
+        // be the actual submit — apps/web must treat this as ambiguous, never
+        // as a provably pre-click failure it invites the user to retry.
+        throw driverError("advance", `could not advance past step ${step}`, cause);
       }
     }
 
