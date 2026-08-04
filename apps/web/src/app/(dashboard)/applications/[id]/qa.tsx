@@ -78,8 +78,11 @@ function ManualAnswerForm({
   sensitive: boolean;
 }) {
   // Same reasoning as the materials panel's manual draft form: the action
-  // reports why it saved nothing rather than throwing or failing silently.
-  const [saveError, saveManualAnswer] = useActionState(saveManualAnswerAction, null);
+  // reports why it saved nothing rather than throwing or failing silently, and
+  // hands the submitted answer back so React's post-action form reset does not
+  // empty the textarea. `question` is already controlled by the parent, so it
+  // survives on its own.
+  const [saveState, saveManualAnswer] = useActionState(saveManualAnswerAction, null);
   return (
     <form action={saveManualAnswer} className="qa-manual-form">
       <input type="hidden" name="applicationId" value={applicationId} />
@@ -97,10 +100,12 @@ function ManualAnswerForm({
       </label>
       <label>
         Answer
-        <textarea name="answer" rows={4} required />
+        <textarea name="answer" defaultValue={saveState?.answer ?? ""} rows={4} required />
       </label>
       <button type="submit">Save manual answer</button>
-      {saveError && <p className="qa-error">{saveError}</p>}
+      {saveState && (
+        <p className="qa-error">Not saved — {saveState.reason}. Your answer is still here; try again.</p>
+      )}
     </form>
   );
 }

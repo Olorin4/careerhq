@@ -109,8 +109,11 @@ function MaterialSection({
   const [error, setError] = useState<string | null>(null);
   // The manual form posts straight to the server action; `useActionState`
   // carries back the reason a save did nothing (currently only the demo rate
-  // limit) so it is never silently dropped.
-  const [manualError, saveManualDraft] = useActionState(createManualDocumentAction, null);
+  // limit) AND the text that was submitted, so a refusal neither goes
+  // unreported nor costs the user the draft they just typed — React resets an
+  // uncontrolled form once its action resolves, and the textarea's
+  // `defaultValue` below re-seeds from this.
+  const [manualDraft, saveManualDraft] = useActionState(createManualDocumentAction, null);
 
   async function runNonStreamingFallback() {
     setFellBack(true);
@@ -274,13 +277,15 @@ function MaterialSection({
           Manual draft
           <textarea
             name="content"
-            defaultValue={document?.origin === "user" ? document.contentMd : ""}
+            defaultValue={manualDraft?.content ?? (document?.origin === "user" ? document.contentMd : "")}
             rows={6}
             required
           />
         </label>
         <button type="submit">Save manual draft</button>
-        {manualError && <p className="materials-error">{manualError}</p>}
+        {manualDraft && (
+          <p className="materials-error">Not saved — {manualDraft.reason}. Your draft is still here; try again.</p>
+        )}
       </form>
     </div>
   );

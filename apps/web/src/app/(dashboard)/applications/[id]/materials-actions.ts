@@ -82,22 +82,32 @@ const manualDocumentSchema = z.object({
 });
 
 /**
+ * What a refused manual save hands back: the reason, plus the text that was
+ * submitted. The text matters as much as the reason — React resets an
+ * uncontrolled form once its action resolves, so without carrying the content
+ * back for the textarea to re-seed its `defaultValue` from, a refused save
+ * would silently discard what the user had just typed and restore the last
+ * saved draft (P6 task-3 review, advisory C). `null` means saved.
+ */
+export type ManualDocumentState = { reason: string; content: string } | null;
+
+/**
  * The manual editor's save action. Always inserts a new draft row with
  * `origin: "user"` — documents are append-only history, not edited in
  * place, so a manual edit (even of a previously AI-drafted document) becomes
  * its own new latest version rather than mutating the AI-authored row.
  *
- * Shaped for `useActionState`: it returns the reason it did nothing (or null
- * on success) rather than throwing, so a rate-limited save is visible in the
- * form instead of silently dropping what the user typed.
+ * Shaped for `useActionState`: it returns why it did nothing (or null on
+ * success) rather than throwing, so a rate-limited save is reported in the
+ * form and the typed draft survives it.
  */
 export async function createManualDocumentAction(
-  _previous: string | null,
+  _previous: ManualDocumentState,
   formData: FormData,
-): Promise<string | null> {
+): Promise<ManualDocumentState> {
   const input = manualDocumentSchema.parse(Object.fromEntries(formData));
   const limited = demoRateLimit("createManualDocument");
-  if (limited) return limited;
+  if (limited) return { reason: limited, content: input.content };
   const db = getDb();
   await createDocument(db, {
     applicationId: input.applicationId,

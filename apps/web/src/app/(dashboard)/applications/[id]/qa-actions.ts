@@ -65,18 +65,21 @@ const manualAnswerSchema = z.object({
  * `sensitivity: "sensitive"` row, since `runGeneration` never persists an AI
  * answer to a sensitive question.
  *
- * Shaped for `useActionState` like `createManualDocumentAction`: it returns the
- * reason it did nothing (or null on success) rather than throwing, so a
- * rate-limited save is visible in the form instead of silently dropping what
- * the user typed.
+ * Shaped for `useActionState` like `createManualDocumentAction`, and carries
+ * the submitted answer back with the reason for the same purpose: React resets
+ * an uncontrolled form once its action resolves, so the textarea re-seeds its
+ * `defaultValue` from this instead of emptying itself (P6 task-3 review,
+ * advisory C). `null` means saved.
  */
+export type ManualAnswerState = { reason: string; answer: string } | null;
+
 export async function saveManualAnswerAction(
-  _previous: string | null,
+  _previous: ManualAnswerState,
   formData: FormData,
-): Promise<string | null> {
+): Promise<ManualAnswerState> {
   const input = manualAnswerSchema.parse(Object.fromEntries(formData));
   const limited = demoRateLimit("saveManualAnswer");
-  if (limited) return limited;
+  if (limited) return { reason: limited, answer: input.answer };
   const db = getDb();
   await createAnswer(db, {
     applicationId: input.applicationId,
