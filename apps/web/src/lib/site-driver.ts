@@ -38,6 +38,24 @@ export function makeSiteCapture(config: AppConfig): (url: string) => Promise<Raw
 }
 
 /**
+ * The real `SiteDeps.probeDriver`: launches a browser and closes it again,
+ * touching no page and no network. It exists so `confirmAndSubmitSite` can find
+ * out whether this process can drive a browser BEFORE it burns the confirmation
+ * token — the same `openSession()` call `makeSiteSubmit` makes, just early
+ * enough that its failure is a plain refusal instead of an attempt parked
+ * NEEDS_RECONCILE for a click that never happened.
+ *
+ * Cheap by browser standards (a launch/close round trip, no navigation) and
+ * paid once per confirm, which is a human-initiated action, not a hot path.
+ */
+export function makeDriverProbe(): () => Promise<void> {
+  return async () => {
+    const session = await openSession();
+    await session.close();
+  };
+}
+
+/**
  * The real `SiteDeps.submit`: fills the form, clicks Submit exactly once, and
  * stores the confirmation screenshot under `fileStorageDir` — the driver
  * itself only returns the PNG bytes, never touches disk.

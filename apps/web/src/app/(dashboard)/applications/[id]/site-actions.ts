@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
-import { makeSiteCapture, makeSiteSubmit } from "../../../../lib/site-driver.js";
+import { makeDriverProbe, makeSiteCapture, makeSiteSubmit } from "../../../../lib/site-driver.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import {
   confirmAndSubmitSite, prepareSiteApplication, previewSiteSubmission, updatePlannedAnswer,
@@ -30,6 +30,9 @@ function siteDepsWithDriver(): SiteDeps {
     config,
     capture: makeSiteCapture(config),
     submit: makeSiteSubmit(config),
+    // Checked before the confirmation token is burned, so a process that cannot
+    // launch Chromium says so instead of parking the attempt for a human.
+    probeDriver: makeDriverProbe(),
   };
 }
 

@@ -22,12 +22,14 @@ import {
 } from "@careerhq/core/gates";
 import {
   applicationEvents as applicationEventsTable, beginSubmission, completeSubmission,
-  createSiteAttempt, cvVariants as cvVariantsTable, findRequisitionAttempt, formSnapshots as formSnapshotsTable,
+  createSiteAttempt, cvVariants as cvVariantsTable, failSubmission, findRequisitionAttempt,
+  formSnapshots as formSnapshotsTable,
   getApplicationDetail, getAttempt, getLatestConfirmation, getLatestSnapshot, hasBlockingAttempt, isFactStale,
   listAnswers, listCvVariants, listFacts, listReusableAnswers, markAttemptBlocked, markAttemptReady,
   markNeedsReconcile, recordPreview, saveFormSnapshot, updateSnapshotAnswers, workspaces as workspacesTable,
   type ApplicationAttempt, type CandidateFact, type CvVariant, type Db, type FormSnapshot,
 } from "@careerhq/db";
+import { redactError } from "@careerhq/email";
 import { stripHtml } from "@careerhq/ingest";
 
 /** What the driver hands back after the one submit click (worker `fillAndSubmit`, adapted). */
@@ -59,6 +61,19 @@ export interface SiteDeps {
   capture?: (url: string) => Promise<RawFormPage>;
   /** Fills the form and clicks Submit exactly once. Injected for the same reason. */
   submit?: (args: SiteSubmitArgs) => Promise<SiteSubmitResult>;
+  /**
+   * Cheap "can a browser actually start here?" check — a launch/close round
+   * trip, resolving on success and throwing on failure. Run as the LAST
+   * pre-`beginSubmission` check so a process that cannot start Chromium refuses
+   * with `driver_unavailable` while the token is still unburned, instead of
+   * discovering it inside `submit` and parking the attempt NEEDS_RECONCILE
+   * claiming "the click may have landed" when no browser ever started.
+   *
+   * Optional: an unset probe means "do not check", which is what every test
+   * with a stubbed `submit` wants. The real one is `makeDriverProbe` in
+   * `./site-driver.ts`.
+   */
+  probeDriver?: () => Promise<void>;
   /** Injected in tests; defaults to the real fast-tier field interpreter. */
   interpret?: typeof interpretField;
   /** Injected in tests; defaults to the real grounded generate task. */
@@ -173,6 +188,36 @@ const BLOCKER_GUIDANCE: Record<BlockerKind, string> = {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * `DriverError.kind`s (apps/worker/src/autoapply/driver.ts) that are provably
+ * raised BEFORE the one submit click:
+ *   - "navigation" — the page never opened, never extracted, or Chromium never
+ *     launched at all (`openSession` reports a launch failure as this kind).
+ *   - "fill" — a field action or a between-steps "Next" click failed; the
+ *     submit button has not been touched.
+ * Everything else stays ambiguous on purpose. "submit" is the click itself;
+ * "timeout" has already lost which phase it came from (`driverError` collapses
+ * every Playwright TimeoutError onto it), and a click that timed out may still
+ * have landed.
+ */
+const PRE_CLICK_DRIVER_ERROR_KINDS: ReadonlySet<string> = new Set(["navigation", "fill"]);
+
+/**
+ * Recognises a `DriverError` structurally — `name` plus a string `kind` — rather
+ * than by `instanceof`. The class lives behind `@careerhq/worker/autoapply`,
+ * whose module graph pulls in `playwright`; this orchestrator is deliberately
+ * browser-free and takes its driver by injection, so importing the class here
+ * to narrow an error would invert that. `driver.test.ts` pins the same two
+ * properties from the driver's side so a rename cannot pass unnoticed, and the
+ * fallback direction is the safe one: an unrecognised throw is treated as
+ * post-click ambiguity, never as a clean pre-click failure.
+ */
+function isPreClickDriverFailure(err: unknown): boolean {
+  if (!(err instanceof Error) || err.name !== "DriverError") return false;
+  const kind: unknown = (err as Error & { kind?: unknown }).kind;
+  return typeof kind === "string" && PRE_CLICK_DRIVER_ERROR_KINDS.has(kind);
 }
 
 /**
@@ -907,6 +952,23 @@ export async function confirmAndSubmitSite(
       reason: "the auto-apply browser is not available in this process",
     };
   }
+  // A wired-up `submit` is not the same as a browser that can start. The probe
+  // is a real launch/close round trip, and it runs HERE — before the token is
+  // burned and before anything is typed — so an image or host without Chromium
+  // refuses honestly and stays retryable, instead of throwing inside `submit`
+  // and parking the attempt for a human to reconcile a click that never
+  // happened.
+  if (deps.probeDriver) {
+    try {
+      await deps.probeDriver();
+    } catch (err) {
+      return {
+        status: "blocked",
+        code: "driver_unavailable",
+        reason: `the auto-apply browser could not be started: ${redactError(err, [])}`,
+      };
+    }
+  }
 
   // The write that happens BEFORE the mutation: token burned, attempt
   // SUBMITTING, pending receipt recording exactly what is about to be typed. If
@@ -925,9 +987,20 @@ export async function confirmAndSubmitSite(
   try {
     result = await submit({ url: payload.url, form, answers, files });
   } catch (err) {
-    // The driver clicks Submit inside this call. Anything escaping it is
-    // unclassified and the attempt has already begun — assume the worst (the
-    // application may be in) and park it for a human rather than guessing.
+    // The driver clicks Submit inside this call, so which side of that click
+    // the throw came from decides the attempt's fate (spec §11): a failure
+    // BEFORE the mutation is a plain FAILED with a redacted reason; only
+    // uncertainty AFTER it is worth a human's time. `DriverError.kind` already
+    // knows — navigating, extracting or filling all happen before the submit
+    // button is touched.
+    if (isPreClickDriverFailure(err)) {
+      const reason = `the form could not be filled in, so nothing was submitted: ${redactError(err, [])}`;
+      await failSubmissionSafely(deps, attempt.id, reason);
+      return { status: "failed", reason };
+    }
+    // Anything else is unclassified and the attempt has already begun — assume
+    // the worst (the application may be in) and park it for a human rather than
+    // guessing.
     const reason = `the submission failed in an unexpected way: ${errorMessage(err)}`;
     await markNeedsReconcileSafely(deps, attempt.id, reason);
     return { status: "needs_reconcile", reason };
@@ -988,6 +1061,18 @@ async function markNeedsReconcileSafely(deps: SiteDeps, attemptId: string, reaso
   } catch (err) {
     console.error(
       `[site-submission] attempt ${attemptId} needs reconciling (${reason}) but could not be marked: `
+      + errorMessage(err),
+    );
+  }
+}
+
+/** Same guard, same reasoning, for the pre-click FAILED outcome. */
+async function failSubmissionSafely(deps: SiteDeps, attemptId: string, reason: string): Promise<void> {
+  try {
+    await failSubmission(deps.db, attemptId, reason);
+  } catch (err) {
+    console.error(
+      `[site-submission] attempt ${attemptId} failed before the click (${reason}) but could not be marked: `
       + errorMessage(err),
     );
   }

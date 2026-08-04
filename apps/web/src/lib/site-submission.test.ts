@@ -35,6 +35,8 @@ const CV_SHA256 = createHash("sha256").update(CV_BYTES).digest("hex");
 let db: Db;
 let workspaceId: string;
 let otherWorkspaceId: string;
+/** A sandbox-kind workspace, used to exercise the sandbox host allow-list. */
+let sandboxWorkspaceId: string;
 let cvVariantId: string;
 let cvPath: string;
 
@@ -115,14 +117,32 @@ interface SubmitCall {
   files: Record<string, string>;
 }
 
-type SubmitBehaviour = { kind: "ok"; confirmationId?: string | null } | { kind: "throws" };
+type SubmitBehaviour =
+  | { kind: "ok"; confirmationId?: string | null }
+  | { kind: "throws"; error?: Error };
+
+/**
+ * A `DriverError` exactly as `apps/worker/src/autoapply/driver.ts` constructs
+ * one — `name === "DriverError"` plus a string `kind`. That pair is the whole
+ * contract `site-submission.ts` classifies on, so reproducing it here keeps this
+ * suite browser-free (no `playwright` import) while still exercising the real
+ * shape. `driver.test.ts` pins the same contract from the driver's side.
+ */
+class FakeDriverError extends Error {
+  constructor(message: string, readonly kind: string) {
+    super(message);
+    this.name = "DriverError";
+  }
+}
 
 function stubSubmit(calls: SubmitCall[], behaviour: SubmitBehaviour = { kind: "ok" }) {
   return async (args: {
     url: string; answers: PlannedAnswer[]; files: Record<string, string>;
   }): Promise<SiteSubmitResult> => {
     calls.push({ url: args.url, answers: args.answers, files: args.files });
-    if (behaviour.kind === "throws") throw new Error("chromium crashed after the submit click");
+    if (behaviour.kind === "throws") {
+      throw behaviour.error ?? new Error("chromium crashed after the submit click");
+    }
     const confirmationId = behaviour.confirmationId === undefined ? "NR-1a2b3c4d" : behaviour.confirmationId;
     return {
       confirmationId,
@@ -182,10 +202,14 @@ interface Prepared {
   url: string;
 }
 
-async function prepare(companyName: string, over: Partial<SiteDeps> = {}): Promise<Prepared> {
-  const applicationId = await readyApplication(companyName);
-  const pageUrl = urlFor(companyName);
-  const outcome = await prepareSiteApplication(deps(over), { workspaceId, applicationId, url: pageUrl });
+async function prepare(
+  companyName: string,
+  over: Partial<SiteDeps> = {},
+  ws = workspaceId,
+  pageUrl = urlFor(companyName),
+): Promise<Prepared> {
+  const applicationId = await readyApplication(companyName, ws);
+  const outcome = await prepareSiteApplication(deps(over), { workspaceId: ws, applicationId, url: pageUrl });
   expect(outcome.status).toBe("ready");
   if (outcome.status !== "ready") throw new Error(`prepare failed: ${JSON.stringify(outcome)}`);
   return {
@@ -194,26 +218,38 @@ async function prepare(companyName: string, over: Partial<SiteDeps> = {}): Promi
   };
 }
 
-/** Settles every field the planner left for the user, the way Task 12's review screen will. */
-async function settleBlocking(prepared: Prepared, over: Partial<SiteDeps> = {}): Promise<void> {
+/**
+ * Settles every field the planner left for the user, the way Task 12's review
+ * screen will. `utm_source` is deliberately absent: it is a hidden input, the
+ * review grid never renders it, and `requiresUserBeforeSubmit` must not count it.
+ */
+async function settleBlocking(
+  prepared: Prepared,
+  over: Partial<SiteDeps> = {},
+  ws = workspaceId,
+): Promise<void> {
   for (const [name, value] of [
     ["work_authorization", "yes"],
     ["why_northwind", "Because Northwind runs the event-driven systems I have built for five years."],
     ["other_notes", ""],
-    ["utm_source", ""],
   ] as const) {
     const result = await updatePlannedAnswer(deps(over), {
-      workspaceId, snapshotId: prepared.snapshotId, fieldId: fieldId(name), value,
+      workspaceId: ws, snapshotId: prepared.snapshotId, fieldId: fieldId(name), value,
     });
     expect(result).toEqual({ ok: true });
   }
 }
 
 /** Prepare → settle → preview, handing back the plaintext token. */
-async function previewed(companyName: string, over: Partial<SiteDeps> = {}): Promise<Prepared & { token: string }> {
-  const prepared = await prepare(companyName, over);
-  await settleBlocking(prepared, over);
-  const outcome = await previewSiteSubmission(deps(over), { workspaceId, attemptId: prepared.attemptId });
+async function previewed(
+  companyName: string,
+  over: Partial<SiteDeps> = {},
+  ws = workspaceId,
+  pageUrl = urlFor(companyName),
+): Promise<Prepared & { token: string }> {
+  const prepared = await prepare(companyName, over, ws, pageUrl);
+  await settleBlocking(prepared, over, ws);
+  const outcome = await previewSiteSubmission(deps(over), { workspaceId: ws, attemptId: prepared.attemptId });
   expect(outcome.status).toBe("ok");
   if (outcome.status !== "ok") throw new Error(`preview failed: ${JSON.stringify(outcome)}`);
   return { ...prepared, token: outcome.token };
@@ -227,36 +263,47 @@ beforeAll(async () => {
   cvPath = path.join(dir, "alex-cv.pdf");
   writeFileSync(cvPath, CV_BYTES);
 
+  /** Everything a workspace needs to plan the fixture form end to end. */
+  async function seed(ws: string): Promise<string> {
+    const variantId = (await createCvVariant(db, {
+      workspaceId: ws, label: "ATS CV", format: "ats", filePath: cvPath, sha256: CV_SHA256,
+    })).id;
+
+    const reviewBy = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+    const facts = [
+      { category: "identity" as const, claim: "Full legal name: Alex Rivera" },
+      { category: "contact" as const, claim: "Email: alex.rivera@example.com" },
+      { category: "contact" as const, claim: "Phone: +1-555-0142" },
+      { category: "contact" as const, claim: "Location: Athens, Greece" },
+      { category: "experience" as const, claim: "5 years as a backend engineer building event-driven systems" },
+    ];
+    for (const fact of facts) await createFact(db, { workspaceId: ws, ...fact, reviewBy });
+    // A sensitive fact exists but must never reach an auto-filled answer.
+    await createFact(db, {
+      workspaceId: ws, category: "authorization", claim: "US work authorization: citizen",
+      sensitivity: "sensitive", reviewBy,
+    });
+    return variantId;
+  }
+
   const [ws] = await db.insert(workspaces).values({ name: `t-site-${Date.now()}`, kind: "personal" }).returning();
   workspaceId = ws!.id;
   const [other] = await db.insert(workspaces)
     .values({ name: `t-site-other-${Date.now()}`, kind: "personal" }).returning();
   otherWorkspaceId = other!.id;
+  const [sandbox] = await db.insert(workspaces)
+    .values({ name: `t-site-sandbox-${Date.now()}`, kind: "sandbox" }).returning();
+  sandboxWorkspaceId = sandbox!.id;
 
-  cvVariantId = (await createCvVariant(db, {
-    workspaceId, label: "ATS CV", format: "ats", filePath: cvPath, sha256: CV_SHA256,
-  })).id;
-
-  const reviewBy = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
-  const facts = [
-    { category: "identity" as const, claim: "Full legal name: Alex Rivera" },
-    { category: "contact" as const, claim: "Email: alex.rivera@example.com" },
-    { category: "contact" as const, claim: "Phone: +1-555-0142" },
-    { category: "contact" as const, claim: "Location: Athens, Greece" },
-    { category: "experience" as const, claim: "5 years as a backend engineer building event-driven systems" },
-  ];
-  for (const fact of facts) await createFact(db, { workspaceId, ...fact, reviewBy });
-  // A sensitive fact exists but must never reach an auto-filled answer.
-  await createFact(db, {
-    workspaceId, category: "authorization", claim: "US work authorization: citizen",
-    sensitivity: "sensitive", reviewBy,
-  });
+  cvVariantId = await seed(workspaceId);
+  await seed(sandboxWorkspaceId);
 });
 
 afterAll(async () => {
   if (!url) return;
   await db.delete(workspaces).where(eq(workspaces.id, workspaceId));
   await db.delete(workspaces).where(eq(workspaces.id, otherWorkspaceId));
+  await db.delete(workspaces).where(eq(workspaces.id, sandboxWorkspaceId));
   await db.$client.end();
 });
 
@@ -280,10 +327,17 @@ d("prepareSiteApplication", () => {
     expect(workAuth.source).not.toBe("ai");
     expect(workAuth.value).toBe("");
 
-    // Every field the user must settle is reported, optional ones included.
+    // Every field the user must settle is reported, optional ones included …
     expect(prepared.blocking).toEqual(expect.arrayContaining([
-      fieldId("work_authorization"), fieldId("why_northwind"), fieldId("other_notes"), fieldId("utm_source"),
+      fieldId("work_authorization"), fieldId("why_northwind"), fieldId("other_notes"),
     ]));
+    // … but never the hidden tracking input: the review grid does not render it,
+    // so counting it would make this form permanently un-previewable. Its planned
+    // answer still exists and still says the planner could not settle it.
+    expect(prepared.blocking).not.toContain(fieldId("utm_source"));
+    expect(
+      (snapshot!.plannedAnswers as PlannedAnswer[]).find((a) => a.fieldId === fieldId("utm_source")),
+    ).toMatchObject({ needsUser: true });
     expect((await getAttempt(db, prepared.attemptId))?.status).toBe("DRAFT");
   });
 
@@ -624,6 +678,71 @@ d("confirmAndSubmitSite", () => {
     expect((await getAttempt(db, prepared.attemptId))?.status).toBe("PENDING_CONFIRMATION");
   });
 
+  it("blocks a sandbox workspace applying to a host outside the allow-list → sandbox_blocked", async () => {
+    const calls: SubmitCall[] = [];
+    // `config()` names APPLY_HOST as SANDBOX_SITE_ALLOWED_HOST, so any other
+    // hostname is out of bounds for a sandbox-kind workspace.
+    const outsideUrl = "http://careers.northwind.example/greenhouse/jobs/sandbox-co";
+    const outsideHost = "careers.northwind.example";
+
+    const captured: string[] = [];
+    const capture = async (pageUrl: string) => {
+      captured.push(pageUrl);
+      return greenhousePage(pageUrl);
+    };
+    const prepared = await previewed(
+      "Sandbox Co", { capture, submit: stubSubmit(calls) }, sandboxWorkspaceId, outsideUrl,
+    );
+    // Reading the page is not a mutation, so prepare is allowed to have run.
+    expect(captured).toEqual([outsideUrl]);
+
+    const outcome = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId: sandboxWorkspaceId, attemptId: prepared.attemptId,
+      presentedToken: prepared.token, retypedTarget: outsideHost,
+    });
+    expect(outcome).toMatchObject({ status: "blocked", code: "sandbox_blocked" });
+
+    // Nothing was typed and nothing was burned: the driver was never reached,
+    // the attempt is still confirmable, and the token is still unconsumed.
+    expect(calls).toHaveLength(0);
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect(attempt?.pendingReceipt).toBeNull();
+    expect((await getActiveConfirmation(db, prepared.attemptId))?.consumedAt ?? null).toBeNull();
+  });
+
+  it("refuses before the token burns when no browser can start → driver_unavailable", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("No Chromium Co");
+
+    const probeDriver = async (): Promise<void> => {
+      throw new Error("browserType.launch: Executable doesn't exist at /ms-playwright/chromium/headless_shell");
+    };
+    const outcome = await confirmAndSubmitSite(deps({ probeDriver, submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(outcome).toMatchObject({ status: "blocked", code: "driver_unavailable" });
+    if (outcome.status !== "blocked") return;
+    expect(outcome.reason).toMatch(/browser/i);
+
+    // The whole point: this happens BEFORE beginSubmission, so the attempt is
+    // not parked NEEDS_RECONCILE claiming "the click may have landed" when no
+    // browser ever started.
+    expect(calls).toHaveLength(0);
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect(attempt?.pendingReceipt).toBeNull();
+    expect((await getActiveConfirmation(db, prepared.attemptId))?.consumedAt ?? null).toBeNull();
+
+    // And the same token still works once a browser is available again.
+    const retried = await confirmAndSubmitSite(
+      deps({ probeDriver: async () => undefined, submit: stubSubmit(calls) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(retried.status).toBe("submitted");
+    expect(calls).toHaveLength(1);
+  });
+
   it("parks an attempt whose submit threw — the click may have landed, so never FAILED", async () => {
     const calls: SubmitCall[] = [];
     const prepared = await previewed("Crashed Co");
@@ -637,6 +756,55 @@ d("confirmAndSubmitSite", () => {
     expect(attempt?.status).toBe("NEEDS_RECONCILE");
     expect(attempt?.failureReason).toMatch(/chromium crashed/i);
     expect((attempt?.pendingReceipt as { channel: string }).channel).toBe("company_site");
+  });
+
+  // Spec §11: a failure BEFORE the mutation is a plain FAILED with a redacted
+  // reason; only uncertainty AFTER it earns NEEDS_RECONCILE. `DriverError.kind`
+  // already says which side of the click the driver died on.
+  for (const kind of ["navigation", "fill"] as const) {
+    it(`fails (never parks) an attempt whose driver died pre-click — kind ${kind}`, async () => {
+      const calls: SubmitCall[] = [];
+      const prepared = await previewed(`Pre Click ${kind} Co`);
+
+      const error = new FakeDriverError(`could not ${kind} the page: net::ERR_CONNECTION_REFUSED`, kind);
+      const outcome = await confirmAndSubmitSite(
+        deps({ submit: stubSubmit(calls, { kind: "throws", error }) }),
+        { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+      );
+      expect(outcome.status).toBe("failed");
+      if (outcome.status !== "failed") return;
+      expect(outcome.reason).toMatch(/ERR_CONNECTION_REFUSED/);
+
+      const attempt = await getAttempt(db, prepared.attemptId);
+      expect(attempt?.status).toBe("FAILED");
+      expect(attempt?.failureReason).toMatch(/ERR_CONNECTION_REFUSED/);
+    });
+  }
+
+  it("still parks an attempt whose SUBMIT click itself failed — that one is genuinely ambiguous", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Post Click Co");
+
+    const error = new FakeDriverError("could not submit http://demo-ats:3001/x: click intercepted", "submit");
+    const outcome = await confirmAndSubmitSite(
+      deps({ submit: stubSubmit(calls, { kind: "throws", error }) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(outcome.status).toBe("needs_reconcile");
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("NEEDS_RECONCILE");
+  });
+
+  it("treats a driver timeout as ambiguous — a click that timed out may still have landed", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Timeout Co");
+
+    const error = new FakeDriverError("could not open http://demo-ats:3001/x: Timeout 45000ms exceeded", "timeout");
+    const outcome = await confirmAndSubmitSite(
+      deps({ submit: stubSubmit(calls, { kind: "throws", error }) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(outcome.status).toBe("needs_reconcile");
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("NEEDS_RECONCILE");
   });
 
   it("parks an attempt the site accepted without a confirmation id — no evidence, no claim of success", async () => {
