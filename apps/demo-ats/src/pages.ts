@@ -202,6 +202,53 @@ export function leverPage(job: DemoJob): string {
 }
 
 /**
+ * Signature-style attestation page: a Lever-style form with text and date
+ * signature controls that trigger the legal_attestation blocker. Includes
+ * a resume file input to avoid unsupported_file_control and login_required
+ * blockers.
+ */
+export function signaturePage(job: DemoJob): string {
+  const action = `/signature/apply/${escapeHtml(job.id)}`;
+  const body = `<h1>${escapeHtml(job.title)} at ${escapeHtml(job.company)}</h1>
+<form class="application-form" data-source="lever" action="${action}" method="post" enctype="multipart/form-data">
+  <div class="field">
+    <label for="name">Full Name</label>
+    <input type="text" id="name" name="name" aria-required="true" required />
+  </div>
+  <div class="field">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" aria-required="true" required />
+  </div>
+  <div class="field">
+    <label for="phone">Phone</label>
+    <input type="tel" id="phone" name="phone" />
+  </div>
+  <div class="field">
+    <label for="resume">Resume/CV</label>
+    <input type="file" id="resume" name="resume" aria-required="true" required />
+  </div>
+  <div class="field">
+    <label for="cards[urls][LinkedIn]">LinkedIn URL</label>
+    <input type="url" id="cards[urls][LinkedIn]" name="cards[urls][LinkedIn]" />
+  </div>
+  <div class="field">
+    <label for="cards[urls][Portfolio]">Portfolio URL</label>
+    <input type="url" id="cards[urls][Portfolio]" name="cards[urls][Portfolio]" />
+  </div>
+  <div class="field">
+    <label for="signature_text">Type your full legal name to certify this application is true and complete</label>
+    <input type="text" id="signature_text" name="signature_text" aria-required="true" required />
+  </div>
+  <div class="field">
+    <label for="signature_date">Date of signature</label>
+    <input type="date" id="signature_date" name="signature_date" aria-required="true" required />
+  </div>
+  <button type="submit" id="btn_submit">Submit Application</button>
+</form>`;
+  return layout(`${job.title} at ${job.company}`, body);
+}
+
+/**
  * Pause-and-return fixture: a CAPTCHA blocker that auto-apply cannot solve.
  */
 export function captchaPage(job: DemoJob): string {

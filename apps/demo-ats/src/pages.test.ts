@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captchaPage, confirmationPage, greenhousePage, leverPage, loginPage } from "./pages.js";
+import { captchaPage, confirmationPage, greenhousePage, leverPage, loginPage, signaturePage } from "./pages.js";
 
 const job = { id: "eng-1", title: "Senior Robotics Engineer", company: "Northwind Robotics" };
 
@@ -44,5 +44,14 @@ describe("demo-ats pages", () => {
     expect(html).toContain("Application received");
     expect(html).toContain("Confirmation ID: NR-abc12345");
     expect(html).toContain('data-confirmation-id="NR-abc12345"');
+  });
+  it("signature page carries a typed-signature and date attestation, no checkbox", () => {
+    const html = signaturePage(job);
+    expect(html).toContain('data-source="lever"');
+    expect(html.toLowerCase()).toContain("type your full legal name");
+    expect(html.toLowerCase()).toContain("date of signature");
+    expect(html).toContain('name="resume"');
+    expect(html).not.toContain('type="password"');
+    expect(html).not.toContain("g-recaptcha");
   });
 });
