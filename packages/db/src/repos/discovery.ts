@@ -96,7 +96,11 @@ export async function upsertNormalizedJobs(
         eq(jobs.contentHash, contentHash),
         isNull(jobs.expiredAt),
         ne(jobs.id, created!.id),
-      )).orderBy(asc(jobs.firstSeenAt)).limit(1);
+      // Two rows can share a first_seen_at (clock_timestamp() has microsecond
+      // resolution and a seed inserts a batch inside one transaction), and
+      // which of them wins decides which listing the inbox hides as a
+      // duplicate. `id` makes that choice the same one every time.
+      )).orderBy(asc(jobs.firstSeenAt), asc(jobs.id)).limit(1);
 
       if (firstSeen) {
         await tx.update(jobs).set({ duplicateOfJobId: firstSeen.id })
@@ -151,7 +155,7 @@ export async function listIngestRuns(
 ): Promise<IngestRun[]> {
   return db.select().from(ingestRuns)
     .where(eq(ingestRuns.workspaceId, workspaceId))
-    .orderBy(desc(ingestRuns.startedAt))
+    .orderBy(desc(ingestRuns.startedAt), asc(ingestRuns.id))
     .limit(limit);
 }
 
@@ -173,7 +177,15 @@ export async function listInboxJobs(db: Db, workspaceId: string): Promise<Job[]>
         )),
       ),
     ),
-  )).orderBy(sql`${jobs.llmScore} DESC NULLS LAST`, desc(jobs.keywordScore));
+  // `id` last is what makes this a *total* order, and it is load-bearing rather
+  // than tidiness. Without it Postgres is free to return equal-scoring listings
+  // in whatever order it read them — measured different between two runs over
+  // the same rows — so the inbox reshuffles between renders and the demo's
+  // screenshots and walkthrough recording stop being reproducible. It also
+  // decides which listings survive `topNForLlm` and the order they take in the
+  // re-rank prompt, and that prompt is an AI replay fixture's cache key.
+  // Ascending, to agree with the same tie-break in the worker's rerank job.
+  )).orderBy(sql`${jobs.llmScore} DESC NULLS LAST`, desc(jobs.keywordScore), asc(jobs.id));
 }
 
 export async function countInboxDuplicates(db: Db, workspaceId: string): Promise<number> {
@@ -238,7 +250,7 @@ export async function saveScoringProfile(db: DbOrTx, workspaceId: string, profil
 export async function listWatchlist(db: Db, workspaceId: string): Promise<WatchlistCompany[]> {
   return db.select().from(watchlistCompanies)
     .where(eq(watchlistCompanies.workspaceId, workspaceId))
-    .orderBy(asc(watchlistCompanies.createdAt));
+    .orderBy(asc(watchlistCompanies.createdAt), asc(watchlistCompanies.id));
 }
 
 export async function addWatchlistEntry(

@@ -20,7 +20,7 @@ export async function createCvVariant(db: DbOrTx, input: {
 export async function listCvVariants(db: Db, workspaceId: string): Promise<CvVariant[]> {
   return db.select().from(cvVariants)
     .where(eq(cvVariants.workspaceId, workspaceId))
-    .orderBy(asc(cvVariants.createdAt));
+    .orderBy(asc(cvVariants.createdAt), asc(cvVariants.id));
 }
 
 /**

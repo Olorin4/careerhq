@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { AnswerOrigin, ApprovalState, DocumentKind } from "@careerhq/contracts";
 import type { Db, DbOrTx } from "../client.js";
 import { applications, generatedDocuments } from "../schema/index.js";
@@ -53,7 +53,8 @@ export async function setDocumentApproval(
 export async function listDocuments(db: Db, applicationId: string): Promise<GeneratedDocument[]> {
   return db.select().from(generatedDocuments)
     .where(eq(generatedDocuments.applicationId, applicationId))
-    .orderBy(desc(generatedDocuments.createdAt));
+    // `id` last so equal-timestamped rows cannot swap places between renders.
+    .orderBy(desc(generatedDocuments.createdAt), asc(generatedDocuments.id));
 }
 
 /**

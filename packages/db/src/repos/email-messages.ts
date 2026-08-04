@@ -198,7 +198,9 @@ export async function buildSenderDomainIndex(db: Db, workspaceId: string): Promi
 export async function listMessagesForApplication(db: Db, applicationId: string): Promise<EmailMessage[]> {
   return db.select().from(emailMessages)
     .where(eq(emailMessages.applicationId, applicationId))
-    .orderBy(asc(emailMessages.receivedAt));
+    // `id` last so two messages sharing a received_at (a threaded reply and
+    // its cc, say) render in the same order every time.
+    .orderBy(asc(emailMessages.receivedAt), asc(emailMessages.id));
 }
 
 /** The suggestion queue: everything still awaiting a human accept/dismiss, newest first. */
@@ -208,7 +210,7 @@ export async function listPendingSuggestions(db: Db, workspaceId: string): Promi
       eq(emailMessages.workspaceId, workspaceId),
       eq(emailMessages.suggestionState, "pending"),
     ))
-    .orderBy(desc(emailMessages.receivedAt));
+    .orderBy(desc(emailMessages.receivedAt), asc(emailMessages.id));
 }
 
 export interface SetClassificationInput {

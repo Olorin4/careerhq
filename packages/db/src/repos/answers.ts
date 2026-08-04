@@ -79,7 +79,8 @@ export async function rejectAnswer(db: Db, workspaceId: string, id: string): Pro
 export async function listAnswers(db: Db, applicationId: string): Promise<ApplicationAnswer[]> {
   return db.select().from(applicationAnswers)
     .where(eq(applicationAnswers.applicationId, applicationId))
-    .orderBy(asc(applicationAnswers.createdAt));
+    // `id` last so equal-timestamped rows cannot swap places between renders.
+    .orderBy(asc(applicationAnswers.createdAt), asc(applicationAnswers.id));
 }
 
 export async function listReusableAnswers(
@@ -94,7 +95,9 @@ export async function listReusableAnswers(
       eq(applicationAnswers.approval, "approved"),
       eq(applicationAnswers.reusable, true),
     ))
-    .orderBy(asc(applicationAnswers.questionNorm));
+    // Two applications answering the same question normalize to the same
+    // `question_norm`, so this key ties by construction — `id` decides.
+    .orderBy(asc(applicationAnswers.questionNorm), asc(applicationAnswers.id));
 
   const now = new Date();
   return rows.map(({ answer }) => ({

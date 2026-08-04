@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
 import type { Db, DbOrTx } from "../client.js";
 import { applicationAttempts, applications, formSnapshots } from "../schema/index.js";
@@ -30,7 +30,9 @@ export async function saveFormSnapshot(db: DbOrTx, input: {
 export async function getLatestSnapshot(db: Db, attemptId: string): Promise<FormSnapshot | null> {
   const [snapshot] = await db.select().from(formSnapshots)
     .where(eq(formSnapshots.attemptId, attemptId))
-    .orderBy(desc(formSnapshots.capturedAt))
+    // `id` last so "the most recent" is one row, not either of two captured in
+    // the same instant.
+    .orderBy(desc(formSnapshots.capturedAt), asc(formSnapshots.id))
     .limit(1);
   return snapshot ?? null;
 }
@@ -91,7 +93,7 @@ export async function findRequisitionAttempt(
       eq(formSnapshots.requisitionKey, requisitionKey),
       eq(applicationAttempts.status, "SUBMITTED"),
     ))
-    .orderBy(desc(formSnapshots.capturedAt))
+    .orderBy(desc(formSnapshots.capturedAt), asc(formSnapshots.id))
     .limit(1);
   return row ?? null;
 }

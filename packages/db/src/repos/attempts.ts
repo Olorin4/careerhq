@@ -113,7 +113,7 @@ export async function listAttemptsForApplication(
 ): Promise<ApplicationAttempt[]> {
   return db.select().from(applicationAttempts)
     .where(eq(applicationAttempts.applicationId, applicationId))
-    .orderBy(asc(applicationAttempts.startedAt));
+    .orderBy(asc(applicationAttempts.startedAt), asc(applicationAttempts.id));
 }
 
 /**
@@ -214,6 +214,7 @@ export async function getLatestConfirmation(
     .orderBy(
       desc(attemptConfirmations.createdAt),
       asc(sql`(${attemptConfirmations.consumedAt} is not null)`),
+      asc(attemptConfirmations.id),
     )
     .limit(1);
   return row ?? null;
@@ -230,7 +231,7 @@ export async function getActiveConfirmation(
       isNull(attemptConfirmations.consumedAt),
       gt(attemptConfirmations.expiresAt, sql`now()`),
     ))
-    .orderBy(desc(attemptConfirmations.createdAt))
+    .orderBy(desc(attemptConfirmations.createdAt), asc(attemptConfirmations.id))
     .limit(1);
   return row ?? null;
 }

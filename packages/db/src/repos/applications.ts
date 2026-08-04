@@ -94,7 +94,8 @@ export async function transitionApplicationTx(tx: Tx, args: TransitionArgs): Pro
 export async function listApplications(db: Db, workspaceId: string): Promise<Application[]> {
   return db.select().from(applications)
     .where(eq(applications.workspaceId, workspaceId))
-    .orderBy(asc(applications.createdAt));
+    // `id` last so equal-timestamped rows cannot swap places between renders.
+    .orderBy(asc(applications.createdAt), asc(applications.id));
 }
 
 export async function getApplication(db: Db, applicationId: string): Promise<Application | null> {
@@ -121,6 +122,6 @@ export async function getApplicationDetail(db: Db, applicationId: string) {
   const [job] = await db.select().from(jobs).where(eq(jobs.id, app.jobId));
   const events = await db.select().from(applicationEvents)
     .where(eq(applicationEvents.applicationId, applicationId))
-    .orderBy(asc(applicationEvents.createdAt));
+    .orderBy(asc(applicationEvents.createdAt), asc(applicationEvents.id));
   return { application: app, job: job as Job, events: events as ApplicationEvent[] };
 }

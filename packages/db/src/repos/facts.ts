@@ -77,7 +77,12 @@ export async function listFacts(
     : and(eq(candidateFacts.workspaceId, workspaceId), isNull(candidateFacts.archivedAt));
   return db.select().from(candidateFacts)
     .where(conditions)
-    .orderBy(asc(candidateFacts.category), asc(candidateFacts.createdAt));
+    // `id` last so the order is total. Facts seeded in one batch can share a
+    // created_at, and this list is rendered in the UI *and* laid out verbatim
+    // in the generation prompt (`[<fact id>] <claim>`) — an order Postgres is
+    // free to vary is an inbox that reshuffles between renders and a prompt
+    // whose replay-fixture hash changes between runs.
+    .orderBy(asc(candidateFacts.category), asc(candidateFacts.createdAt), asc(candidateFacts.id));
 }
 
 export function isFactStale(fact: Pick<CandidateFact, "reviewBy">, now?: Date): boolean {

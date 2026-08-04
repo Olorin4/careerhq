@@ -90,7 +90,7 @@ export async function getConnectionSecrets(
 export async function listEmailConnections(db: Db, workspaceId: string): Promise<EmailConnection[]> {
   return db.select().from(emailConnections)
     .where(eq(emailConnections.workspaceId, workspaceId))
-    .orderBy(asc(emailConnections.createdAt));
+    .orderBy(asc(emailConnections.createdAt), asc(emailConnections.id));
 }
 
 /**
