@@ -10,6 +10,7 @@ import path from "node:path";
 import { canonicalFormSchema, type CanonicalField, type CanonicalForm, type FieldKind } from "@careerhq/contracts";
 import { parseGenericForm } from "../generic.js";
 import { rawFieldId, type RawField, type RawFormPage } from "../raw.js";
+import { isAttestationCheckbox } from "./attestation.js";
 
 /**
  * A hint's target is usually a fixed CanonicalField, but a few name/id
@@ -61,6 +62,11 @@ const NAME_HINTS: NameHint[] = [
 ];
 
 function matchNameHint(raw: RawField, kind: FieldKind): CanonicalField | null {
+  // Checked before the ordered substring hints: an attestation checkbox is
+  // never one of the identity/link fields below, and its wording ("I agree…")
+  // can otherwise collide with them. See ./attestation.ts for why it is
+  // checkbox-only.
+  if (isAttestationCheckbox(raw, kind)) return "legal_attestation";
   const haystack = `${raw.name} ${raw.id}`.toLowerCase();
   for (const hint of NAME_HINTS) {
     if (hint.pattern.test(haystack)) {
@@ -78,8 +84,10 @@ function matchNameHint(raw: RawField, kind: FieldKind): CanonicalField | null {
  * "custom_question"/"question_N" fields always render as textareas, and a
  * tenant may give that textarea a human-readable name (as our demo-ats
  * fixture does with "why_northwind") instead of the generic convention.
- * Every other unmatched field (checkboxes, unrecognized selects, ...) is
- * left "unknown" — deterministic label matching is Task 7's job.
+ * An attestation checkbox maps to `legal_attestation` (see
+ * `isAttestationCheckbox`); every other unmatched field (remaining checkboxes,
+ * unrecognized selects, ...) is left "unknown" — deterministic label matching
+ * is Task 7's job.
  *
  * Fix round (Task 5 review): the demo-ats fixture's `work_authorization`
  * and `visa_sponsorship` <select> fields now map to their matching

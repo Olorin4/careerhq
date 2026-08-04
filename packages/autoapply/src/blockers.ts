@@ -11,9 +11,11 @@ const ATTESTATION_RE = /certify|attest|under penalty|legally binding/i;
  * Pause-and-return signals per spec §10.6. Order is not significant; the
  * caller (site orchestrator, Task 11) decides how to react to each kind.
  *
- * legal_attestation is a blocker ONLY when the checkbox is required — spec
- * §10.6 forbids auto-apply from ticking a legal attestation on the user's
- * behalf, but an optional/voluntary attestation checkbox is not a blocker.
+ * legal_attestation is a blocker only for attestations we cannot put to the
+ * user as a simple yes/no — a typed signature, a "type your full legal name"
+ * input, a signature date. A required attestation CHECKBOX is deliberately NOT
+ * a blocker: it is demoted to a field-level consent tick the user checks
+ * personally on the review screen (spec §10.6, revised). See the loop below.
  */
 export function detectBlockers(page: RawFormPage): Array<{ kind: BlockerKind; detail: string }> {
   const blockers: Array<{ kind: BlockerKind; detail: string }> = [];
@@ -59,15 +61,27 @@ export function detectBlockers(page: RawFormPage): Array<{ kind: BlockerKind; de
     }
   }
 
+  // A REQUIRED ATTESTATION CHECKBOX IS NOT A BLOCKER (spec §10.6, revised):
+  // it is demoted to a field-level consent tick the user checks personally in
+  // the review screen, having seen its exact text. That returns control to the
+  // user more precisely than abandoning the attempt — and the tick, being
+  // source "user", lands inside the fingerprinted payload and the receipt.
+  //
+  // What we still cannot render honestly is an attestation that is not a simple
+  // yes/no: a typed signature, a "type your full legal name" input, or a
+  // signature date. Those still pause the page.
   for (const field of page.fields) {
-    if (field.tag === "input" && field.type === "checkbox" && field.required) {
-      const text = `${field.labelText} ${field.nearbyText}`;
-      if (ATTESTATION_RE.test(text)) {
-        blockers.push({
-          kind: "legal_attestation",
-          detail: `${field.selector}: ${field.labelText || field.nearbyText}`,
-        });
-      }
+    const isCheckbox = field.tag === "input" && field.type === "checkbox";
+    if (isCheckbox) continue;
+    const isTypedControl =
+      field.tag === "textarea" || (field.tag === "input" && ["text", "date"].includes(field.type));
+    if (!isTypedControl || !field.required) continue;
+    const text = `${field.labelText} ${field.nearbyText}`;
+    if (ATTESTATION_RE.test(text)) {
+      blockers.push({
+        kind: "legal_attestation",
+        detail: `${field.selector}: ${field.labelText || field.nearbyText}`,
+      });
     }
   }
 

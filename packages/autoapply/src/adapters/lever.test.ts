@@ -104,6 +104,32 @@ describe("fix round: availability no longer collides with notice_period", () => 
   });
 });
 
+describe("attestation checkboxes map to legal_attestation", () => {
+  it("maps a checkbox whose label reads as an attestation, and leaves a typed signature alone", () => {
+    const html = `<html><body><form>
+      <div class="field"><label for="consent">
+        <input type="checkbox" id="consent" name="consent" required />
+        I certify that the information provided is accurate
+      </label></div>
+      <div class="field">
+        <label for="signature">Type your full legal name to certify this application</label>
+        <input type="text" id="signature" name="signature" required />
+      </div>
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://acme.example/lever/apply");
+    const form = parseLever(page);
+
+    const consent = form.fields.find((f) => f.id === idFor("#consent"));
+    expect(consent?.canonicalField).toBe("legal_attestation");
+    expect(consent?.mappingConfidence).toBe(0.9);
+
+    // A typed signature is NOT a consent tick — it stays unmapped and is
+    // pause-and-return's job (blockers.ts), not the review screen's.
+    const signature = form.fields.find((f) => f.id === idFor("#signature"));
+    expect(signature?.canonicalField).toBe("unknown");
+  });
+});
+
 describe("LEVER_FIXTURE_HASH (parser-drift tripwire)", () => {
   it("still matches the sha256 of the live demo-ats helper output", () => {
     const livePage = rawPageFromHtml(leverPage(job), url);

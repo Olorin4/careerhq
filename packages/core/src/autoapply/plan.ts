@@ -52,6 +52,7 @@ export const MIN_FILL_CONFIDENCE = 0.7;
 const SAVED_ANSWER_CONFIDENCE = 0.9;
 const STALE_SAVED_ANSWER_NOTE = "saved answer past review date";
 const SENSITIVE_NOTE = "sensitive question — only you may answer this";
+const CONSENT_NOTE = "you must answer this yourself for each application";
 const LOW_CONFIDENCE_NOTE = "mapping confidence below fill threshold";
 const MISSING_RESUME_NOTE = "no resume document attached";
 
@@ -69,6 +70,20 @@ export const SENSITIVE_CANONICAL_FIELDS: ReadonlySet<CanonicalField> = new Set<C
   "notice_period",
   "availability",
   "relocation",
+]);
+
+/**
+ * Consent must be given freshly, per application: an attestation or a criminal-history
+ * disclosure approved on ANOTHER application can never auto-satisfy this one, because
+ * reusing it would amount to CareerHQ answering on the user's behalf.
+ *
+ * A strict subset of SENSITIVE_CANONICAL_FIELDS — the rest (notice period, desired
+ * salary, …) are facts about the user that do carry across applications, and the
+ * saved-answer reuse in rule 1 still applies to them.
+ */
+export const CONSENT_ONLY_FIELDS: ReadonlySet<CanonicalField> = new Set<CanonicalField>([
+  "legal_attestation",
+  "criminal_history",
 ]);
 
 /** Canonical fields backed by a deterministic profile value. */
@@ -143,7 +158,11 @@ function planField(
 ): Draft {
   // Rule 1 — sensitive: only the user (or their own previously saved answer) may answer.
   // Never "ai", never a profile guess, regardless of mapping confidence.
+  //
+  // Consent-only fields go further and refuse the saved answer too: consent is
+  // given per application, so it can never be carried over from another one.
   if (isSensitiveField(field)) {
+    if (CONSENT_ONLY_FIELDS.has(field.canonicalField)) return userDraft(CONSENT_NOTE, false);
     return saved ? savedAnswerDraft(saved) : userDraft(SENSITIVE_NOTE, false);
   }
 

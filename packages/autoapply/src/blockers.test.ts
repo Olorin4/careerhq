@@ -30,15 +30,54 @@ describe("detectBlockers", () => {
     expect(detectBlockers(page).map((b) => b.kind)).toEqual(["login_required"]);
   });
 
-  it("flags a required attestation checkbox as legal_attestation", () => {
+  it("does NOT block on a required attestation CHECKBOX (it becomes a consent tick)", () => {
+    // Spec §10.6 (revised): a required attestation checkbox is demoted to a
+    // field-level consent tick the user checks personally on the review screen,
+    // having read its exact text — more precise than abandoning the attempt.
     const html = `<html><body><form>
-      <div class="field"><label for="attest">
-        <input type="checkbox" id="attest" name="attest" required />
-        I certify that the above is true and complete.
+      <div class="field"><label for="ack">
+        <input type="checkbox" id="ack" name="ack" required />
+        I certify that the information provided is accurate
       </label></div>
     </form></body></html>`;
     const page = rawPageFromHtml(html, "https://example.com/apply");
-    expect(detectBlockers(page).map((b) => b.kind)).toEqual(["legal_attestation"]);
+    expect(detectBlockers(page).map((b) => b.kind)).not.toContain("legal_attestation");
+    expect(detectBlockers(page)).toEqual([]);
+  });
+
+  it("still blocks on a typed-signature attestation (not renderable as a tick)", () => {
+    const html = `<html><body><form>
+      <div class="field">
+        <label for="sig">Type your full legal name to certify this application</label>
+        <input type="text" id="sig" name="sig" required />
+      </div>
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://example.com/apply");
+    const blockers = detectBlockers(page);
+    expect(blockers.map((b) => b.kind)).toContain("legal_attestation");
+    expect(blockers.find((b) => b.kind === "legal_attestation")?.detail).toContain("#sig");
+  });
+
+  it("still blocks on a signature-date attestation", () => {
+    const html = `<html><body><form>
+      <div class="field">
+        <label for="sigdate">Date of signature — I attest the above is true</label>
+        <input type="date" id="sigdate" name="sigdate" required />
+      </div>
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://example.com/apply");
+    expect(detectBlockers(page).map((b) => b.kind)).toContain("legal_attestation");
+  });
+
+  it("does not block on an optional attestation checkbox", () => {
+    const html = `<html><body><form>
+      <div class="field"><label for="opt">
+        <input type="checkbox" id="opt" name="opt" />
+        I acknowledge the privacy notice
+      </label></div>
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://example.com/apply");
+    expect(detectBlockers(page).map((b) => b.kind)).not.toContain("legal_attestation");
   });
 
   it("does not flag the same attestation checkbox when it is not required", () => {

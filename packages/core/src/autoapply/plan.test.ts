@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { CanonicalForm, CanonicalFormField } from "@careerhq/contracts";
+import { normalizeQuestion } from "../grounding/select-facts.js";
 import {
+  CONSENT_ONLY_FIELDS,
   MIN_FILL_CONFIDENCE,
   planAnswers,
   requiresUserBeforeSubmit,
@@ -190,6 +192,103 @@ describe("planAnswers — rule 1: sensitive fields", () => {
       expect(answer.needsUser).toBe(true);
       expect(answer.confidence).toBe(0);
     }
+  });
+});
+
+describe("planAnswers — rule 1a: consent-only fields are never reused across applications", () => {
+  it("never reuses a saved answer for a legal attestation — consent must be fresh", () => {
+    const label = "I certify that the information provided is accurate";
+    const result = planAnswers(
+      inputs({
+        form: form([
+          field({
+            id: "ack",
+            kind: "checkbox",
+            required: true,
+            label,
+            canonicalField: "legal_attestation",
+            mappingConfidence: 0.9,
+          }),
+        ]),
+        savedAnswers: [
+          {
+            questionNorm: normalizeQuestion(label),
+            answer: "true",
+            sourceFactIds: [],
+            staleForReuse: false,
+          },
+        ],
+      }),
+    );
+
+    const answer = answerFor(result, "ack");
+    expect(answer.source).toBe("user");
+    expect(answer.needsUser).toBe(true);
+    expect(answer.value).toBe("");
+  });
+
+  it("never reuses a saved answer for criminal history", () => {
+    const label = "Have you ever been convicted of a felony?";
+    const result = planAnswers(
+      inputs({
+        form: form([
+          field({
+            id: "ch",
+            kind: "select",
+            required: true,
+            label,
+            canonicalField: "criminal_history",
+            mappingConfidence: 0.9,
+          }),
+        ]),
+        savedAnswers: [
+          {
+            questionNorm: normalizeQuestion(label),
+            answer: "No",
+            sourceFactIds: [],
+            staleForReuse: false,
+          },
+        ],
+      }),
+    );
+
+    const answer = answerFor(result, "ch");
+    expect(answer.source).toBe("user");
+    expect(answer.needsUser).toBe(true);
+  });
+
+  it("still reuses a saved answer for other sensitive fields (e.g. notice period)", () => {
+    const label = "What is your notice period?";
+    const result = planAnswers(
+      inputs({
+        form: form([
+          field({
+            id: "np",
+            kind: "text",
+            required: true,
+            label,
+            canonicalField: "notice_period",
+            mappingConfidence: 0.9,
+          }),
+        ]),
+        savedAnswers: [
+          {
+            questionNorm: normalizeQuestion(label),
+            answer: "Two weeks",
+            sourceFactIds: [],
+            staleForReuse: false,
+          },
+        ],
+      }),
+    );
+
+    const answer = answerFor(result, "np");
+    expect(answer.source).toBe("saved_answer");
+    expect(answer.needsUser).toBe(false);
+  });
+
+  it("names exactly the two consent-only canonical fields", () => {
+    expect([...CONSENT_ONLY_FIELDS].sort()).toEqual(["criminal_history", "legal_attestation"]);
   });
 });
 

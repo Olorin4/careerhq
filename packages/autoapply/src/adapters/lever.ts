@@ -9,10 +9,11 @@
 // use: detectAts → parseGreenhouse | parseLever | parseGenericForm(generic).
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { canonicalFormSchema, type CanonicalField, type CanonicalForm } from "@careerhq/contracts";
+import { canonicalFormSchema, type CanonicalField, type CanonicalForm, type FieldKind } from "@careerhq/contracts";
 import { detectAts } from "../detect.js";
 import { parseGenericForm } from "../generic.js";
 import { rawFieldId, type RawField, type RawFormPage } from "../raw.js";
+import { isAttestationCheckbox } from "./attestation.js";
 import { hashRawFormPage, parseGreenhouse } from "./greenhouse.js";
 
 // Re-exported so callers (and this file's own fixture-hash tripwire below)
@@ -66,7 +67,11 @@ const NAME_HINTS: NameHint[] = [
   { pattern: /phone/i, field: "phone" },
 ];
 
-function matchNameHint(raw: RawField): CanonicalField | null {
+function matchNameHint(raw: RawField, kind: FieldKind): CanonicalField | null {
+  // Checked first: an attestation checkbox is never one of the fields below,
+  // and its wording ("I agree…", "…company name") could otherwise collide with
+  // them. See ./attestation.ts for why it is checkbox-only.
+  if (isAttestationCheckbox(raw, kind)) return "legal_attestation";
   // Lever's single full-name field is literally named/id'd "name" — an
   // exact match, not a substring one (a substring match would wrongly
   // catch fields like "company_name"). Checked before the ordered
@@ -106,7 +111,7 @@ export function parseLever(page: RawFormPage): CanonicalForm {
     const raw = rawById.get(field.id);
     if (!raw) return field;
 
-    const hinted = matchNameHint(raw);
+    const hinted = matchNameHint(raw, field.kind);
     if (hinted) {
       return { ...field, canonicalField: hinted, mappingConfidence: 0.9 };
     }

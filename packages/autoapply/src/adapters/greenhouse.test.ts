@@ -80,10 +80,14 @@ describe("parseGreenhouse (committed fixture)", () => {
     expect(field?.mappingConfidence).toBe(0.9);
   });
 
-  it("leaves the attestation checkbox unknown at 0 (no hint covers it)", () => {
-    const field = form.fields.find((f) => f.id === idFor("#legal_attestation"));
-    expect(field?.canonicalField).toBe("unknown");
-    expect(field?.mappingConfidence).toBe(0);
+  // The attestation checkbox is no longer a blocker (spec §10.6, revised) — it
+  // is a field-level consent tick, so it must carry a canonical field for the
+  // review screen and the planner to key off.
+  it("maps the required attestation checkbox to legal_attestation", () => {
+    const ack = form.fields.find((f) => f.id === idFor("#legal_attestation"));
+    expect(ack?.kind).toBe("checkbox");
+    expect(ack?.canonicalField).toBe("legal_attestation");
+    expect(ack?.mappingConfidence).toBe(0.9);
   });
 });
 
@@ -120,6 +124,21 @@ describe("fix round: location/relocation/sponsorship/work_authorization don't co
     // Belt-and-braces: all four resolved fields are pairwise distinct — no
     // field silently shadows another's canonical field.
     expect(new Set(mapped).size).toBe(4);
+  });
+});
+
+describe("attestation mapping is checkbox-only", () => {
+  it("leaves a typed-signature 'certify' text input unknown", () => {
+    // A typed signature is not a consent tick — it stays unmapped and is
+    // pause-and-return's job (blockers.ts), not the review screen's.
+    const html = `<html><body><form>
+      <label for="signature">Type your full legal name to certify this application</label>
+      <input type="text" id="signature" name="signature" required />
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://acme.example/careers/apply");
+    const form = parseGreenhouse(page);
+    const field = form.fields.find((f) => f.id === idFor("#signature"));
+    expect(field?.canonicalField).toBe("unknown");
   });
 });
 
