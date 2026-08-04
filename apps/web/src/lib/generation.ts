@@ -84,10 +84,16 @@ export async function prepareGeneration(
 ): Promise<PreparedGeneration> {
   const { db, config } = deps;
   const apiKey = config.openrouterApiKey;
+  // Replay mode answers out of a committed fixture and never opens a socket
+  // (`withReplay` does not call `run()`), so it is the one mode that is fully
+  // functional without a key — which is the whole basis of the hosted demo:
+  // `AI_MODE=replay` with no `OPENROUTER_API_KEY` deployed (spec P6 §3).
+  const keyless = apiKey === null;
+  const replaying = config.aiMode === "replay";
 
   // (1) No key means no AI at all — the deterministic floor. Checked first so
   // no other work (and no db read) happens for a disabled install.
-  if (apiKey === null) return { ready: false, outcome: { status: "ai_unavailable" } };
+  if (keyless && !replaying) return { ready: false, outcome: { status: "ai_unavailable" } };
 
   let question: string | undefined;
   let ruleset: ReturnType<typeof classifyQuestionSensitivity> | undefined;
@@ -125,7 +131,12 @@ export async function prepareGeneration(
   // failure mode than an explicit error here.
   if (!job) return { ready: false, outcome: { status: "failed", error: "job_not_found" } };
 
-  if (args.kind === "question" && ruleset) {
+  // The tie-break is a live fast-tier call with no replay wrapper of its own,
+  // so a keyless replay run skips it and keeps the ruleset's verdict. That is
+  // the safe direction: the LLM only ever *widens* "sensitive", so skipping it
+  // can only let through a question the deterministic rules already cleared —
+  // never block one they flagged.
+  if (args.kind === "question" && ruleset && apiKey !== null) {
     // (2b) The fast-tier tie-break itself: only reached once the ruleset
     // came back clean AND the application is confirmed real and in-scope.
     const classifySensitive = deps.classifySensitive ?? classifySensitiveLlm;
@@ -238,9 +249,6 @@ export async function runGeneration(
 
   const { config } = deps;
   const apiKey = config.openrouterApiKey;
-  // prepareGeneration already returned ai_unavailable for a null key; this is
-  // for the type narrowing only.
-  if (apiKey === null) return { status: "ai_unavailable" };
 
   const generate = deps.generate ?? generateGrounded;
   // (4) The replay layer wraps the whole call: in replay mode `generate` is
@@ -251,7 +259,14 @@ export async function runGeneration(
     taskId: REPLAY_TASK_ID,
     prompt: prepared.prompt,
     schema: generationResultSchema,
-    run: () => generate(prepared.input, { models: config.aiWritingModels, apiKey }),
+    run: () => {
+      // Unreachable without a key: `withReplay` never calls `run` in replay
+      // mode, and every other mode was turned away by prepareGeneration's
+      // api-key gate. Thrown rather than silently degraded so a future mode
+      // that slips past both cannot quietly issue an unauthenticated call.
+      if (apiKey === null) throw new Error("generation: no api key outside replay mode");
+      return generate(prepared.input, { models: config.aiWritingModels, apiKey });
+    },
   });
 
   // (5) A failure is terminal, except no_facts_provided — that is the grounding

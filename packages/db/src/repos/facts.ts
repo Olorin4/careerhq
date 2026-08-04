@@ -8,10 +8,19 @@ export interface FactInput {
   workspaceId: string; category: FactCategory; claim: string;
   detail?: string; evidenceUrl?: string; sensitivity?: Sensitivity;
   reviewBy: Date;
+  /**
+   * Overrides the generated primary key. Exists for one caller — the demo seed,
+   * whose facts must keep the same ids across every six-hourly rebuild because
+   * those ids are baked into the AI replay fixtures' cache keys (see
+   * `packages/db/src/demo-seed.ts`). Nothing user-facing should ever set it:
+   * a duplicate id is a primary-key violation, not a silent overwrite.
+   */
+  id?: string;
 }
 
 export async function createFact(db: DbOrTx, input: FactInput): Promise<CandidateFact> {
   const [fact] = await db.insert(candidateFacts).values({
+    ...(input.id !== undefined ? { id: input.id } : {}),
     workspaceId: input.workspaceId,
     category: input.category,
     claim: input.claim,

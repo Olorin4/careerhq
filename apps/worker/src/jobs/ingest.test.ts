@@ -1,6 +1,12 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, ingestRuns, jobs, workspaces, type Db } from "@careerhq/db";
+import {
+  createDb, ingestRuns, jobs, lockDemoSeed, seedDemoWorkspace, workspaces, type Db,
+} from "@careerhq/db";
 import type { AppConfig } from "@careerhq/config";
 import type { JobScore } from "@careerhq/core";
 import type { FetchContext, JobFetcher } from "@careerhq/ingest";
@@ -241,4 +247,53 @@ d("runRerankOnce candidate filter", () => {
     const [row] = await db.select().from(jobs).where(eq(jobs.id, eligibleId));
     expect(row?.llmScore).toBe(91);
   });
+});
+
+/**
+ * The demo's re-rank, keyless (spec P6 §3, Task 8). The worker's ingest cron
+ * calls `runRerankOnce` every six hours; in the hosted demo there is no
+ * OpenRouter key, so the only way the inbox shows an LLM ranking is a
+ * committed fixture in `packages/ai/fixtures/replay/`.
+ *
+ * That fixture is keyed by a hash of the re-rank prompt, and the prompt quotes
+ * every candidate listing's uuid — so this passes only while `demo-seed.ts`
+ * keeps pinning those ids (`demoJobId`). Each run reseeds the demo workspace,
+ * which is what makes this a guard against the six-hourly reset silently
+ * invalidating the fixture rather than a one-off check.
+ */
+d("runRerankOnce in the hosted demo's keyless replay mode", () => {
+  it("re-ranks the seeded inbox from a committed fixture, without an api key", async () => {
+    const replayConfig: AppConfig = {
+      ...baseConfig,
+      openrouterApiKey: null,
+      aiMode: "replay",
+      // The repo's committed fixtures, not the throwaway dir baseConfig uses.
+      aiReplayDir: fileURLToPath(new URL("../../../../packages/ai/fixtures/replay", import.meta.url)),
+    };
+
+    // The candidate-filter suite above leaves call history on the shared mock.
+    rerankJobsMock.mockReset();
+
+    const ROLLBACK = new Error("rollback: this test must leave no trace");
+    await expect(db.transaction(async (tx) => {
+      // The seed's delete predicate is database-global and `demo-reset.test.ts`
+      // runs resets in parallel with this file; the lock is what stops one
+      // deleting this workspace mid-test, and the rollback is why seeding a
+      // real demo workspace here disturbs nothing.
+      await lockDemoSeed(tx);
+      const txDb = tx as unknown as Db;
+      const { workspaceId: demoWorkspaceId } = await seedDemoWorkspace(txDb, {
+        fileStorageDir: mkdtempSync(path.join(tmpdir(), "careerhq-demo-rerank-")),
+      });
+
+      const result = await runRerankOnce(txDb, demoWorkspaceId, replayConfig);
+
+      expect(result.status).toBe("ok");
+      expect(result.reranked).toBeGreaterThan(0);
+      // Reaching the live client would mean the demo can spend tokens.
+      expect(rerankJobsMock).not.toHaveBeenCalled();
+
+      throw ROLLBACK;
+    })).rejects.toBe(ROLLBACK);
+  }, 60_000);
 });

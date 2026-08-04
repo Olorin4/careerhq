@@ -45,7 +45,7 @@ import { createApplication, transitionApplication } from "./repos/applications.j
 import { createCvVariant } from "./repos/cv-variants.js";
 import {
   applyRerank, promoteJob, recordIngestRun, saveScoringProfile, scoreInboxJobs,
-  upsertNormalizedJobs,
+  upsertNormalizedJobs, type UpsertJobItem,
 } from "./repos/discovery.js";
 import { createDocument, setDocumentApproval } from "./repos/documents.js";
 import { createEmailConnection } from "./repos/email-connections.js";
@@ -161,6 +161,57 @@ interface DemoFact {
 /** The seeded facts' ids, by key — what `sourceFactIds` is built from. */
 type DemoFactIds = Record<DemoFactKey, string>;
 
+/**
+ * A fixed primary key for a seeded row, derived from a stable name.
+ *
+ * **Why the demo's ids may not be random (spec P6 §3, Task 8).** The demo runs
+ * with `AI_MODE=replay` and no `OPENROUTER_API_KEY`: every AI answer it shows
+ * comes from a committed fixture in `packages/ai/fixtures/replay/`. A fixture
+ * is keyed by `${taskId}-${sha256(system + "\n" + user).slice(0, 16)}` — a hash
+ * of the *exact prompt text* — and both prompts the demo depends on embed
+ * database ids verbatim:
+ *
+ *   - the generation prompt lists the selected facts as `[<fact uuid>] <claim>`
+ *     (`buildGeneratePrompt`), because the model must cite them back;
+ *   - the re-rank prompt lists each listing as `id: <job uuid>`
+ *     (`buildRerankPrompt`), for the same reason.
+ *
+ * With `gen_random_uuid()` ids, every six-hourly reset would produce a
+ * different prompt, a different hash, and therefore a miss on every fixture —
+ * the demo's AI flows would silently degrade to `replay_miss` a few hours
+ * after deployment, which is exactly the sort of failure nobody watching a
+ * portfolio demo would report. Deriving the ids from stable names instead
+ * makes the prompts — and so the fixture keys — identical after every reset.
+ *
+ * The derivation is a plain RFC 4122 §4.3 name-based (v5-shaped) UUID over
+ * sha256, so it is reproducible from this file alone and needs no dependency.
+ * **Changing `NAMESPACE`, a `kind`, or a key invalidates the fixtures recorded
+ * against it** — re-record them (`AI_MODE=record`) in the same commit.
+ */
+const DEMO_ID_NAMESPACE = "careerhq-demo-seed";
+
+function demoUuid(kind: string, key: string): string {
+  const bytes = createHash("sha256").update(`${DEMO_ID_NAMESPACE}/${kind}/${key}`).digest()
+    .subarray(0, 16);
+  // Version 5 in the high nibble of byte 6, RFC 4122 variant in byte 8.
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return [
+    hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20, 32),
+  ].join("-");
+}
+
+/** The fixed id of a seeded fact. Exported so tests can assert the pinning holds. */
+export function demoFactId(key: string): string {
+  return demoUuid("fact", key);
+}
+
+/** The fixed id of a seeded discovery listing, keyed by its `external_id`. */
+export function demoJobId(externalId: string): string {
+  return demoUuid("job", externalId);
+}
+
 function demoFacts(): DemoFact[] {
   return [
     { key: "legalName", category: "identity", claim: "Full legal name: Alex Demo", reviewBy: daysFromNow(180) },
@@ -216,10 +267,15 @@ function demoFacts(): DemoFact[] {
   ];
 }
 
+/**
+ * Inserts the persona's facts with {@link demoFactId}-pinned primary keys —
+ * see that helper's comment for why a random id here would break every AI
+ * replay fixture on the next reset.
+ */
 async function seedFacts(db: DbOrTx, workspaceId: string): Promise<DemoFactIds> {
   const ids = {} as DemoFactIds;
   for (const { key, ...fact } of demoFacts()) {
-    ids[key] = (await createFact(db, { workspaceId, ...fact })).id;
+    ids[key] = (await createFact(db, { workspaceId, id: demoFactId(key), ...fact })).id;
   }
   return ids;
 }
@@ -331,7 +387,12 @@ const DEMO_JOB_SEEDS: readonly JobSeed[] = [
   ["Wren Accounting", "Full-Stack Engineer", "Remote (EU)", "remote", "€74k–€92k", "TypeScript, Node, Postgres. Small remote-first team."],
 ];
 
-function normalizedJobs(): Array<{ job: NormalizedJob; contentHash: string }> {
+/**
+ * The listings, with {@link demoJobId}-pinned primary keys: the re-rank prompt
+ * quotes each listing's uuid, and that prompt is an AI replay fixture's cache
+ * key (see {@link demoFactId}'s comment).
+ */
+function normalizedJobs(): UpsertJobItem[] {
   return DEMO_JOB_SEEDS.map(([companyName, title, location, remoteMode, salaryRaw, descriptionMd], index) => {
     const externalId = `demo-${String(index + 1).padStart(3, "0")}`;
     const job: NormalizedJob = {
@@ -347,6 +408,7 @@ function normalizedJobs(): Array<{ job: NormalizedJob; contentHash: string }> {
       postedAt: daysAgo((index % 14) + 1),
     };
     return {
+      id: demoJobId(externalId),
       job,
       contentHash: createHash("sha256").update(`${companyName}\n${title}\n${descriptionMd}`).digest("hex"),
     };

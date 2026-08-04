@@ -3,7 +3,7 @@ import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "@careerhq/config";
 import {
-  imapConfigSchema, retentionSettingSchema,
+  classifyReplyResultSchema, imapConfigSchema, retentionSettingSchema,
   type ApplicationState, type ClassifyReplyResult, type ImapConfig, type RetentionSetting,
 } from "@careerhq/contracts";
 import { AUTO_ACK_CONFIDENCE } from "@careerhq/core";
@@ -18,8 +18,13 @@ import {
   makeImapClient, matchInboundToApplication, normalizeRawMessage, redactError,
   type ImapClientLike, type NormalizedInboundEmail,
 } from "@careerhq/email";
-import { classifyReply, type ClassifyReplyInput } from "@careerhq/ai";
+import {
+  buildClassifyPrompt, classifyReply, makeFsReplayStore, withReplay, type ClassifyReplyInput,
+} from "@careerhq/ai";
 import type { FallbackOptions, FallbackResult } from "@careerhq/ai";
+
+/** Task id for the record/replay store; keeps reply fixtures in their own keyspace. */
+const REPLAY_TASK_ID = "classify-reply";
 
 /**
  * `makeImapClient` widened to its structural contract, mirroring `MakeTransport`
@@ -156,19 +161,35 @@ async function classifyAndSuggest(
 ): Promise<"pending" | "accepted" | null> {
   const { db, config, summary } = deps;
   const apiKey = config.openrouterApiKey;
-  // No key is the deterministic floor: the message is stored, just unclassified.
-  if (apiKey === null) return null;
+  // No key is the deterministic floor: the message is stored, just
+  // unclassified. Replay mode is the exception — it answers from a committed
+  // fixture and opens no socket, which is how the hosted demo classifies
+  // without a key at all (spec P6 §3).
+  if (apiKey === null && config.aiMode !== "replay") return null;
 
   const context = await loadApplicationContext(db, deps.contextCache, applicationId);
   if (!context) return null;
 
-  const result = await deps.classify({
+  const input: ClassifyReplyInput = {
     subject: msg.subject,
     snippet: msg.textSnippet,
     companyName: context.companyName,
     jobTitle: context.jobTitle,
     applicationState: context.state,
-  }, { models: config.aiFastModels, apiKey });
+  };
+  const result = await withReplay<ClassifyReplyResult>({
+    mode: config.aiMode,
+    store: makeFsReplayStore(config.aiReplayDir),
+    taskId: REPLAY_TASK_ID,
+    prompt: buildClassifyPrompt(input),
+    schema: classifyReplyResultSchema,
+    run: () => {
+      // Unreachable without a key: replay never calls `run`, and every other
+      // mode returned above.
+      if (apiKey === null) throw new Error("email-sync: no api key outside replay mode");
+      return deps.classify(input, { models: config.aiFastModels, apiKey });
+    },
+  });
 
   if (!result.ok || !result.value) {
     // The next scheduled pass will not retry this message (it is no longer

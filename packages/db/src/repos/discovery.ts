@@ -20,17 +20,30 @@ const DEFAULT_INGEST_RUNS_LIMIT = 20;
 
 export interface UpsertResult { inserted: number; updated: number; duplicates: number }
 
+/**
+ * `id` overrides the generated primary key on INSERT only (an existing row
+ * keeps the id it already has). Exists for one caller — the demo seed, whose
+ * listings must keep the same ids across every six-hourly rebuild because the
+ * re-rank prompt embeds them verbatim and that prompt is an AI replay
+ * fixture's cache key. Real ingest sources never set it.
+ */
+export interface UpsertJobItem {
+  job: NormalizedJob;
+  contentHash: string;
+  id?: string;
+}
+
 export async function upsertNormalizedJobs(
   db: DbOrTx,
   workspaceId: string,
-  items: Array<{ job: NormalizedJob; contentHash: string }>,
+  items: UpsertJobItem[],
 ): Promise<UpsertResult> {
   return db.transaction(async (tx) => {
     let inserted = 0;
     let updated = 0;
     let duplicates = 0;
 
-    for (const { job, contentHash } of items) {
+    for (const { job, contentHash, id } of items) {
       await tx.insert(companies).values({ workspaceId, name: job.companyName })
         .onConflictDoNothing({ target: [companies.workspaceId, companies.name] });
       const [company] = await tx.select({ id: companies.id }).from(companies)
@@ -62,6 +75,7 @@ export async function upsertNormalizedJobs(
       }
 
       const [created] = await tx.insert(jobs).values({
+        ...(id !== undefined ? { id } : {}),
         workspaceId,
         companyId,
         source: job.source,

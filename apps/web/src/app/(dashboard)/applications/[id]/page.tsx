@@ -57,7 +57,12 @@ export default async function ApplicationDetailPage({
   const factClaims: Record<string, string> = Object.fromEntries(
     facts.map((fact) => [fact.id, fact.claim] as const),
   );
-  const aiAvailable = loadConfig().openrouterApiKey !== null;
+  // Replay mode answers from committed fixtures and opens no socket, so the
+  // hosted demo — `AI_MODE=replay` with no key deployed — must still offer the
+  // generate controls; without this the demo's replay fixtures are unreachable
+  // from the UI. `prepareGeneration` enforces the same rule server-side.
+  const aiConfig = loadConfig();
+  const aiAvailable = aiConfig.openrouterApiKey !== null || aiConfig.aiMode === "replay";
   const answers = await listAnswers(db, application.id);
   const cvVariants = await listCvVariants(db, application.workspaceId);
   const emailConnections = await listEmailConnections(db, application.workspaceId);

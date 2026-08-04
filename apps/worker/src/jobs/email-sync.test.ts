@@ -503,3 +503,70 @@ d("runEmailSyncOnce", () => {
     expect(ok!.health).toBe("ok");
   });
 });
+
+/**
+ * Reply classification through the record/replay layer (ADR-0004's follow-on,
+ * wired in P6 Task 8). The point is the *keyless* half: `AI_MODE=replay` opens
+ * no socket, so a deployment with no `OPENROUTER_API_KEY` — which is what the
+ * hosted demo is — can still classify, from a fixture, instead of storing every
+ * reply unclassified.
+ *
+ * Recorded in one mailbox and replayed in a second, identical one: the fixture
+ * key is a hash of the prompt (company, role, application state, subject,
+ * body), so two mailboxes that differ only in Message-ID hit the same key. That
+ * is a stronger check than writing a fixture by hand, which would only prove
+ * the key this test computed matches the key this test wrote.
+ */
+d("runEmailSyncOnce classification via the replay layer", () => {
+  /** Same company, role, subject and body in both halves — so, the same prompt. */
+  const SUBJECT = "Re: Application: Backend Engineer";
+  const BODY = "We would like to invite you to a first interview next Tuesday.";
+  const VERDICT: ClassifyReplyResult = {
+    classification: "interview",
+    confidence: 0.91,
+    suggestedState: "INTERVIEW",
+    quotedEvidence: "invite you to a first interview",
+  };
+
+  async function syncOne(
+    name: string, cfg: AppConfig, classify: ClassifyReplyFn,
+  ): Promise<{ workspaceId: string; messageId: string }> {
+    const workspaceId = await newWorkspace(name);
+    const connectionId = await newConnection(workspaceId, name, { mode: "metadata_only" });
+    const outboundId = `<out-${name}@careerhq.test>`;
+    await submittedWithOutbound(workspaceId, connectionId, "Replay Health", outboundId);
+    const messageId = `<in-${name}@replay.test>`;
+    const client = stubClient([
+      { uid: 1, source: rfc822({ messageId, from: "hiring@replay.test", subject: SUBJECT, inReplyTo: outboundId, body: BODY }) },
+    ]);
+    await runEmailSyncOnce(db, workspaceId, cfg, {
+      makeClient: makeClientReturning(client), classify,
+    });
+    return { workspaceId, messageId };
+  }
+
+  it("records a live classification and replays it for a mailbox with no api key", async () => {
+    // One store for both halves: the recording is what the replay reads.
+    const replayDir = mkdtempSync(path.join(tmpdir(), "careerhq-classify-replay-"));
+
+    const recorded = await syncOne(
+      "record",
+      config({ AI_MODE: "record", AI_REPLAY_DIR: replayDir }),
+      classifierFor({ [SUBJECT]: VERDICT }).classify,
+    );
+    const [recordedRow] = await messageBy(recorded.workspaceId, recorded.messageId);
+    expect(recordedRow?.classification).toBe("interview");
+
+    // The demo's shape exactly: replay mode, no key at all.
+    const keyless = config({ AI_MODE: "replay", AI_REPLAY_DIR: replayDir, OPENROUTER_API_KEY: "" });
+    expect(keyless.openrouterApiKey).toBeNull();
+    const replayed = await syncOne("replay", keyless, async () => {
+      throw new Error("replay mode must never call the model");
+    });
+
+    const [replayedRow] = await messageBy(replayed.workspaceId, replayed.messageId);
+    expect(replayedRow?.classification).toBe("interview");
+    expect(replayedRow?.suggestedTransition).toBe("INTERVIEW");
+    expect(replayedRow?.quotedEvidence).toBe(VERDICT.quotedEvidence);
+  });
+});
