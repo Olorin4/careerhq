@@ -52,10 +52,11 @@ describe("loadConfig", () => {
   it("treats a whitespace-only OPENROUTER_API_KEY as unset", () => {
     expect(loadConfig({ ...BASE, OPENROUTER_API_KEY: "  " }).openrouterApiKey).toBeNull();
   });
-  it("defaults aiFastModels to the free-tier fallback list", () => {
+  it("defaults aiFastModels to the verified fallback list", () => {
     expect(loadConfig(BASE).aiFastModels).toEqual([
-      "google/gemini-2.0-flash-exp:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemini-2.5-flash-lite",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("parses AI_FAST_MODELS as a comma list, trimming whitespace and dropping empties", () => {
@@ -69,14 +70,16 @@ describe("loadConfig", () => {
   // empty model list would leave the fallback client with nothing to try.
   it("falls back to the default model list when AI_FAST_MODELS is empty", () => {
     expect(loadConfig({ ...BASE, AI_FAST_MODELS: "" }).aiFastModels).toEqual([
-      "google/gemini-2.0-flash-exp:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemini-2.5-flash-lite",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("falls back to the default model list when AI_FAST_MODELS holds only separators", () => {
     expect(loadConfig({ ...BASE, AI_FAST_MODELS: " , ," }).aiFastModels).toEqual([
-      "google/gemini-2.0-flash-exp:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemini-2.5-flash-lite",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("never returns an empty aiFastModels list", () => {
@@ -106,11 +109,11 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...BASE, AI_MODE: "bogus" })).toThrow(/AI_MODE/);
   });
 
-  it("defaults aiWritingModels to the free-tier writing-tier fallback list", () => {
+  it("defaults aiWritingModels to the verified writing-tier fallback list", () => {
     expect(loadConfig(BASE).aiWritingModels).toEqual([
-      "deepseek/deepseek-chat:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
-      "google/gemini-2.0-flash-001",
+      "deepseek/deepseek-v4-flash",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("parses AI_WRITING_MODELS as a comma list, trimming whitespace and dropping empties", () => {
@@ -118,16 +121,16 @@ describe("loadConfig", () => {
   });
   it("falls back to the default writing model list when AI_WRITING_MODELS is empty", () => {
     expect(loadConfig({ ...BASE, AI_WRITING_MODELS: "" }).aiWritingModels).toEqual([
-      "deepseek/deepseek-chat:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
-      "google/gemini-2.0-flash-001",
+      "deepseek/deepseek-v4-flash",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("falls back to the default writing model list when AI_WRITING_MODELS holds only separators", () => {
     expect(loadConfig({ ...BASE, AI_WRITING_MODELS: " , ," }).aiWritingModels).toEqual([
-      "deepseek/deepseek-chat:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
-      "google/gemini-2.0-flash-001",
+      "deepseek/deepseek-v4-flash",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("never returns an empty aiWritingModels list", () => {

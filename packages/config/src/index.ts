@@ -38,15 +38,39 @@ const boolFromEnv = z
   .default("false")
   .transform((v) => v === "true");
 
+/**
+ * The two model tiers, in the order the sequential fallback tries them
+ * (ADR-0003). Every id below was verified by actually running this repo's own
+ * prompts against it three times, not by reading the OpenRouter catalogue: the
+ * previous defaults were four `:free` ids that OpenRouter has since retired,
+ * and they answered `http_404` on every call while the README still advertised
+ * them. Two lessons are encoded here. `:free` aliases churn, so the defaults
+ * are cheap-but-stable paid ids instead (fractions of a cent per call — a
+ * re-rank costs about $0.00005). And a model that passes one tier can still
+ * fail the other: `google/gemini-2.5-flash-lite` re-ranks and classifies
+ * flawlessly but returns generation's `confidence` as a *string*, which the
+ * grounding schema rejects, so it is deliberately absent from the writing
+ * tier. If you swap an id, run both tiers' prompts before trusting it.
+ *
+ * The lists stay env-overridable for exactly the reason they went stale — see
+ * ADR-0003 §"Model lists are env configuration, not code".
+ */
 const DEFAULT_AI_FAST_MODELS = [
-  "google/gemini-2.0-flash-exp:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
+  "google/gemini-2.5-flash-lite",
+  "qwen/qwen3-30b-a3b-instruct-2507",
+  "meta-llama/llama-3.3-70b-instruct",
 ];
 
+/**
+ * The writing tier's first entry is also the only one the streaming generation
+ * endpoint uses (`aiWritingModels[0]`), so it is verified streaming as well as
+ * buffered. `deepseek/deepseek-v4-flash` is the undated alias on purpose: the
+ * dated snapshots are the ids that disappear.
+ */
 const DEFAULT_AI_WRITING_MODELS = [
-  "deepseek/deepseek-chat:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "google/gemini-2.0-flash-001",
+  "deepseek/deepseek-v4-flash",
+  "qwen/qwen3-30b-a3b-instruct-2507",
+  "meta-llama/llama-3.3-70b-instruct",
 ];
 
 /**
