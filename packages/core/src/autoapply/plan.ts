@@ -231,6 +231,15 @@ export function planAnswers(inputs: PlanInputs): PlanResult {
  * a required field with a missing/empty answer, any field still flagged `needsUser`,
  * or a sensitive field carrying an "ai" answer — the last being a belt-and-braces
  * invariant `planAnswers` can never produce.
+ *
+ * Hidden inputs are exempt, and deliberately so. `planField` has no deterministic
+ * source for them so rule 5 hands them back `needsUser: true`, and the review
+ * screen does not render them (they are CSRF tokens, utm parameters and tracking
+ * ids — there is no question to put to a human). Counting them here would make
+ * every real ATS form permanently un-previewable: a blocker the user is shown no
+ * way to clear. Their VALUES are still carried through the snapshot, the
+ * fingerprint and the receipt exactly as parsed, so nothing about what gets
+ * typed changes — only whether the user is asked about it.
  */
 export function requiresUserBeforeSubmit(
   answers: PlannedAnswer[],
@@ -240,6 +249,7 @@ export function requiresUserBeforeSubmit(
   const blocking: string[] = [];
 
   for (const field of form.fields) {
+    if (field.kind === "hidden") continue;
     const answer = answerByFieldId.get(field.id);
     if (!answer) {
       if (field.required) blocking.push(field.id);

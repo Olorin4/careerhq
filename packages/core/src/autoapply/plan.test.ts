@@ -475,4 +475,32 @@ describe("requiresUserBeforeSubmit", () => {
 
     expect(requiresUserBeforeSubmit([], target)).toEqual(["f_email"]);
   });
+
+  it("never blocks on a hidden input — CSRF/utm/tracking fields are not user-answerable", () => {
+    const target = form([
+      field({ id: "f_email", kind: "email", label: "Email", required: true, canonicalField: "email", mappingConfidence: 0.95 }),
+      // Exactly what a real ATS page carries: a required CSRF token and a
+      // tracking parameter, neither of which any human can be asked to fill.
+      field({ id: "f_csrf", kind: "hidden", label: "authenticity_token", required: true }),
+      field({ id: "f_utm", kind: "hidden", label: "utm_source" }),
+    ]);
+    const result = planAnswers(inputs({ form: target }));
+
+    // The planner still hands them back flagged (rule 5 fallthrough) …
+    expect(answerFor(result, "f_csrf").needsUser).toBe(true);
+    expect(answerFor(result, "f_utm").needsUser).toBe(true);
+    // … but the submit gate ignores them, or Preview could never be enabled on
+    // any real form.
+    expect(requiresUserBeforeSubmit(result.answers, target)).toEqual([]);
+  });
+
+  it("still blocks a hidden field's visible neighbours", () => {
+    const target = form([
+      field({ id: "f_csrf", kind: "hidden", label: "authenticity_token", required: true }),
+      field({ id: "f_notes", kind: "textarea", label: "Anything else?", required: true }),
+    ]);
+    const result = planAnswers(inputs({ form: target }));
+
+    expect(requiresUserBeforeSubmit(result.answers, target)).toEqual(["f_notes"]);
+  });
 });
