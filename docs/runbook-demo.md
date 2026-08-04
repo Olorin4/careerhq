@@ -261,9 +261,10 @@ dc ps
 curl -sI http://127.0.0.1:3100/overview
 ```
 
-`pg_restore --clean` prints errors for objects that did not exist yet. Those are
-noise; a non-zero exit with `--clean` is normal. What matters is the row counts
-afterwards:
+`pg_restore --clean` prints errors for objects it cannot drop cleanly, and a
+non-zero exit is normal. On this schema they are pg-boss's partition tables
+(`ALTER TABLE ... pgboss.j<hash> DROP CONSTRAINT`) — six of them in the verified
+run, all noise. What matters is the row counts afterwards:
 
 ```bash
 dc exec -T postgres psql -U careerhq -d careerhq \
@@ -303,9 +304,11 @@ dc down                # containers and network; volumes survive
 dc down --volumes      # ALSO deletes careerhq_pgdata and careerhq_files
 ```
 
-`dc down` is safe. `dc down --volumes` on the demo is recoverable (the worker
-reseeds at boot) and on a personal install is destructive — know which one you
-are on before typing it.
+`dc down` is safe. `dc down --volumes` deletes the database, so coming back up
+needs the schema again — `dc --profile tools run --rm migrate` **before**
+`dc up -d`, or every page 500s until you do. On the demo the data itself is
+recoverable (the worker reseeds at boot); on a personal install it is not.
+Know which one you are on before typing it.
 
 ## 8. Confirming the safety posture on the live box
 
