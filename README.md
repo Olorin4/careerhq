@@ -6,7 +6,7 @@ This is a portfolio project built to demonstrate full-stack product engineering 
 
 ## Current status
 
-**P1 (Foundation, tracker, Fact Bank), P2 (discovery ingestion and scoring), P3 (grounded AI materials generation), and P4 (the email channel) are complete.** Shipped so far:
+**P1 (Foundation, tracker, Fact Bank), P2 (discovery ingestion and scoring), P3 (grounded AI materials generation), P4 (the email channel), and P5 (assisted auto-apply) are complete.** Shipped so far:
 
 - Monorepo scaffold (pnpm workspaces + Turborepo), strict TypeScript, ESLint.
 - Compose stack (`postgres`, `mailpit`, `web`, `worker`) with a parameterized Postgres host port.
@@ -35,9 +35,16 @@ This is a portfolio project built to demonstrate full-stack product engineering 
 - **IMAP sync worker** (`apps/worker`'s `email-sync` job on `EMAIL_SYNC_CRON`, default every 15 minutes): polls every connected mailbox, threads replies onto an application by `In-Reply-To`/`References` headers first and sender-domain only when unambiguous, and enforces each connection's retention mode (`metadata_only` stores no body, `full_local` keeps it, `days_limited` keeps it until `purgeExpiredBodies` sweeps it). With no `CAREERHQ_MASTER_KEY` the sync is a no-op, not a failure.
 - **`classifyReply` + auto-acknowledge** (`packages/ai`): classifies a threaded reply (ack/rejection/other) with a confidence and quoted evidence; a classification at or above `AUTO_ACK_CONFIDENCE` (0.9) on a `SUBMITTED` application drives the tracker's own `classification` trigger straight to `ACKNOWLEDGED` — everything below that bar, or any other state, waits in `/inbox` for a human decision.
 - **Safe local demo recipe**: set `SUBMISSIONS_LIVE_EMAIL=true` and connect a mailbox pointed at Mailpit (`localhost:1025` for a host-run `pnpm dev`; the `mailpit` service name inside Compose) — safety here comes from the connection itself pointing at Mailpit, so the worst a demo can do is land a message in Mailpit's own web UI (`http://localhost:8025`), never a real inbox. (The `SANDBOX_SMTP_ALLOWED_HOST` allow-list is a separate gate that only applies to `sandbox`-kind workspaces — the local workspace here is `personal`, so that gate never fires; it protects the hosted demo's sandbox workspace instead, P6.)
-- CI (GitHub Actions): lint, typecheck, dependency-cruiser import-boundary checks, and the test suite against a real Postgres service container, including a Mailpit round-trip e2e suite (`apps/web/src/lib/email-e2e.test.ts`) that skips cleanly with no `TEST_DATABASE_URL` or unreachable Mailpit.
+- **Assisted auto-apply** (`packages/autoapply`, `apps/worker`'s Playwright driver, `apps/web`'s site-submission orchestrator): reads a live employer career-site page in an isolated browser context and turns it into a browser-free `RawFormPage` → `CanonicalForm` — DOM selectors are never the data model, spec §10.3 — so ATS detection, blocker detection, and field mapping are pure, fixture-tested functions. See [ADR-0007](docs/adr/0007-canonical-form-schema.md).
+- **Greenhouse and Lever adapters, generic fallback**: name/id pattern hints layered over an ATS-agnostic structural parser, each with a committed saved-HTML regression fixture (`packages/autoapply/fixtures`) and a sha256 hash tripwire that fails first if `demo-ats`'s markup drifts without the fixture being regenerated. Every parsed form carries `parserVersion` for traceability. An unrecognized site falls back to the generic parser at lowered confidence for closer review.
+- **Deterministic answer planning, then a bounded AI pass** (`packages/core`'s `planAnswers`/`requiresUserBeforeSubmit`): identity/contact fields fill from the fact bank, screening questions reuse an exact saved answer, the CV attaches from the application's chosen variant — and **sensitive fields (work authorization, visa sponsorship, desired salary, demographics, criminal history, legal attestation, notice period, availability, relocation) are never AI-filled**, structurally: `planAnswers` has no code path that can emit `source: "ai"` for them, and `requiresUserBeforeSubmit` re-checks the invariant independently as a belt-and-braces guard. Only unresolved free-text screening questions get an AI-drafted answer, under the same grounding/validation contract as email and materials generation (ADR-0004) — visibly marked, never silently filled.
+- **Review screen with per-answer provenance** (`/applications/[id]`'s site panel): every field shows its source (fact/saved answer/document/user/AI), a confidence percentage, a "Needs your answer" flag, a "Differs from approved" flag when it disagrees with a previously approved answer, and a skip-optional action for any non-required field. The attached CV is named explicitly with a change link. Preview is impossible while `requiresUserBeforeSubmit` reports anything still needing the user.
+- **Blockers pause and return control, never bypass**: a required legal attestation, CAPTCHA, login wall, identity verification, coding assessment, or an upload control that accepts neither PDF nor DOC stops the attempt as `BLOCKED` with a typed reason and human-readable guidance — CareerHQ will never tick a legal attestation on a user's behalf (spec §10.6). This is a pause, not a failure: the attempt is visible in the application's history and nothing was submitted.
+- **The same three-layer gate and receipt design as email, reused, not reinvented** (`apps/web/src/lib/site-submission.ts`): `SUBMISSIONS_LIVE_COMPANY_SITE` off by default, a sandbox workspace restricted to `SANDBOX_SITE_ALLOWED_HOST`, and a preview → payload-fingerprint pin → single-use confirmation token → retyped-host match before the one submit click. A pending receipt is written before the click; a confirmed receipt carries the confirmation id, final URL, and a saved confirmation-page screenshot; a submit that throws or returns no confirmation id becomes `NEEDS_RECONCILE`, never a false `FAILED`. Duplicate-requisition detection refuses a second prepare unless the user explicitly overrides, recorded in the event log.
+- **`apps/demo-ats`**: a small fictional-company careers site (Greenhouse-style multi-step form at `/greenhouse/jobs/eng-1`, Lever-style single-page form at `/lever/jobs/eng-2`) and the only auto-apply destination in CI or any local demo — `eng-1` carries a required legal attestation checkbox and is the demo's blocked case; `eng-2` is the happy path. No new route was added to `apps/web` for this — auto-apply lives inside the existing `/applications/[id]` detail page, alongside the email panel.
+- CI (GitHub Actions): lint, typecheck, dependency-cruiser import-boundary checks, and the test suite against a real Postgres service container, including a Mailpit round-trip e2e suite (`apps/web/src/lib/email-e2e.test.ts`) and a real-Chromium `demo-ats` round-trip e2e suite (`apps/web/src/lib/site-e2e.test.ts`, 7 cases: the full happy path plus all five gate refusals and both blocker kinds) that both skip cleanly with no `TEST_DATABASE_URL` or an unreachable dependency.
 
-Everything past this point — assisted auto-apply, the hosted demo, and the restricted-source connector — is **planned**, not built. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan (P5–P7) and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
+Everything past this point — the hosted demo and the restricted-source connector — is **planned**, not built. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan (P6–P7) and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
 
 ## Quickstart
 
@@ -74,9 +81,32 @@ Mailpit's web UI is at `http://localhost:8025` (dev/demo SMTP sink — nothing i
 - `SANDBOX_SMTP_ALLOWED_HOST` — the only SMTP host a `sandbox`-kind workspace may send to. Defaults to `mailpit` (the Compose service name); set to `localhost` when running a host `pnpm dev` process against the Compose Mailpit's exposed port.
 - `EMAIL_SYNC_CRON` — cron expression for the worker's IMAP-poll `email-sync` job. Defaults to `*/15 * * * *` (every 15 minutes).
 
+**Auto-apply env vars:**
+
+- `SUBMISSIONS_LIVE_COMPANY_SITE` — `false` by default (the deterministic-off gate, spec §11, mirroring `SUBMISSIONS_LIVE_EMAIL`). Must be `true` for a confirmed submit to leave `PENDING_CONFIRMATION`; with it off, capture/parse/plan/review/preview all still work end to end, they just cannot reach the gate's final `allowed` decision.
+- `SANDBOX_SITE_ALLOWED_HOST` — the only site hostname a `sandbox`-kind workspace may auto-apply to. Defaults to `demo-ats` (the Compose service name); set to `localhost` when running a host `pnpm dev` process against the Compose `demo-ats`'s exposed port.
+- `DEMO_ATS_URL` — the base URL of the fictional ATS (`apps/demo-ats`), the only auto-apply destination in CI or any local demo. Defaults to `http://demo-ats:3001` (the Compose service); set to `http://localhost:3001` when running `demo-ats` directly on the host.
+- `AUTOAPPLY_BROWSER_TIMEOUT_MS` — per-action budget for the Playwright driver (one navigation, one field action, the post-submit wait) — not the whole attempt. Defaults to `45000`.
+
 **One `.env`, at the repo root.** Nothing in this repo auto-loads it: `drizzle-kit`, the seed (`tsx`), `next dev` (which would only look inside `apps/web`), and the worker each load `<repo root>/.env` explicitly at startup. Variables already exported in your shell win over the file, which is Node's own `--env-file` rule. Copying `.env.example` is therefore enough — no `export DATABASE_URL=…` needed. In Docker, no `.env` exists and Compose supplies the environment instead.
 
 `FILE_STORAGE_DIR` (CV variants and, later, screenshots and message bodies) defaults to `var/files`. Relative values resolve against the repo root, not the current process's working directory, so the seed (which runs from `packages/db`) and the web upload action (which runs from `apps/web`) write to the same tree. Compose sets it to the absolute `/app/var/files`, the path of the shared `files` volume.
+
+**Safe local auto-apply demo recipe.** The Playwright driver needs a local Chromium binary the first time (`pnpm --filter @careerhq/worker exec playwright install chromium`). Then run `demo-ats` on the host alongside a host `pnpm dev`:
+
+```bash
+pnpm --filter @careerhq/demo-ats dev   # http://localhost:3001
+```
+
+then set, in `.env`:
+
+```bash
+SUBMISSIONS_LIVE_COMPANY_SITE=true
+SANDBOX_SITE_ALLOWED_HOST=localhost
+DEMO_ATS_URL=http://localhost:3001
+```
+
+then, from `apps/web`'s application detail page, point auto-apply at `http://localhost:3001/lever/jobs/eng-2` (the happy path) or `http://localhost:3001/greenhouse/jobs/eng-1` (the blocked demo — a required legal attestation checkbox), review, and confirm — the interactive flow drives its own headless Chromium session in-process (`apps/web/src/lib/site-driver.ts`), so no separate `apps/worker` process is needed for this recipe (`apps/worker` runs the same driver code for its own background auto-apply queue jobs, a separate path). Safety here comes the same way it does for email: the only reachable target is the fictional `demo-ats`, never a real employer. (Compose's own defaults — `demo-ats` as the hostname, `http://demo-ats:3001` as the URL — are for the `docker compose up` path, where `demo-ats` is a service name, not `localhost`.)
 
 **Whole stack in containers.** `docker compose -f infra/docker-compose.yml up -d --build` builds the `web` and `worker` images and runs them against the same Postgres. The images build the whole workspace (the pnpm lockfile has an importer per package, so a partial copy cannot satisfy `--frozen-lockfile`) and carry no `.env` — Compose supplies `DATABASE_URL` and `FILE_STORAGE_DIR`. Migrations and the seed are still run from the host, as above.
 
@@ -135,19 +165,20 @@ flowchart LR
     restricted -->|"proxy pool only"| boards["Restricted boards\nLinkedIn, Indeed, Glassdoor,\nGoogle Jobs, ZipRecruiter"]
 ```
 
-As of P4, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, the file volume, the keyless job **feeds** (Remotive, RemoteOK, Arbeitnow, WWR, The Muse, and watchlisted Greenhouse/Lever/Ashby boards), **user SMTP/IMAP** (gated by `SUBMISSIONS_LIVE_EMAIL` and, for a sandbox workspace, `SANDBOX_SMTP_ALLOWED_HOST` — Mailpit stands in for it in dev/demo), and, if `OPENROUTER_API_KEY` is set, **OpenRouter** from `web` (grounded materials/Q&A generation, reply classification's tie-break) and `worker` (re-rank, `classifyReply`) — live company-site submission and the restricted connector remain architected for but not yet wired up.
+As of P5, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, `demo-ats`, the file volume, the keyless job **feeds** (Remotive, RemoteOK, Arbeitnow, WWR, The Muse, and watchlisted Greenhouse/Lever/Ashby boards), **user SMTP/IMAP** (gated by `SUBMISSIONS_LIVE_EMAIL` and, for a sandbox workspace, `SANDBOX_SMTP_ALLOWED_HOST` — Mailpit stands in for it in dev/demo), **company career sites** (gated by `SUBMISSIONS_LIVE_COMPANY_SITE` and, for a sandbox workspace, `SANDBOX_SITE_ALLOWED_HOST` — the in-repo `demo-ats` stands in for it in dev/demo and CI), and, if `OPENROUTER_API_KEY` is set, **OpenRouter** from `web` (grounded materials/Q&A generation, reply classification's tie-break, screening-question drafting) and `worker` (re-rank, `classifyReply`) — the restricted connector remains architected for but not yet wired up. Company-site submission runs entirely through an isolated Playwright browser context inside `worker`; nothing outside `apps/worker/src/autoapply` ever touches a live DOM (ADR-0007).
 
 ## Documentation
 
 - [`career-hq-product-spec.md`](career-hq-product-spec.md) — the normative product specification (v0.3).
 - [`docs/architecture.md`](docs/architecture.md) — system diagram, data model, monorepo layout, gated-submission sequence.
-- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P4 (done) through P7.
+- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P5 (done) through P7.
 - [`docs/adr/0001-postgres-and-pg-boss.md`](docs/adr/0001-postgres-and-pg-boss.md) — why Postgres + pg-boss over SQLite/Redis.
-- [`docs/adr/0002-gated-mutation-protocol.md`](docs/adr/0002-gated-mutation-protocol.md) — the three-layer gated-mutation design (state machine shipped in P1, enforced for real by the email channel in P4).
+- [`docs/adr/0002-gated-mutation-protocol.md`](docs/adr/0002-gated-mutation-protocol.md) — the three-layer gated-mutation design (state machine shipped in P1, enforced for real by the email channel in P4 and the company-site channel in P5).
 - [`docs/adr/0003-openrouter-sequential-fallback.md`](docs/adr/0003-openrouter-sequential-fallback.md) — the ported `chat-json` pattern and why fallback is sequential, not raced.
 - [`docs/adr/0004-grounding-contract-and-sensitive-answers.md`](docs/adr/0004-grounding-contract-and-sensitive-answers.md) — the grounding contract (deterministic citation post-validation, `NEEDS_FACTS`) and the conservative, widen-only sensitive-question policy.
 - [`docs/adr/0005-credential-encryption.md`](docs/adr/0005-credential-encryption.md) — app-level libsodium secretbox for stored mail credentials, ciphertext-only rows, and the honest scope of what the master key does and doesn't protect against.
 - [`docs/adr/0006-scraping-and-tos-boundaries.md`](docs/adr/0006-scraping-and-tos-boundaries.md) — the keyless-only core boundary and the isolated, opt-in restricted-source connector.
+- [`docs/adr/0007-canonical-form-schema.md`](docs/adr/0007-canonical-form-schema.md) — DOM selectors are never the data model; the serializable `RawFormPage` boundary, fixture-testable adapters, and the hash tripwire that catches parser drift.
 
 ## Screenshots
 

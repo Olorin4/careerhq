@@ -37,7 +37,8 @@ flowchart LR
 
 - `apps/web` — UI, server actions, route handlers. Enqueues work; never performs external mutations itself except LLM calls for interactive generation.
 - `apps/worker` — long-lived Node process consuming pg-boss queues: `ingest`, `rerank`, `imap-sync`, `classify`, `autoapply`, `demo-reset`. Runs Playwright (image based on `mcr.microsoft.com/playwright`).
-- `apps/demo-ats` — small Hono/Express server with a fictional company careers page: one Greenhouse-style multi-step form and one Lever-style single-page form. Serves two purposes: Playwright e2e target in CI, and the only allowed auto-apply destination for the hosted demo.
+- `apps/demo-ats` — small Hono server with a fictional company careers page: a Greenhouse-style multi-step form (`eng-1`, carrying a required legal-attestation checkbox — the permanent-blocker demo) and a Lever-style single-page form (`eng-2`, the happy path). Serves two purposes: Playwright e2e target in CI (`apps/web/src/lib/site-e2e.test.ts`), and the only allowed auto-apply destination for local demos and the hosted demo.
+- `packages/autoapply` — the browser-free "brain" of auto-apply: ATS detection, blocker detection, and the generic/Greenhouse/Lever parsers, all pure functions over a serializable `RawFormPage` (ADR-0007). **The browser boundary is narrow and explicit**: only `apps/worker/src/autoapply/extract.ts`'s in-page extractor ever touches a live DOM (inside an isolated Playwright context, `driver.ts`), by evaluating a script derived from its own function source (`fn.toString()`) so the browser and a linkedom-backed test run byte-identical extraction logic — everything past that boundary, including `apps/web`'s review screen and submission orchestrator, only ever sees plain, JSON-serializable data.
 - `services/restricted-ingest` — optional Python service wrapping JobSpy for restricted-board discovery (LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter). Own container under a dedicated Compose profile, absent from the default stack and the demo. Narrow JSON contract (bounded search matrix in, normalized listings out); mandatory user-supplied proxy pool, per-board circuit breakers, bounded runs. The worker calls it only when the spec §5.3 consent gate is fully satisfied (profile deployed + env flag + recorded in-app consent). Discovery only — no credentials, no applying.
 - Postgres is the single store for structured data; large artifacts live on the file volume with hashes in the DB. pg-boss uses the same Postgres — no Redis, keeping the default stack at four services.
 
@@ -71,7 +72,7 @@ careerHQ-app/
 └── .github/workflows/ci.yml
 ```
 
-**Dependency rules:** `contracts` ← everything. `core` depends only on `contracts`. `ai` / `email` / `autoapply` / `ingest` depend on `contracts` + `core`. Only `web` and `worker` compose everything (and are the only importers of `db` repositories alongside the feature packages' service layers). `core` receives plain objects — it never touches the database.
+**Dependency rules:** `contracts` ← everything. `core` depends only on `contracts`. `ai` / `email` / `autoapply` / `ingest` depend on `contracts` + `core`. Only `web` and `worker` compose everything (and are the only importers of `db` repositories alongside the feature packages' service layers). `core` receives plain objects — it never touches the database. `apps/web` drives its own interactive auto-apply session (and its e2e suite) by opening a Playwright session directly, in-process — but it reaches the driver code itself only through `apps/worker`'s own package `exports` map (`@careerhq/worker/autoapply`), never a relative import across the app boundary; a dependency-cruiser rule (`no-relative-cross-app-web-to-worker`/`-worker-to-web`) enforces this both directions.
 
 ## 3. Data model
 
@@ -191,7 +192,7 @@ Design notes:
 
 - Session middleware resolves the active workspace; the demo deployment pins it to the sandbox workspace and disables login.
 - `docker-compose.demo.yml` sets `SANDBOX_FORCE_SAFE=true`, points SMTP at Mailpit, sets the auto-apply origin allowlist to the `demo-ats` service, runs `ai` in replay mode, and schedules `demo-reset` (truncate sandbox workspace + reseed) every 6 hours.
-- The sandbox block is the last check inside `packages/email/src/send.ts` and `packages/autoapply/src/submit.ts` — a UI or route-handler bug cannot bypass it.
+- The sandbox block is evaluated inside `evaluateSubmissionGates` (`packages/core/src/gates`), the single gate matrix both `apps/web/src/lib/email-submission.ts` and `apps/web/src/lib/site-submission.ts` call before their one mutation — a UI or route-handler bug cannot bypass it.
 - Demo mutations are rate-limited; credential setup is disabled for sandbox workspaces.
 
 ## 7. Security
@@ -207,10 +208,10 @@ Design notes:
 |---|---|---|
 | Unit | Vitest | transition/guard tables, scoring breakdown, fingerprint tamper detection, gate matrix (sandbox × env × token × duplicate), JSON extraction + fallback (mocked 429 sequences), grounding validation, form normalization from saved ATS HTML, threading |
 | Integration | Vitest + testcontainers | Drizzle repositories, Mailpit SMTP |
-| E2E | Playwright | tracker flow; gated email send verified in Mailpit; full auto-apply vs `demo-ats`; negative: edited payload → fingerprint mismatch → blocked |
+| E2E | Vitest + a real Chromium session (Playwright driver) | Mailpit round-trip send (`email-e2e.test.ts`); full auto-apply round trip vs `demo-ats` plus all five gate refusals and both blocker kinds, 7 cases (`site-e2e.test.ts`) — every suite skips cleanly, not falsely-green, when its dependency (`TEST_DATABASE_URL`, Mailpit, `demo-ats`, Chromium) is unavailable |
 | CI | GitHub Actions | PR: lint, typecheck, dependency-cruiser, unit + integration, migration drift. main: + e2e (compose), image builds |
 
-## 9. ADR index (planned)
+## 9. ADR index
 
 | ADR | Decision |
 |---|---|

@@ -59,7 +59,7 @@ First live external mutation — the gate framework becomes real.
 
 **Demo:** draft → preview → retype-target confirm → send → receipt in tracker → simulated reply auto-linked and classified in Mailpit.
 
-## P5 — Assisted auto-apply (Greenhouse, Lever)
+## P5 — Assisted auto-apply (Greenhouse, Lever) (done)
 
 Carried from the P4 final review (land in P5, all minor/deferred — no correctness gap blocks P4's own DoD): sender-domain reply matching treats a mail subdomain (e.g. `mail.acme.com`) and its parent domain (`acme.com`) as unrelated, so a legitimate ATS-relay sender falls through to no match rather than the sender-domain fallback — widen or deliberately scope `matchInboundToApplication` (`packages/email/src/threading.ts`); a per-folder IMAP fetch failure currently skips the sync-state advance for every folder on that connection, not just the failing one (safe — nothing already-fetched is lost — but wasteful, since a persistently broken folder blocks re-fetch progress on healthy siblings too); add the concurrency test proving two simultaneous `confirmAndSend` calls on the same token cannot both complete (the repo-layer compare-and-swap already enforces this — only the test is missing); add nonce-randomness and short-ciphertext-buffer unit tests for `sealSecret`/`openSecret` (`packages/db/src/crypto.ts` — manually verified correct, coverage deferred); the "please re-preview" UI copy omits `token_missing` from its reasons list (UX-only — the gate itself already denies it correctly).
 
@@ -75,6 +75,8 @@ Carried from the P4 final review (land in P5, all minor/deferred — no correctn
 **Demo:** full end-to-end auto-apply against `demo-ats`.
 
 ## P6 — Hosted demo and portfolio polish
+
+Carried from the P5 final review (reconsider during P6, not a P5 correctness gap): `detectBlockers` treats every *required* legal-attestation checkbox as a permanent page-level blocker (spec §10.6) — the only behavior consistent with "never tick this on the user's behalf" without a UI that can capture a deliberate, per-field, explicit-consent action. A field-level design (surface the exact attestation text on the review screen and let the user tick it themselves, once, with their own click, instead of pausing the whole attempt) would recover forms like `demo-ats`'s `eng-1` without weakening the "never auto-ticked" guarantee — but it needs its own consent-and-audit design, not a quick patch to `detectBlockers`, so it stays a page-level pause for now.
 
 - `docker-compose.demo.yml`: sandbox workspace, `SANDBOX_FORCE_SAFE`, Mailpit egress, demo-ats allowlist, AI replay mode, 6-hour reset job, mutation rate limits, demo banner.
 - VPS deployment behind reverse-proxy TLS; public demo URL.
