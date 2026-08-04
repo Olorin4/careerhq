@@ -23,10 +23,18 @@ export function detectBlockers(page: RawFormPage): Array<{ kind: BlockerKind; de
     blockers.push({ kind: "captcha", detail: "CAPTCHA widget or human-verification challenge detected" });
   }
 
+  // ANY password input pauses the page, with no "…unless there is also a resume
+  // upload" carve-out. That carve-out was meant to let an ATS's
+  // "create-an-account-while-you-apply" page through, but there is no safe way
+  // to carry a password through this pipeline: `generic.ts` has no password
+  // FieldKind, so the input becomes a plain `text` field whose value would be
+  // planned, shown, persisted verbatim in form_snapshots.planned_answers, folded
+  // into the fingerprinted payload and copied onto the receipt — plaintext
+  // secrets in the database, which spec §13 forbids. Pausing costs the user the
+  // few seconds it takes to make the account in their own browser.
   const hasPassword = page.fields.some((field) => field.tag === "input" && field.type === "password");
-  const hasFile = page.fields.some((field) => field.tag === "input" && field.type === "file");
-  if (hasPassword && !hasFile) {
-    blockers.push({ kind: "login_required", detail: "Page requires sign-in and has no resume-upload field" });
+  if (hasPassword) {
+    blockers.push({ kind: "login_required", detail: "Page contains a password field — accounts and sign-in are yours to complete" });
   }
 
   if (IDENTITY_RE.test(page.bodyText)) {

@@ -16,13 +16,18 @@ describe("detectBlockers", () => {
     expect(detectBlockers(page).map((b) => b.kind)).toEqual(["login_required"]);
   });
 
-  it("does not flag login_required when a password field coexists with a resume upload", () => {
+  it("flags login_required for ANY password input, even beside a resume upload", () => {
+    // The "create an account while you apply" page. Without this rule the
+    // password becomes a plain `text` field (generic.ts has no password kind),
+    // gets planned like any other answer, and its plaintext value is persisted
+    // into form_snapshots.planned_answers, the fingerprinted payload and the
+    // receipt — which spec §13 forbids outright.
     const html = `<html><body><form>
       <input type="password" id="password" name="password" required />
       <input type="file" id="resume" name="resume" />
     </form></body></html>`;
     const page = rawPageFromHtml(html, "https://example.com/apply");
-    expect(detectBlockers(page).map((b) => b.kind)).not.toContain("login_required");
+    expect(detectBlockers(page).map((b) => b.kind)).toEqual(["login_required"]);
   });
 
   it("flags a required attestation checkbox as legal_attestation", () => {
