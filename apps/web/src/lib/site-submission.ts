@@ -31,7 +31,9 @@ import {
 } from "@careerhq/db";
 import { redactError } from "@careerhq/email";
 import { stripHtml } from "@careerhq/ingest";
-import { effectiveWorkspaceKind, refuseCaptureTarget } from "@careerhq/autoapply/policy";
+import {
+  effectiveWorkspaceKind, refuseCaptureTarget, type CaptureTargetPolicy,
+} from "@careerhq/autoapply/policy";
 
 /** What the driver hands back after the one submit click (worker `fillAndSubmit`, adapted). */
 export interface SiteSubmitResult {
@@ -49,6 +51,12 @@ export interface SiteSubmitArgs {
   answers: PlannedAnswer[];
   /** fieldId → absolute path of the file to upload. */
   files: Record<string, string>;
+  /**
+   * Who this workspace may be driven at, carried down to the driver so every
+   * navigation the submit performs — including any redirect the site answers
+   * with — is judged by the same rules that let the attempt exist at all.
+   */
+  policy: CaptureTargetPolicy;
 }
 
 export interface SiteDeps {
@@ -59,7 +67,7 @@ export interface SiteDeps {
    * from the worker, which this process cannot do — an unset `capture` means
    * auto-apply is simply unavailable here, never that a page was empty.
    */
-  capture?: (url: string) => Promise<RawFormPage>;
+  capture?: (url: string, policy: CaptureTargetPolicy) => Promise<RawFormPage>;
   /** Fills the form and clicks Submit exactly once. Injected for the same reason. */
   submit?: (args: SiteSubmitArgs) => Promise<SiteSubmitResult>;
   /**
@@ -546,15 +554,20 @@ export async function prepareSiteApplication(
   if (!workspace) {
     return { status: "failed", reason: "this workspace no longer exists" };
   }
-  const refusal = refuseCaptureTarget(args.url, {
+  const policy: CaptureTargetPolicy = {
     workspaceKind: effectiveWorkspaceKind(deps.config, workspace.kind),
     sandboxSiteAllowedHost: deps.config.sandboxSiteAllowedHost,
-  });
+  };
+  const refusal = refuseCaptureTarget(args.url, policy);
   if (refusal) return { status: "failed", reason: refusal };
 
   let page: RawFormPage;
   try {
-    page = await capture(args.url);
+    // The policy goes WITH the URL, not just ahead of it. `page.goto` follows
+    // redirects, so checking only `args.url` left a 302 from an allow-listed
+    // host to `127.0.0.1` captured and returned (P6 fix-wave review,
+    // BLOCKING). The driver now re-asks this same policy at every hop.
+    page = await capture(args.url, policy);
   } catch (err) {
     return { status: "failed", reason: `the application page could not be read: ${errorMessage(err)}` };
   }
@@ -938,6 +951,12 @@ export async function confirmAndSubmitSite(
     return { status: "blocked", code: "workspace_not_found", reason: "this workspace no longer exists" };
   }
 
+  // The same policy object prepare used, rebuilt from the same derivation.
+  const policy: CaptureTargetPolicy = {
+    workspaceKind: effectiveWorkspaceKind(config, workspace.kind),
+    sandboxSiteAllowedHost: config.sandboxSiteAllowedHost,
+  };
+
   // The latest confirmation whatever its state — a consumed or expired row must
   // reach the matrix as itself, not as "no token at all".
   const confirmation = await getLatestConfirmation(db, attempt.id);
@@ -952,7 +971,7 @@ export async function confirmAndSubmitSite(
     // allow-list. Deliberately not derived from/coupled to DEMO_MODE; it is
     // its own hard-safety switch. Shared with the prepare-time layer through
     // `effectiveWorkspaceKind` so the two can never derive it differently.
-    workspaceKind: effectiveWorkspaceKind(config, workspace.kind),
+    workspaceKind: policy.workspaceKind,
     // Only consulted for sandbox workspaces; a sandbox may reach exactly one host.
     sandboxTargetAllowed: payload.host === config.sandboxSiteAllowedHost,
     tokenRecord: confirmation
@@ -1001,6 +1020,22 @@ export async function confirmAndSubmitSite(
       code: "review_required",
       reason: `these fields still need you: ${blockingLabels(stillBlocking, form).join(", ")}`,
     };
+  }
+
+  // `payload.url` is `form.url`, which is where the CAPTURE landed — so before
+  // the redirect fix it could itself be a redirect target, and this is the
+  // check that makes "form.url is never off-policy" true at submit time rather
+  // than merely likely. It is the full policy, not just `sandboxTargetAllowed`
+  // above: a personal workspace has no host check in the gate matrix at all,
+  // so without this one `confirmAndSubmitSite` would type the user's CV and
+  // answers into an internal host and upload the files there.
+  //
+  // Placed here for the reason everything else in this run-up is placed here:
+  // it is BEFORE `beginSubmission`, so a refusal leaves the attempt
+  // PENDING_CONFIRMATION with its token unburned and the user simply retries.
+  const targetRefusal = refuseCaptureTarget(payload.url, policy);
+  if (targetRefusal) {
+    return { status: "blocked", code: "target_refused", reason: targetRefusal };
   }
 
   // The last thing that can fail harmlessly: no driver, no submission — and the
@@ -1057,7 +1092,7 @@ export async function confirmAndSubmitSite(
 
   let result: SiteSubmitResult;
   try {
-    result = await submit({ url: payload.url, form, answers, files });
+    result = await submit({ url: payload.url, form, answers, files, policy });
   } catch (err) {
     // The driver clicks Submit inside this call, so which side of that click
     // the throw came from decides the attempt's fate (spec §11): a failure

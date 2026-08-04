@@ -110,6 +110,20 @@ async function siteAttempt(companyName: string): Promise<{ applicationId: string
   return { applicationId: app.id, attemptId: attempt.id };
 }
 
+/**
+ * The predicate the job hands the driver must be the real capture policy, not
+ * a placeholder — these jobs had NO host gate at all before the P6 fix-wave
+ * review (A2), and the driver now depends on this predicate to judge every
+ * redirect hop. Asserting only that a function was passed would pass for
+ * `() => true`, which is the exact regression worth catching.
+ */
+function expectPolicyPredicate(deps: { isNavigationAllowed: (url: string) => boolean }): void {
+  expect(deps.isNavigationAllowed("https://acme.example/jobs/1/apply")).toBe(true);
+  expect(deps.isNavigationAllowed("http://169.254.169.254/latest/meta-data/")).toBe(false);
+  expect(deps.isNavigationAllowed("http://127.0.0.1:9100/secret")).toBe(false);
+  expect(deps.isNavigationAllowed("file:///etc/passwd")).toBe(false);
+}
+
 const fakeSession: BrowserSession = {
   newPage: () => {
     throw new Error("newPage should be unused — capturePage/fillAndSubmit are mocked directly");
@@ -147,8 +161,12 @@ d("runCaptureJob", () => {
       workspaceId, applicationId, attemptId, url: "https://acme.example/jobs/1/apply",
     });
 
-    expect(capturePageMock).toHaveBeenCalledWith(fakeSession, "https://acme.example/jobs/1/apply", { timeoutMs: 1_000 });
+    expect(capturePageMock).toHaveBeenCalledWith(fakeSession, "https://acme.example/jobs/1/apply", {
+      timeoutMs: 1_000,
+      isNavigationAllowed: expect.any(Function) as unknown as (url: string) => boolean,
+    });
     expect(sessionCloseMock).toHaveBeenCalledTimes(1);
+    expectPolicyPredicate(capturePageMock.mock.calls[0]?.[2] as { isNavigationAllowed: (u: string) => boolean });
 
     const latest = await getLatestSnapshot(db, attemptId);
     expect(latest?.recoveryState).toEqual({ kind: "raw_page", page });
@@ -172,6 +190,26 @@ d("runCaptureJob", () => {
     expect(latest?.recoveryState).toBeNull();
     const attempt = await getAttempt(db, attemptId);
     expect(attempt?.status).toBe("DRAFT");
+  });
+
+  /**
+   * The gap the fix-wave review called structural (A2): this job had no host
+   * gate whatsoever — `data.url` went straight to `capturePage`, with only the
+   * driver's protocol floor between a queue payload and
+   * `http://169.254.169.254/`. It was unreachable only because main.ts does not
+   * register the consumer, so registering it would have shipped the hole.
+   */
+  it("refuses an internal target before a browser is ever started", async () => {
+    const { applicationId, attemptId } = await siteAttempt("Internal Target Co");
+    await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+
+    await expect(runCaptureJob(db, config(), {
+      workspaceId, applicationId, attemptId, url: "http://169.254.169.254/latest/meta-data/",
+    })).rejects.toThrow(/internal network/);
+
+    expect(openSessionMock).not.toHaveBeenCalled();
+    expect(capturePageMock).not.toHaveBeenCalled();
+    expect((await getLatestSnapshot(db, attemptId))?.recoveryState).toBeNull();
   });
 
   it("refuses before opening a session when the attempt has no snapshot yet", async () => {
@@ -230,9 +268,15 @@ d("runSubmitJob", () => {
       form,
       answers,
       files: { "field-cv": "/var/files/cv/alex.pdf" },
-      deps: { timeoutMs: 1_000 },
+      deps: {
+        timeoutMs: 1_000,
+        isNavigationAllowed: expect.any(Function) as unknown as (url: string) => boolean,
+      },
     });
     expect(sessionCloseMock).toHaveBeenCalledTimes(1);
+    expectPolicyPredicate(
+      (fillAndSubmitMock.mock.calls[0]?.[1] as { deps: { isNavigationAllowed: (u: string) => boolean } }).deps,
+    );
 
     const screenshotPath = path.join(fileStorageDir, "autoapply", `${attemptId}.png`);
     expect(readFileSync(screenshotPath).toString()).toBe("fake-png-bytes");

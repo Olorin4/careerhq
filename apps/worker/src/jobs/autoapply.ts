@@ -14,7 +14,11 @@ import type { AppConfig } from "@careerhq/config";
 import { canonicalFormSchema, plannedAnswerSchema, type CanonicalForm, type PlannedAnswer } from "@careerhq/contracts";
 import type { RawFormPage } from "@careerhq/autoapply";
 import {
+  allowsCaptureTarget, effectiveWorkspaceKind, refuseCaptureTarget, type CaptureTargetPolicy,
+} from "@careerhq/autoapply/policy";
+import {
   cvVariants as cvVariantsTable, getApplicationDetail, getAttempt, getLatestSnapshot, updateRecoveryState,
+  workspaces as workspacesTable,
   type ApplicationAttempt, type Db, type FormSnapshot,
 } from "@careerhq/db";
 import { capturePage, fillAndSubmit, openSession } from "../autoapply/driver.js";
@@ -75,6 +79,29 @@ async function loadWorkspaceAttempt(db: Db, workspaceId: string, attemptId: stri
   return attempt;
 }
 
+/**
+ * Who this workspace's browser may be pointed at — the SAME function apps/web
+ * gates the interactive path with (`@careerhq/autoapply/policy`), which is the
+ * whole reason that module no longer lives in apps/web.
+ *
+ * These jobs used to have no host gate whatsoever: `runCaptureJob` handed
+ * `data.url` straight to `capturePage`, and only the driver's protocol floor
+ * stood between a queue payload and `http://169.254.169.254/`. It was
+ * unreachable only because `apps/worker/src/main.ts` never registers the
+ * `autoapply.capture`/`autoapply.submit` consumers — so re-registering them
+ * would have shipped an ungated second entry point (P6 fix-wave review, A2).
+ * A queue payload is exactly as untrusted as a request body, and is gated the
+ * same way here: refused before a browser is started, not after.
+ */
+async function capturePolicy(db: Db, config: AppConfig, workspaceId: string): Promise<CaptureTargetPolicy> {
+  const [workspace] = await db.select().from(workspacesTable).where(eq(workspacesTable.id, workspaceId));
+  if (!workspace) throw new Error(`autoapply job: workspace not found: ${workspaceId}`);
+  return {
+    workspaceKind: effectiveWorkspaceKind(config, workspace.kind),
+    sandboxSiteAllowedHost: config.sandboxSiteAllowedHost,
+  };
+}
+
 /** The attempt's newest snapshot, or a refusal — every recovery write targets a snapshot that already exists. */
 async function loadLatestSnapshot(db: Db, attemptId: string): Promise<FormSnapshot> {
   const snapshot = await getLatestSnapshot(db, attemptId);
@@ -99,9 +126,16 @@ export async function runCaptureJob(db: Db, config: AppConfig, data: CaptureJobD
   }
   const snapshot = await loadLatestSnapshot(db, attempt.id);
 
+  const policy = await capturePolicy(db, config, data.workspaceId);
+  const refusal = refuseCaptureTarget(data.url, policy);
+  if (refusal) throw new Error(`autoapply capture: refusing to open ${data.url}: ${refusal}`);
+
   const session = await openSession();
   try {
-    const page = await capturePage(session, data.url, { timeoutMs: config.autoapplyBrowserTimeoutMs });
+    const page = await capturePage(session, data.url, {
+      timeoutMs: config.autoapplyBrowserTimeoutMs,
+      isNavigationAllowed: (target) => allowsCaptureTarget(target, policy),
+    });
     const recovery: RawPageRecovery = { kind: "raw_page", page };
     await updateRecoveryState(db, snapshot.id, snapshot.currentStep, recovery);
   } finally {
@@ -164,6 +198,12 @@ export async function runSubmitJob(db: Db, config: AppConfig, data: SubmitJobDat
   const answers = plannedAnswersSchema.parse(snapshot.plannedAnswers);
   const files = await resolveFilePaths(db, data.workspaceId, form, answers);
 
+  // `form.url` is where the capture LANDED, so it is gated here too rather
+  // than assumed safe because a capture once produced it.
+  const policy = await capturePolicy(db, config, data.workspaceId);
+  const refusal = refuseCaptureTarget(form.url, policy);
+  if (refusal) throw new Error(`autoapply submit: refusing to open ${form.url}: ${refusal}`);
+
   const session = await openSession();
   try {
     const result = await fillAndSubmit(session, {
@@ -171,7 +211,10 @@ export async function runSubmitJob(db: Db, config: AppConfig, data: SubmitJobDat
       form,
       answers,
       files,
-      deps: { timeoutMs: config.autoapplyBrowserTimeoutMs },
+      deps: {
+        timeoutMs: config.autoapplyBrowserTimeoutMs,
+        isNavigationAllowed: (target) => allowsCaptureTarget(target, policy),
+      },
     });
 
     const dir = path.join(config.fileStorageDir, "autoapply");

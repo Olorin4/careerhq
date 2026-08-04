@@ -1,11 +1,14 @@
+import { createServer, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { parseHTML } from "linkedom";
 import { chromium, errors } from "playwright";
 import { consentPage, greenhousePage, hiddenConsentPage, leverPage, type DemoJob } from "@careerhq/demo-ats";
 import { rawPageFromHtml } from "@careerhq/autoapply/testing";
+import { allowsCaptureTarget } from "@careerhq/autoapply/policy";
 import { detectBlockers, parseForm, rawFieldId, type RawFormPage } from "@careerhq/autoapply";
 import type { PlannedAnswer } from "@careerhq/contracts";
 import {
@@ -19,7 +22,7 @@ import {
 } from "./extract.js";
 import {
   capturePage, DriverError, driverErrorKind, fillAndSubmit, openSession,
-  type BrowserSession, type DriverErrorKind,
+  type BrowserSession, type DriverDeps, type DriverErrorKind,
 } from "./driver.js";
 
 const JOB: DemoJob = { id: "eng-1", title: "Senior Robotics Engineer", company: "Northwind Robotics" };
@@ -165,6 +168,16 @@ describe("DriverError's cross-app contract", () => {
 // `bodyText`. Browser-free: the refusal must land BEFORE a page is opened, so
 // a stub session that would explode if used is the assertion.
 // ---------------------------------------------------------------------------
+/**
+ * These suites are about everything EXCEPT the host policy, so they hand the
+ * driver a predicate that allows everything — the policy's own table lives in
+ * `packages/autoapply/src/target-policy.test.ts` and the driver's use of it is
+ * pinned by "the navigation guard" suite below. A permissive predicate here
+ * also keeps these cases honest: what they assert must hold on its own, not
+ * because the policy happened to refuse first.
+ */
+const ALLOW_ANY = (): boolean => true;
+
 describe("capturePage's protocol floor", () => {
   const explodingSession: BrowserSession = {
     newPage: () => Promise.reject(new Error("capturePage opened a page for a URL it should have refused")),
@@ -180,7 +193,7 @@ describe("capturePage's protocol floor", () => {
     "chrome://settings",
     "ftp://files.example.com/x",
   ])("refuses %s as a navigation-phase DriverError", async (url) => {
-    const err = await capturePage(explodingSession, url, { timeoutMs: 1000 }).catch((e: unknown) => e);
+    const err = await capturePage(explodingSession, url, { timeoutMs: 1000, isNavigationAllowed: ALLOW_ANY }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(DriverError);
     expect((err as DriverError).kind).toBe("navigation");
     expect((err as DriverError).message).toMatch(/refusing to open/);
@@ -189,14 +202,14 @@ describe("capturePage's protocol floor", () => {
   it.each(["not a url", "/relative/path", "//example.com/protocol-relative"])(
     "refuses %s, which is not an absolute URL at all",
     async (url) => {
-      const err = await capturePage(explodingSession, url, { timeoutMs: 1000 }).catch((e: unknown) => e);
+      const err = await capturePage(explodingSession, url, { timeoutMs: 1000, isNavigationAllowed: ALLOW_ANY }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(DriverError);
       expect((err as DriverError).kind).toBe("navigation");
     },
   );
 
   it("lets an http(s) URL through to the session, proving the refusal is about the protocol", async () => {
-    const err = await capturePage(explodingSession, "https://careers.northwind.example/apply", { timeoutMs: 1000 })
+    const err = await capturePage(explodingSession, "https://careers.northwind.example/apply", { timeoutMs: 1000, isNavigationAllowed: ALLOW_ANY })
       .catch((e: unknown) => e);
     expect((err as Error).message).toMatch(/should have refused/);
   });
@@ -233,7 +246,7 @@ const browserAvailable = await probeBrowser();
 const live = describe.skipIf(!demoAtsUp || !browserAvailable);
 
 live("driver against demo-ats", () => {
-  const deps = { timeoutMs: 30_000 };
+  const deps = { timeoutMs: 30_000, isNavigationAllowed: ALLOW_ANY };
   let session: BrowserSession;
   let resumePath: string;
 
@@ -448,7 +461,7 @@ live("driver against demo-ats", () => {
   it("reports an un-tickable consent box as a FILL failure, not an ambiguous timeout", async () => {
     const jobId = "hidden-consent-1";
     const url = `${DEMO_ATS_URL}/hidden-consent/jobs/${jobId}`;
-    const shortDeps = { timeoutMs: 2_000 };
+    const shortDeps = { timeoutMs: 2_000, isNavigationAllowed: ALLOW_ANY };
     const raw = await capturePage(session, url, shortDeps);
     const form = parseForm(raw);
 
@@ -486,6 +499,172 @@ live("driver against demo-ats", () => {
     // And nothing reached the site.
     expect(await submissionsFor(jobId)).toEqual([]);
   }, 60_000);
+});
+
+
+// ---------------------------------------------------------------------------
+// The navigation guard (P6 fix-wave review, BLOCKING).
+//
+// `refuseCaptureTarget` ran once, on the submitted URL; `page.goto` then
+// followed redirects wherever they led. The reviewer stood up
+// `http://evil.test:9099/go` -> 302 -> `http://127.0.0.1:9100/secret` and got
+// the secret back in `bodyText`, from a SANDBOX workspace, through the
+// allow-listed host. This suite is that probe, as a test.
+//
+// The load-bearing assertion in every refusal case is `internalHits`: not just
+// "we did not return the secret" but "we never asked for it". A guard that
+// checks `page.url()` after the fact would pass the first assertion and fail
+// this one.
+//
+// No fake DNS is needed even for the cross-host cases, which is itself a
+// property of the fix: the refusal happens on the `Location` HEADER, before
+// the next hop is ever resolved or connected to.
+// ---------------------------------------------------------------------------
+const guarded = describe.skipIf(!browserAvailable);
+
+guarded("the navigation guard follows the policy, not the Location header", () => {
+  const SECRET = "DRIVER-TEST-SSRF-SECRET-4b81c2";
+  /** `localhost` is the allow-listed host; `127.0.0.1` is the internal one it must not reach. */
+  const SANDBOX_LOCALHOST = { workspaceKind: "sandbox", sandboxSiteAllowedHost: "localhost" } as const;
+
+  let session: BrowserSession;
+  let internal: Server;
+  let redirector: Server;
+  let internalPort = 0;
+  let redirectorPort = 0;
+  let internalHits = 0;
+
+  const deps = (policy = SANDBOX_LOCALHOST): DriverDeps => ({
+    timeoutMs: 15_000,
+    isNavigationAllowed: (target) => allowsCaptureTarget(target, policy),
+  });
+
+  async function listen(server: Server): Promise<number> {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return (server.address() as AddressInfo).port;
+  }
+
+  const start = (path: string): string => `http://localhost:${redirectorPort}${path}`;
+  const redirect = (res: ServerResponse, location: string): void => {
+    res.writeHead(302, { location });
+    res.end();
+  };
+  const html = (res: ServerResponse, body: string): void => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<html><body>${body}</body></html>`);
+  };
+
+  beforeAll(async () => {
+    if (!browserAvailable) return;
+    internal = createServer((_req, res) => {
+      internalHits += 1;
+      html(res, `${SECRET}<p>internal only</p>`);
+    });
+    internalPort = await listen(internal);
+
+    redirector = createServer((req, res) => {
+      const internalUrl = `http://127.0.0.1:${internalPort}/secret`;
+      switch (req.url) {
+        // One hop, straight at the loopback address.
+        case "/to-internal": return redirect(res, internalUrl);
+        // One hop to a public host this sandbox workspace may not reach.
+        case "/to-other-host": return redirect(res, "http://careers.northwind.example/apply");
+        // Three hops on the allowed host, then out.
+        case "/hop1": return redirect(res, start("/hop2"));
+        case "/hop2": return redirect(res, start("/hop3"));
+        case "/hop3": return redirect(res, internalUrl);
+        // A relative Location, resolved against the hop it came from.
+        case "/relative": return redirect(res, "/form");
+        // The two renderer-driven forms, which the route layer does see.
+        case "/meta":
+          return html(res, `<meta http-equiv="refresh" content="0;url=${internalUrl}">landing`);
+        case "/js":
+          return html(res, `landing<script>location.href=${JSON.stringify(internalUrl)}</script>`);
+        case "/legit": return redirect(res, start("/form"));
+        case "/form": return html(res, '<h1>Apply</h1><form><input id="email" name="email"></form>');
+        default:
+          res.writeHead(404);
+          return res.end();
+      }
+    });
+    redirectorPort = await listen(redirector);
+
+    session = await openSession();
+  }, 60_000);
+
+  afterAll(async () => {
+    await session?.close();
+    internal?.close();
+    redirector?.close();
+  });
+
+  beforeEach(() => {
+    internalHits = 0;
+  });
+
+  it.each([
+    ["a 302 from the allow-listed host to a loopback address", "/to-internal"],
+    ["a chain of three allowed hops that ends on a loopback address", "/hop1"],
+  ])("refuses %s, and never requests it", async (_label, path) => {
+    const failure = await capturePage(session, start(path), deps()).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(DriverError);
+    expect((failure as DriverError).kind).toBe("navigation");
+    expect((failure as DriverError).message).toMatch(/not an allowed target/);
+    expect((failure as DriverError).message).toContain("127.0.0.1");
+    // The whole point. A post-hoc `page.url()` check would leave this at 1.
+    expect(internalHits).toBe(0);
+  }, 60_000);
+
+  it("refuses a redirect to a public host this sandbox workspace may not reach", async () => {
+    const failure = await capturePage(session, start("/to-other-host"), deps()).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(DriverError);
+    expect((failure as DriverError).kind).toBe("navigation");
+    expect((failure as DriverError).message).toContain("careers.northwind.example");
+  }, 60_000);
+
+  it("refuses a meta-refresh to a loopback address", async () => {
+    // Renderer-initiated, so the route handler DOES see it — unlike a server
+    // 30x, which is why the chain walk above exists at all. `capturePage` has
+    // usually returned by the time this fires, so the assertion is on the
+    // server: the browser must not have fetched it.
+    await capturePage(session, start("/meta"), deps()).catch(() => null);
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(internalHits).toBe(0);
+  }, 60_000);
+
+  it("refuses a JS-driven navigation to a loopback address", async () => {
+    await capturePage(session, start("/js"), deps()).catch(() => null);
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(internalHits).toBe(0);
+  }, 60_000);
+
+  // The other half of the contract, and the reason the guard walks the chain
+  // rather than banning redirects: real ATS pages redirect constantly, and a
+  // "fix" that broke them would just move the outage.
+  it.each([
+    ["an ordinary same-host redirect", "/legit"],
+    ["a same-host redirect with a relative Location", "/relative"],
+  ])("still follows %s and reports where it landed", async (_label, path) => {
+    const page = await capturePage(session, start(path), deps());
+
+    expect(page.url).toBe(start("/form"));
+    expect(page.fields.map((field) => field.name)).toContain("email");
+    expect(page.bodyText).toContain("Apply");
+  }, 60_000);
+
+  it("refuses the submitted URL itself when it is off-policy, before opening a page", async () => {
+    const exploding: BrowserSession = {
+      newPage: () => Promise.reject(new Error("a page was opened for a URL the policy refused")),
+      close: () => Promise.resolve(),
+    };
+    const failure = await capturePage(exploding, `http://127.0.0.1:${internalPort}/secret`, deps())
+      .catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(DriverError);
+    expect((failure as DriverError).message).toMatch(/not an allowed target/);
+  });
 });
 
 if (!demoAtsUp || !browserAvailable) {

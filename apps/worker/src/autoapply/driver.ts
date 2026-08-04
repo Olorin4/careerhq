@@ -34,6 +34,17 @@ export interface BrowserSession {
 export interface DriverDeps {
   /** Budget for navigation, per-field actions and the post-submit wait. */
   timeoutMs: number;
+  /**
+   * Whether Chromium may be pointed at a URL — asked once per navigation, not
+   * once per capture. Required, not optional: a caller that has no opinion has
+   * not thought about it, and the last caller who had no opinion was the SSRF.
+   *
+   * The real implementations pass `allowsCaptureTarget` from
+   * `@careerhq/autoapply/policy` bound to the caller's workspace policy — the
+   * SAME function whose refusal reason apps/web shows the user, so the gate
+   * and the guard can never disagree about a URL.
+   */
+  isNavigationAllowed: (url: string) => boolean;
 }
 
 export interface SubmitResult {
@@ -145,10 +156,13 @@ export async function openSession(): Promise<BrowserSession> {
  * contents in `bodyText` in the P6 task-2 review. Deliberately duplicated
  * rather than deduplicated — it is the redundancy that makes it a layer.
  *
- * Only the protocol is checked here: this module has no config and no notion
- * of workspaces, so host policy stays with the caller that has both.
+ * Only the protocol is checked here: this module still has no config and no
+ * notion of workspaces. Host policy arrives as `deps.isNavigationAllowed`, a
+ * predicate the caller closes over its own workspace with, and is applied
+ * immediately after this — before a page is opened — so a caller that gates
+ * nothing cannot reach a host either.
  */
-function assertNavigable(url: string): void {
+function assertNavigable(url: string, deps: DriverDeps): void {
   let protocol: string;
   try {
     protocol = new URL(url).protocol;
@@ -158,13 +172,184 @@ function assertNavigable(url: string): void {
   if (protocol !== "http:" && protocol !== "https:") {
     throw new DriverError(`refusing to open a ${protocol} URL: only http(s) targets can be driven`, "navigation");
   }
+  if (!deps.isNavigationAllowed(url)) {
+    throw new DriverError(`refusing to open ${url}: it is not an allowed target for this workspace`, "navigation");
+  }
 }
 
+/**
+ * How many redirect hops one navigation may take before we call it a loop.
+ * Chromium's own limit is 20; matching it means a chain this guard walks
+ * behaves like a chain the browser would have walked on its own.
+ */
+const MAX_REDIRECT_HOPS = 20;
+
+interface NavigationGuard {
+  /** The off-policy URL the guard refused, if it refused one. */
+  refused: string | null;
+  /** The next, already-policy-checked hop `gotoGuarded` should navigate to. */
+  redirectTo: string | null;
+}
+
+/**
+ * Policy at the navigation layer: every hop is checked BEFORE it is requested.
+ *
+ * The bug this closes (P6 fix-wave review, BLOCKING): `refuseCaptureTarget`
+ * ran once, on the URL the user submitted, and `page.goto` then followed
+ * redirects wherever they led. A page on an allow-listed host answering `302
+ * Location: http://127.0.0.1:9100/secret` was captured and its body returned —
+ * proven, and proven from a sandbox workspace through the allow-listed host,
+ * so it defeated the host allow-list too.
+ *
+ * ==> A NOTE ON WHY THIS IS NOT JUST `route.abort()` <==
+ *
+ * The obvious shape — a `page.route` handler that aborts navigation requests
+ * failing the policy — is necessary but NOT sufficient, and measuring that was
+ * the whole job. In Playwright 1.62.1 a route handler is invoked for the
+ * initial navigation and for renderer-initiated ones (meta refresh, `location
+ * =`, link clicks, sub-frames), but Chromium's network stack follows server
+ * 30x redirects internally and never re-pauses them, so the handler NEVER SEES
+ * THE HOP THAT MATTERS. Fulfilling the redirect response instead of continuing
+ * it does not help either — the browser follows a fulfilled 302 without
+ * re-entering the handler. Both were measured against the installed version,
+ * not assumed.
+ *
+ * So for main-frame GET navigations the guard takes the redirect chain away
+ * from the browser: it fetches with `maxRedirects: 0`, reads `Location`,
+ * judges the next hop, and — if allowed — hands it back to `gotoGuarded` to
+ * navigate to explicitly, which re-enters this handler and re-judges. Off
+ * policy, nothing is fetched: the refusal happens on the Location HEADER, so
+ * the internal host is never contacted at all (measured: zero connections to
+ * the probe's internal server). Exactly one request per hop is made, the same
+ * ones the browser would have made, and `page.url()` stays truthful because
+ * the browser really does navigate to each hop.
+ *
+ * Non-GET navigations are policy-checked but NOT chain-walked: replaying a
+ * multipart POST through `route.fetch` to inspect its redirect is a good way
+ * to submit an application twice. A POST that redirects off-policy is caught
+ * by the post-navigation backstop in `capturePage`/`fillAndSubmit` instead —
+ * later than we would like, which is why it is stated here rather than left
+ * silent.
+ */
+async function installNavigationGuard(page: Page, deps: DriverDeps): Promise<NavigationGuard> {
+  const guard: NavigationGuard = { refused: null, redirectTo: null };
+
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    // Subresources (css, images, xhr) are not navigations and cannot return
+    // their body to us; leaving them alone keeps pages rendering normally.
+    if (!request.isNavigationRequest()) {
+      await route.continue();
+      return;
+    }
+
+    const url = request.url();
+    if (!deps.isNavigationAllowed(url)) {
+      guard.refused = url;
+      await route.abort("blockedbyclient");
+      return;
+    }
+
+    if (request.method() !== "GET" || request.frame() !== page.mainFrame()) {
+      await route.continue();
+      return;
+    }
+
+    let response;
+    try {
+      response = await route.fetch({ maxRedirects: 0 });
+    } catch {
+      // Unreachable host, TLS failure, aborted route: let the browser produce
+      // its own error for `goto` to report, rather than inventing one here.
+      await route.abort();
+      return;
+    }
+
+    const status = response.status();
+    const location = response.headers()["location"];
+    if (status < 300 || status > 399 || location === undefined) {
+      await route.fulfill({ response });
+      return;
+    }
+
+    let next: string;
+    try {
+      next = new URL(location, url).toString();
+    } catch {
+      guard.refused = location;
+      await route.abort("blockedbyclient");
+      return;
+    }
+    if (!deps.isNavigationAllowed(next)) {
+      guard.refused = next;
+      await route.abort("blockedbyclient");
+      return;
+    }
+
+    guard.redirectTo = next;
+    // A blank 200 rather than an abort: aborting starts a `chrome-error://`
+    // navigation that races the goto we are about to make for `next`, and the
+    // legitimate same-host redirect loses that race.
+    await route.fulfill({ status: 200, contentType: "text/html", body: "" });
+  });
+
+  return guard;
+}
+
+/**
+ * `page.goto`, following the redirect chain one policy-checked hop at a time.
+ * The loop is the browser's redirect follower, re-implemented where the policy
+ * can see it.
+ */
 async function gotoOrThrow(page: Page, url: string, deps: DriverDeps): Promise<void> {
-  try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: deps.timeoutMs });
-  } catch (cause) {
-    throw driverError("navigation", `could not open ${url}`, cause);
+  const guard = await installNavigationGuard(page, deps);
+  let target = url;
+
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+    guard.refused = null;
+    guard.redirectTo = null;
+
+    let cause: unknown = null;
+    try {
+      await page.goto(target, { waitUntil: "domcontentloaded", timeout: deps.timeoutMs });
+    } catch (err) {
+      cause = err;
+    }
+
+    // Checked before `cause`: the abort IS why `goto` rejected, and the
+    // refusal is a far more useful thing to tell the caller than
+    // `net::ERR_BLOCKED_BY_CLIENT`.
+    if (guard.refused !== null) {
+      throw new DriverError(
+        `refusing to open ${guard.refused}: it is not an allowed target for this workspace`,
+        "navigation",
+      );
+    }
+    if (guard.redirectTo !== null) {
+      target = guard.redirectTo;
+      continue;
+    }
+    if (cause !== null) throw driverError("navigation", `could not open ${url}`, cause);
+    return;
+  }
+
+  throw new DriverError(`could not open ${url}: more than ${MAX_REDIRECT_HOPS} redirects`, "navigation");
+}
+
+/**
+ * The post-navigation backstop the route guard is not allowed to make
+ * redundant. If a policy bug at the route layer ever lets the browser land
+ * somewhere off-policy — a non-GET redirect, a hop shape nobody anticipated —
+ * the content still does not leave this function. Cheap, and it runs before
+ * `extract`, so nothing off-policy is ever read, parsed or typed into.
+ */
+function assertLandedOnPolicy(page: Page, deps: DriverDeps): void {
+  const landed = page.url();
+  if (!deps.isNavigationAllowed(landed)) {
+    throw new DriverError(
+      `refusing to read ${landed}: it is not an allowed target for this workspace`,
+      "navigation",
+    );
   }
 }
 
@@ -183,11 +368,12 @@ async function extract(page: Page, url: string): Promise<ExtractedPage> {
 export async function capturePage(session: BrowserSession, url: string, deps: DriverDeps): Promise<RawFormPage> {
   // Before a page is opened, not merely before it is navigated: a refused
   // target must cost nothing and leave nothing behind.
-  assertNavigable(url);
+  assertNavigable(url, deps);
   const page = await session.newPage();
   page.setDefaultTimeout(deps.timeoutMs);
   try {
     await gotoOrThrow(page, url, deps);
+    assertLandedOnPolicy(page, deps);
     const extracted = await extract(page, url);
     return { url: page.url(), ...extracted, totalSteps: deriveTotalSteps(extracted.fields) };
   } finally {
@@ -287,12 +473,13 @@ async function readConfirmationId(page: Page, pageText: string): Promise<string 
  */
 export async function fillAndSubmit(session: BrowserSession, args: FillAndSubmitArgs): Promise<SubmitResult> {
   const { url, form, answers, files, deps } = args;
-  assertNavigable(url);
+  assertNavigable(url, deps);
   const page = await session.newPage();
   page.setDefaultTimeout(deps.timeoutMs);
 
   try {
     await gotoOrThrow(page, url, deps);
+    assertLandedOnPolicy(page, deps);
     const extracted = await extract(page, url);
     // The live page is the authority on what is there now, but a form whose
     // later steps only appear after a click can look shorter than the parse
@@ -374,6 +561,15 @@ export async function fillAndSubmit(session: BrowserSession, args: FillAndSubmit
     } catch (cause) {
       throw driverError("submit", `could not submit ${url}`, cause);
     }
+
+    // The submit click is a non-GET navigation, so the route guard checked its
+    // target but did not walk its redirect chain (see `installNavigationGuard`)
+    // — this is where that gap is closed. Deliberately AFTER the click and
+    // therefore ambiguous: the form really was sent, so apps/web parks the
+    // attempt for a human rather than claiming it failed. Reading the
+    // confirmation page of an off-policy host is the one thing that must not
+    // happen quietly.
+    assertLandedOnPolicy(page, deps);
 
     const pageText = await readPageText(page);
     return {

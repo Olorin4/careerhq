@@ -15,6 +15,7 @@ import type { RawFormPage } from "@careerhq/autoapply";
 // writes the raw screenshot buffer to disk (the one adapter step the
 // orchestrator explicitly leaves to its caller — see Task 11's report).
 import { capturePage, configureBrowserLimit, fillAndSubmit, openSession } from "@careerhq/worker/autoapply";
+import { allowsCaptureTarget, type CaptureTargetPolicy } from "@careerhq/autoapply/policy";
 import { safeExternalHref } from "./safe-url.js";
 import type { SiteSubmitArgs, SiteSubmitResult } from "./site-submission.js";
 
@@ -41,9 +42,11 @@ function applyBrowserLimit(config: AppConfig): void {
  * browser across calls for throughput is Task 13's concern (the worker's own
  * background jobs), not the interactive review screen's.
  */
-export function makeSiteCapture(config: AppConfig): (url: string) => Promise<RawFormPage> {
+export function makeSiteCapture(
+  config: AppConfig,
+): (url: string, policy: CaptureTargetPolicy) => Promise<RawFormPage> {
   applyBrowserLimit(config);
-  return async (url: string) => {
+  return async (url: string, policy: CaptureTargetPolicy) => {
     // Defence in depth, not the primary gate: `prepareSiteApplication` already
     // refused everything but http(s) on an allowed host before it called this
     // (`refuseCaptureTarget`). Repeating the protocol check here means a future
@@ -55,7 +58,12 @@ export function makeSiteCapture(config: AppConfig): (url: string) => Promise<Raw
     }
     const session = await openSession();
     try {
-      return await capturePage(session, url, { timeoutMs: config.autoapplyBrowserTimeoutMs });
+      return await capturePage(session, url, {
+        timeoutMs: config.autoapplyBrowserTimeoutMs,
+        // The orchestrator's policy, carried down to where the redirects
+        // happen: the same object it judged `url` with judges every hop.
+        isNavigationAllowed: (target) => allowsCaptureTarget(target, policy),
+      });
     } finally {
       await session.close();
     }
@@ -102,7 +110,10 @@ export function makeSiteSubmit(config: AppConfig): (args: SiteSubmitArgs) => Pro
         form: args.form,
         answers: args.answers,
         files: args.files,
-        deps: { timeoutMs: config.autoapplyBrowserTimeoutMs },
+        deps: {
+          timeoutMs: config.autoapplyBrowserTimeoutMs,
+          isNavigationAllowed: (target) => allowsCaptureTarget(target, args.policy),
+        },
       });
 
       const dir = path.join(config.fileStorageDir, "site-screenshots");

@@ -766,6 +766,43 @@ d("previewSiteSubmission", () => {
   });
 });
 
+d("prepareSiteApplication — the capture target policy", () => {
+  /**
+   * The policy has to travel WITH the URL, not merely ahead of it: `page.goto`
+   * follows redirects, so a gate that ran once on `args.url` left a 302 from an
+   * allow-listed host to `127.0.0.1` captured and returned in `bodyText` (P6
+   * fix-wave review, BLOCKING). This pins the seam — the driver's per-hop use
+   * of what arrives here is pinned in apps/worker's driver.test.ts.
+   */
+  it("hands capture the same policy object it gated the URL with", async () => {
+    let seen: { workspaceKind: string; sandboxSiteAllowedHost: string } | null = null;
+    await prepare("Policy Passed Co", {
+      config: config({ SANDBOX_FORCE_SAFE: "true" }),
+      capture: async (pageUrl: string, policy) => {
+        seen = policy;
+        return greenhousePage(pageUrl);
+      },
+    });
+
+    expect(seen).toEqual({ workspaceKind: "sandbox", sandboxSiteAllowedHost: APPLY_HOST });
+  });
+
+  it("refuses an internal target before a browser is ever asked for", async () => {
+    let captureCalls = 0;
+    const applicationId = await readyApplication("Never Captured Co");
+    const outcome = await prepareSiteApplication(
+      deps({ capture: async (pageUrl: string) => { captureCalls += 1; return greenhousePage(pageUrl); } }),
+      { workspaceId, applicationId, url: "http://169.254.169.254/latest/meta-data/" },
+    );
+
+    expect(outcome).toEqual({
+      status: "failed", reason: "that address is on an internal network and cannot be opened",
+    });
+    expect(captureCalls).toBe(0);
+    expect(await listAttemptsForApplication(db, applicationId)).toHaveLength(0);
+  });
+});
+
 d("confirmAndSubmitSite", () => {
   it("submits once, records both receipts, and moves the application to SUBMITTED", async () => {
     const calls: SubmitCall[] = [];
@@ -943,6 +980,70 @@ d("confirmAndSubmitSite", () => {
       workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: outsideHost,
     });
     expect(outcome.status).toBe("submitted");
+  });
+
+  /**
+   * The confirm-time half of the redirect fix (P6 fix-wave review, BLOCKING).
+   *
+   * `payload.url` is `form.url`, which is where the CAPTURE landed — so before
+   * the fix a 302 could make it an internal address, and `confirmAndSubmitSite`
+   * would then type the user's CV and answers into that host and upload the
+   * files there. A personal workspace has NO host check in the gate matrix at
+   * all (`sandboxTargetAllowed` is only consulted for sandbox workspaces), so
+   * this refusal is the only thing standing there.
+   *
+   * The capture stub fakes the landing directly rather than a real redirect —
+   * the driver's own guard is what stops the redirect (see apps/worker's
+   * driver.test.ts "the navigation guard" suite); this pins the backstop that
+   * has to hold even if that guard ever fails.
+   */
+  it("refuses a confirm whose captured URL is off-policy → target_refused, token unburned", async () => {
+    const calls: SubmitCall[] = [];
+    const landed = "http://169.254.169.254/latest/meta-data/";
+    const prepared = await previewed("Redirected Co", {
+      capture: async () => greenhousePage(landed),
+    });
+
+    const outcome = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token,
+      retypedTarget: "169.254.169.254",
+    });
+
+    expect(outcome).toMatchObject({ status: "blocked", code: "target_refused" });
+    if (outcome.status !== "blocked") return;
+    expect(outcome.reason).toMatch(/internal network/);
+
+    // Before `beginSubmission`, like every other harmless failure: nothing was
+    // typed, the attempt is untouched and the token is still spendable.
+    expect(calls).toHaveLength(0);
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect(attempt?.pendingReceipt).toBeNull();
+    expect((await getActiveConfirmation(db, prepared.attemptId))?.consumedAt ?? null).toBeNull();
+  });
+
+  it("hands the submit driver the same policy it gated the target with", async () => {
+    let seen: { workspaceKind: string; sandboxSiteAllowedHost: string } | null = null;
+    const prepared = await previewed("Policy Carried Co");
+
+    const outcome = await confirmAndSubmitSite(deps({
+      config: config({ SANDBOX_FORCE_SAFE: "true" }),
+      submit: async (args) => {
+        seen = args.policy;
+        return {
+          confirmationId: "NR-1a2b3c4d", finalUrl: `${args.url}/thanks`,
+          screenshotPath: "/app/var/files/shots/attempt.png", pageText: "Thanks",
+        };
+      },
+    }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+
+    expect(outcome.status).toBe("submitted");
+    // SANDBOX_FORCE_SAFE forces the sandbox path, and the driver must be told
+    // that — not the workspace's raw kind — or its per-hop guard would be
+    // looser than the gate that let the attempt through.
+    expect(seen).toEqual({ workspaceKind: "sandbox", sandboxSiteAllowedHost: APPLY_HOST });
   });
 
   it("refuses before the token burns when no browser can start → driver_unavailable", async () => {
