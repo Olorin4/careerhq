@@ -1,0 +1,436 @@
+/**
+ * The full-stack proof for the company-site channel (spec §11 DoD; the P5
+ * counterpart to email-e2e.test.ts's Mailpit suite): a REAL db, a REAL
+ * headless Chromium session driving a REAL demo-ats (apps/demo-ats,
+ * `localhost:3001` by default) through the exact production seam —
+ * `./site-driver.ts`'s `makeSiteCapture`/`makeSiteSubmit`, which reach Task
+ * 8's Playwright driver via the `@careerhq/worker/autoapply` package export
+ * (see site-driver.ts's own comment, and task-13-report.md, for why a
+ * relative cross-app import is a build-time error here — nothing in this
+ * file reaches into `apps/worker/src` directly).
+ *
+ * Two deviations from task-14-brief.md, both directed by the controller
+ * after Task 12's review (see the brief's "IMPORTANT deviations" section and
+ * progress.md's Task 12 FINDING):
+ *
+ *   1. The happy-path round trip runs against LEVER's `/lever/jobs/eng-2`,
+ *      not greenhouse. Greenhouse's `eng-1` fixture carries a REQUIRED
+ *      legal-attestation checkbox, which `detectBlockers` correctly treats
+ *      as a permanent page-level blocker (spec §10.6: CareerHQ must never
+ *      tick a legal attestation on the user's behalf) — it can never reach
+ *      "ready", so `eng-1` is this file's `blocked` proof instead (case 6a),
+ *      alongside a captcha URL (case 6b).
+ *   2. The `apps/worker` ⇄ `apps/web` package-export seam (`exports` on
+ *      apps/worker/package.json, `apps/worker/src/autoapply/index.ts`,
+ *      `@careerhq/worker` as an apps/web dependency) was wired in Task 13,
+ *      not here — this file only consumes the already-seamed
+ *      `./site-driver.ts`.
+ *
+ * Skips cleanly (not a failure) when any dependency is missing:
+ *   - no `TEST_DATABASE_URL` → no db to run against.
+ *   - demo-ats unreachable, probed via `GET /api/submissions` with a short
+ *     timeout (the brief's own probe target — it doubles as the assertion
+ *     surface below).
+ *   - Chromium unavailable, probed with a real `openSession()`/`close()`
+ *     round trip through the same `@careerhq/worker/autoapply` export the
+ *     real driver uses (not a direct `playwright` import — apps/web has no
+ *     reason to depend on that package directly, and this keeps the same
+ *     boundary the driver itself is bound by).
+ * All three probes happen at module load (top-level `await`), before
+ * `describe.skipIf` is evaluated — see email-e2e.test.ts's identical note on
+ * why a `beforeAll` cannot retroactively skip the suite itself.
+ */
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { loadConfig, type AppConfig } from "@careerhq/config";
+import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
+import { openSession } from "@careerhq/worker/autoapply";
+import {
+  applications, createApplication, createCvVariant, createDb, createFact, getAttempt, getLatestSnapshot,
+  listAttemptsForApplication, transitionApplication, updateSnapshotAnswers, workspaces, type Db,
+} from "@careerhq/db";
+import {
+  confirmAndSubmitSite, prepareSiteApplication, previewSiteSubmission, updatePlannedAnswer, type SiteDeps,
+} from "./site-submission.js";
+import { makeSiteCapture, makeSiteSubmit } from "./site-driver.js";
+
+const url = process.env.TEST_DATABASE_URL;
+
+/** Same default/override convention as apps/worker's driver.test.ts. */
+const DEMO_ATS_URL = (process.env.DEMO_ATS_URL ?? "http://localhost:3001").replace(/\/+$/, "");
+/** The hostname the user retypes at confirm time, and what `payload.host` will be. */
+const HOST = new URL(DEMO_ATS_URL).hostname;
+
+async function probeDemoAts(): Promise<boolean> {
+  try {
+    const res = await fetch(`${DEMO_ATS_URL}/api/submissions`, { signal: AbortSignal.timeout(2000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function probeBrowser(): Promise<boolean> {
+  try {
+    const session = await openSession();
+    await session.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const demoAtsUp = url ? await probeDemoAts() : false;
+const browserAvailable = url && demoAtsUp ? await probeBrowser() : false;
+if (url && (!demoAtsUp || !browserAvailable)) {
+  console.warn(
+    `[site-e2e] skipping — demo-ats up: ${demoAtsUp} (${DEMO_ATS_URL}), chromium available: ${browserAvailable}`,
+  );
+}
+const d = describe.skipIf(!url || !demoAtsUp || !browserAvailable);
+
+/** Real headless Chromium round trips; generous relative to vitest's 5s default. */
+const BROWSER_TIMEOUT_MS = 60_000;
+
+const leverUrl = (jobId: string): string => `${DEMO_ATS_URL}/lever/jobs/${jobId}`;
+const greenhouseUrl = (jobId: string): string => `${DEMO_ATS_URL}/greenhouse/jobs/${jobId}`;
+const captchaUrl = (jobId: string): string => `${DEMO_ATS_URL}/captcha/jobs/${jobId}`;
+
+const FACT_EMAIL = "alex.rivera@example.com";
+
+/** A syntactically valid minimal one-page PDF (real xref offsets), same builder as email-e2e.test.ts. */
+function buildTinyPdf(): Buffer {
+  const objects = [
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>\nendobj\n",
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (const obj of objects) {
+    offsets.push(Buffer.byteLength(body));
+    body += obj;
+  }
+  const xrefStart = Buffer.byteLength(body);
+  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) xref += `${off.toString().padStart(10, "0")} 00000 n \n`;
+  const trailer = `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return Buffer.from(body + xref + trailer);
+}
+
+const CV_BYTES = buildTinyPdf();
+const CV_SHA256 = createHash("sha256").update(CV_BYTES).digest("hex");
+
+let db: Db;
+let workspaceId: string;
+let cvPath: string;
+
+function config(over: Record<string, string> = {}): AppConfig {
+  return loadConfig({
+    DATABASE_URL: url ?? "postgres://u:p@localhost:5432/careerhq",
+    SUBMISSIONS_LIVE_COMPANY_SITE: "true",
+    SANDBOX_SITE_ALLOWED_HOST: HOST,
+    DEMO_ATS_URL,
+    ...over,
+  });
+}
+
+/** Real `capture`/`submit`, built from the actual config so an overridden config (e.g. the gate-closed test) rebuilds them too. */
+function deps(over: Partial<SiteDeps> = {}): SiteDeps {
+  const cfg = over.config ?? config();
+  return { db, config: cfg, capture: makeSiteCapture(cfg), submit: makeSiteSubmit(cfg), ...over };
+}
+
+/** An application walked to READY_FOR_REVIEW through the real guarded transitions. */
+async function readyApplication(companyName: string, jobUrl: string): Promise<string> {
+  const app = await createApplication(db, {
+    workspaceId, companyName, jobTitle: "Autonomy Software Engineer", jobUrl,
+  });
+  for (const to of ["SHORTLISTED", "PREPARING"] as const) {
+    expect((await transitionApplication(db, { applicationId: app.id, to, trigger: "user" })).ok).toBe(true);
+  }
+  const ready = await transitionApplication(db, {
+    applicationId: app.id, to: "READY_FOR_REVIEW", trigger: "user", ctx: { hasMaterials: true },
+  });
+  expect(ready.ok).toBe(true);
+  return app.id;
+}
+
+interface ReadyPrepare { snapshotId: string; form: CanonicalForm; blocking: string[] }
+
+/**
+ * The fact bank (seeded in `beforeAll`) resolves every profile-mapped field
+ * on the Lever fixture deterministically — name, email, phone, LinkedIn,
+ * portfolio, resume — leaving exactly two fields for the user: "Notice
+ * Period" (`notice_period` is unconditionally sensitive, spec §7.2.5) and
+ * "Additional information" (a screening question with no saved answer and no
+ * AI pass configured, so it stays unresolved). Any other blocking field means
+ * a fact-bank assumption drifted from the real demo-ats markup — fail loudly
+ * rather than silently leaving it blank.
+ */
+const LEVER_SETTLE_VALUES: Record<string, string> = {
+  "Notice Period": "2_weeks",
+  "Additional information": "Looking forward to contributing to Northwind's autonomy stack.",
+};
+
+async function settleLeverBlocking(prepared: ReadyPrepare): Promise<void> {
+  for (const fieldId of prepared.blocking) {
+    const field = prepared.form.fields.find((f) => f.id === fieldId);
+    if (!field) throw new Error(`blocking field ${fieldId} missing from the parsed form`);
+    const value = LEVER_SETTLE_VALUES[field.label];
+    if (value === undefined) {
+      throw new Error(`no settle value configured for blocking field "${field.label}" — update LEVER_SETTLE_VALUES`);
+    }
+    const result = await updatePlannedAnswer(deps(), {
+      workspaceId, snapshotId: prepared.snapshotId, fieldId, value,
+    });
+    expect(result).toEqual({ ok: true });
+  }
+}
+
+interface DemoSubmission {
+  id: string;
+  source: "greenhouse" | "lever";
+  jobId: string;
+  fields: Record<string, string>;
+  files: Array<{ filename: string; contentType: string; size: number }>;
+  submittedAt: string;
+}
+
+async function getSubmissions(): Promise<DemoSubmission[]> {
+  const res = await fetch(`${DEMO_ATS_URL}/api/submissions`);
+  return (await res.json()) as DemoSubmission[];
+}
+
+beforeAll(async () => {
+  if (!url || !demoAtsUp || !browserAvailable) return;
+  db = createDb(url);
+
+  const dir = mkdtempSync(path.join(tmpdir(), "careerhq-site-e2e-cv-"));
+  cvPath = path.join(dir, "alex-cv.pdf");
+  writeFileSync(cvPath, CV_BYTES);
+
+  const [ws] = await db.insert(workspaces).values({ name: `t-site-e2e-${Date.now()}`, kind: "personal" }).returning();
+  workspaceId = ws!.id;
+
+  await createCvVariant(db, {
+    workspaceId, label: "ATS CV", format: "ats", filePath: cvPath, sha256: CV_SHA256,
+  });
+
+  const reviewBy = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+  const facts = [
+    { category: "identity" as const, claim: "Full legal name: Alex Rivera" },
+    { category: "contact" as const, claim: `Email: ${FACT_EMAIL}` },
+    { category: "contact" as const, claim: "Phone: +1-555-0142" },
+    { category: "contact" as const, claim: "LinkedIn: https://www.linkedin.com/in/alexrivera" },
+    { category: "contact" as const, claim: "Portfolio: https://alexrivera.dev" },
+  ];
+  for (const fact of facts) await createFact(db, { workspaceId, ...fact, reviewBy });
+});
+
+afterAll(async () => {
+  if (!url || !demoAtsUp || !browserAvailable) return;
+  await fetch(`${DEMO_ATS_URL}/api/submissions`, { method: "DELETE" });
+  await db.delete(workspaces).where(eq(workspaces.id, workspaceId));
+  await db.$client.end();
+});
+
+d("company-site end-to-end round trip against demo-ats", () => {
+  it(
+    "full round trip on lever/eng-2: prepare -> resolve needs-you fields -> preview -> confirm -> submitted",
+    async () => {
+      const jobUrl = leverUrl("eng-2");
+      const applicationId = await readyApplication("Happy Path Robotics Co", jobUrl);
+      const before = await getSubmissions();
+
+      const outcome = await prepareSiteApplication(deps(), { workspaceId, applicationId, url: jobUrl });
+      expect(outcome.status).toBe("ready");
+      if (outcome.status !== "ready") throw new Error(`prepare failed: ${JSON.stringify(outcome)}`);
+
+      await settleLeverBlocking(outcome);
+
+      const preview = await previewSiteSubmission(deps(), { workspaceId, attemptId: outcome.attemptId });
+      expect(preview.status).toBe("ok");
+      if (preview.status !== "ok") throw new Error(`preview failed: ${JSON.stringify(preview)}`);
+      expect(preview.payload.host).toBe(HOST);
+
+      const confirm = await confirmAndSubmitSite(deps(), {
+        workspaceId, attemptId: outcome.attemptId, presentedToken: preview.token, retypedTarget: HOST,
+      });
+      expect(confirm.status).toBe("submitted");
+      if (confirm.status !== "submitted") throw new Error(`confirm failed: ${JSON.stringify(confirm)}`);
+      expect(confirm.confirmationId).toMatch(/^NR-[0-9a-f]{8}$/);
+      expect(confirm.screenshotPath).not.toBeNull();
+      expect(existsSync(confirm.screenshotPath as string)).toBe(true);
+
+      const [application] = await db.select().from(applications).where(eq(applications.id, applicationId));
+      expect(application?.state).toBe("SUBMITTED");
+
+      // Exactly one new submission landed in demo-ats, carrying the fact-bank
+      // email and the resume's actual on-disk filename (the driver uploads
+      // the file at its real path — `attachmentFilename`'s sanitized label is
+      // payload/fingerprint metadata only, never what the browser uploads).
+      const after = await getSubmissions();
+      expect(after.length).toBe(before.length + 1);
+      const created = after.find((s) => s.id === confirm.confirmationId);
+      expect(created).toBeDefined();
+      expect(created?.fields["email"]).toBe(FACT_EMAIL);
+      expect(created?.files[0]?.filename).toBe(path.basename(cvPath));
+    },
+    BROWSER_TIMEOUT_MS,
+  );
+
+  it(
+    "blocks a confirm while the env gate is off -> gate_closed, nothing submitted",
+    async () => {
+      const jobUrl = leverUrl("e2e-gate-off");
+      const applicationId = await readyApplication("Gate Off Robotics Co", jobUrl);
+      const outcome = await prepareSiteApplication(deps(), { workspaceId, applicationId, url: jobUrl });
+      expect(outcome.status).toBe("ready");
+      if (outcome.status !== "ready") throw new Error(`prepare failed: ${JSON.stringify(outcome)}`);
+      await settleLeverBlocking(outcome);
+
+      const preview = await previewSiteSubmission(deps(), { workspaceId, attemptId: outcome.attemptId });
+      expect(preview.status).toBe("ok");
+      if (preview.status !== "ok") throw new Error(`preview failed: ${JSON.stringify(preview)}`);
+
+      const before = await getSubmissions();
+      const closedConfig = config({ SUBMISSIONS_LIVE_COMPANY_SITE: "false" });
+      const confirm = await confirmAndSubmitSite(deps({ config: closedConfig }), {
+        workspaceId, attemptId: outcome.attemptId, presentedToken: preview.token, retypedTarget: HOST,
+      });
+      expect(confirm).toMatchObject({ status: "blocked", code: "gate_closed" });
+      expect(await getSubmissions()).toHaveLength(before.length);
+      expect((await getAttempt(db, outcome.attemptId))?.status).toBe("PENDING_CONFIRMATION");
+    },
+    BROWSER_TIMEOUT_MS,
+  );
+
+  it(
+    "blocks a confirm whose answers changed after the preview -> fingerprint_mismatch",
+    async () => {
+      const jobUrl = leverUrl("e2e-tamper");
+      const applicationId = await readyApplication("Tamper Robotics Co", jobUrl);
+      const outcome = await prepareSiteApplication(deps(), { workspaceId, applicationId, url: jobUrl });
+      expect(outcome.status).toBe("ready");
+      if (outcome.status !== "ready") throw new Error(`prepare failed: ${JSON.stringify(outcome)}`);
+      await settleLeverBlocking(outcome);
+
+      const preview = await previewSiteSubmission(deps(), { workspaceId, attemptId: outcome.attemptId });
+      expect(preview.status).toBe("ok");
+      if (preview.status !== "ok") throw new Error(`preview failed: ${JSON.stringify(preview)}`);
+
+      const emailField = outcome.form.fields.find((f) => f.label === "Email");
+      if (!emailField) throw new Error("no Email field on the lever fixture");
+      const snapshot = await getLatestSnapshot(db, outcome.attemptId);
+      const answers = (snapshot!.plannedAnswers as PlannedAnswer[]).map((a) =>
+        (a.fieldId === emailField.id ? { ...a, value: "tampered@example.com" } : a));
+      await updateSnapshotAnswers(db, outcome.snapshotId, answers);
+
+      const before = await getSubmissions();
+      const confirm = await confirmAndSubmitSite(deps(), {
+        workspaceId, attemptId: outcome.attemptId, presentedToken: preview.token, retypedTarget: HOST,
+      });
+      expect(confirm).toMatchObject({ status: "blocked", code: "fingerprint_mismatch" });
+      expect(await getSubmissions()).toHaveLength(before.length);
+    },
+    BROWSER_TIMEOUT_MS,
+  );
+
+  it(
+    "blocks a confirm whose retyped host does not match -> target_mismatch",
+    async () => {
+      const jobUrl = leverUrl("e2e-mismatch");
+      const applicationId = await readyApplication("Mistyped Robotics Co", jobUrl);
+      const outcome = await prepareSiteApplication(deps(), { workspaceId, applicationId, url: jobUrl });
+      expect(outcome.status).toBe("ready");
+      if (outcome.status !== "ready") throw new Error(`prepare failed: ${JSON.stringify(outcome)}`);
+      await settleLeverBlocking(outcome);
+
+      const preview = await previewSiteSubmission(deps(), { workspaceId, attemptId: outcome.attemptId });
+      expect(preview.status).toBe("ok");
+      if (preview.status !== "ok") throw new Error(`preview failed: ${JSON.stringify(preview)}`);
+
+      const before = await getSubmissions();
+      const confirm = await confirmAndSubmitSite(deps(), {
+        workspaceId, attemptId: outcome.attemptId, presentedToken: preview.token,
+        retypedTarget: "totally-wrong-host.example",
+      });
+      expect(confirm).toMatchObject({ status: "blocked", code: "target_mismatch" });
+      expect(await getSubmissions()).toHaveLength(before.length);
+      expect((await getAttempt(db, outcome.attemptId))?.status).toBe("PENDING_CONFIRMATION");
+    },
+    BROWSER_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses a second prepare for the same requisition -> duplicate, no attempt created",
+    async () => {
+      const jobUrl = leverUrl("e2e-duplicate");
+      const firstApplicationId = await readyApplication("Duplicate First Robotics Co", jobUrl);
+      const first = await prepareSiteApplication(deps(), { workspaceId, applicationId: firstApplicationId, url: jobUrl });
+      expect(first.status).toBe("ready");
+      if (first.status !== "ready") throw new Error(`prepare failed: ${JSON.stringify(first)}`);
+      await settleLeverBlocking(first);
+
+      const preview = await previewSiteSubmission(deps(), { workspaceId, attemptId: first.attemptId });
+      expect(preview.status).toBe("ok");
+      if (preview.status !== "ok") throw new Error(`preview failed: ${JSON.stringify(preview)}`);
+
+      const confirm = await confirmAndSubmitSite(deps(), {
+        workspaceId, attemptId: first.attemptId, presentedToken: preview.token, retypedTarget: HOST,
+      });
+      expect(confirm.status).toBe("submitted");
+
+      const secondApplicationId = await readyApplication("Duplicate Second Robotics Co", jobUrl);
+      const second = await prepareSiteApplication(deps(), { workspaceId, applicationId: secondApplicationId, url: jobUrl });
+      expect(second).toEqual({ status: "duplicate", existingApplicationId: firstApplicationId });
+      // A refused prepare leaves nothing behind for the second application.
+      expect(await listAttemptsForApplication(db, secondApplicationId)).toHaveLength(0);
+    },
+    BROWSER_TIMEOUT_MS,
+  );
+
+  it(
+    "pauses on greenhouse eng-1's required legal attestation -> blocked, no submission recorded",
+    async () => {
+      const jobUrl = greenhouseUrl("eng-1");
+      const applicationId = await readyApplication("Attestation Robotics Co", jobUrl);
+      const before = await getSubmissions();
+
+      const outcome = await prepareSiteApplication(deps(), { workspaceId, applicationId, url: jobUrl });
+      expect(outcome.status).toBe("blocked");
+      if (outcome.status !== "blocked") throw new Error(`expected blocked, got ${JSON.stringify(outcome)}`);
+      expect(outcome.kind).toBe("legal_attestation");
+
+      const attempts = await listAttemptsForApplication(db, applicationId);
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.status).toBe("BLOCKED");
+      // A paused attempt captured nothing to submit — no snapshot, no click.
+      expect(await getLatestSnapshot(db, attempts[0]!.id)).toBeNull();
+      expect(await getSubmissions()).toHaveLength(before.length);
+    },
+    BROWSER_TIMEOUT_MS,
+  );
+
+  it(
+    "pauses on a captcha page -> blocked with kind captcha, no submission recorded",
+    async () => {
+      const jobUrl = captchaUrl("e2e-captcha");
+      const applicationId = await readyApplication("Captcha Robotics Co", jobUrl);
+      const before = await getSubmissions();
+
+      const outcome = await prepareSiteApplication(deps(), { workspaceId, applicationId, url: jobUrl });
+      expect(outcome.status).toBe("blocked");
+      if (outcome.status !== "blocked") throw new Error(`expected blocked, got ${JSON.stringify(outcome)}`);
+      expect(outcome.kind).toBe("captcha");
+
+      expect(await getSubmissions()).toHaveLength(before.length);
+    },
+    BROWSER_TIMEOUT_MS,
+  );
+});
