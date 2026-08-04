@@ -3,7 +3,7 @@ import {
   retentionSettingSchema,
   type ApplicationState, type MatchMethod, type ReplyClassification, type SuggestionState,
 } from "@careerhq/contracts";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import {
   applications, companies, emailConnections, emailMessages, jobs,
 } from "../schema/index.js";
@@ -57,7 +57,7 @@ export interface RecordOutboundMessageInput {
  * Idempotent on (workspace, messageId): the caller runs right after a send it
  * has already recorded a receipt for, and a retry there must never 23505.
  */
-export async function recordOutboundMessage(db: Db, input: RecordOutboundMessageInput): Promise<void> {
+export async function recordOutboundMessage(db: DbOrTx, input: RecordOutboundMessageInput): Promise<void> {
   const [connection] = await db.select({ fromAddress: emailConnections.fromAddress })
     .from(emailConnections).where(eq(emailConnections.id, input.connectionId));
 
@@ -95,7 +95,7 @@ export interface UpsertInboundMessageInput {
  * file) it would otherwise pay for again.
  */
 export async function upsertInboundMessage(
-  db: Db,
+  db: DbOrTx,
   input: UpsertInboundMessageInput,
 ): Promise<{ inserted: boolean; id: string }> {
   const { msg } = input;
@@ -223,7 +223,7 @@ export interface SetClassificationInput {
 
 /** Records a model verdict against a stored message. `id` is the `email_messages` row id. */
 export async function setClassification(
-  db: Db,
+  db: DbOrTx,
   id: string,
   input: SetClassificationInput,
 ): Promise<void> {

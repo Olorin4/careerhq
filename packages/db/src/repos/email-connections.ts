@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { ImapConfig, RetentionSetting, SmtpConfig } from "@careerhq/contracts";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import { credentials, emailConnections } from "../schema/index.js";
 import type { EmailConnection } from "../index.js";
 import { createCredential, readCredentialSecret } from "./credentials.js";
@@ -28,7 +28,7 @@ export interface CreateEmailConnectionInput {
  * unreferenced secret sitting in the database forever.
  */
 export async function createEmailConnection(
-  db: Db,
+  db: DbOrTx,
   input: CreateEmailConnectionInput,
 ): Promise<EmailConnection> {
   if (input.imap && !input.imapPassword) {
@@ -105,7 +105,7 @@ export async function updateConnectionHealth(
   detail?: string | null,
 ): Promise<void> {
   await db.update(emailConnections)
-    .set({ health, healthDetail: detail ?? null, lastCheckedAt: sql`now()` })
+    .set({ health, healthDetail: detail ?? null, lastCheckedAt: sql`clock_timestamp()` })
     .where(eq(emailConnections.id, id));
 }
 

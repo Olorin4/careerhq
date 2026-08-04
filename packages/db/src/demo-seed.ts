@@ -25,7 +25,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type {
   ApplicationState, CanonicalForm, CvFormat, FactCategory, NormalizedJob, PlannedAnswer,
   RemoteMode, ScoringProfile, Sensitivity, SmtpConfig, TransitionTrigger,
@@ -35,8 +35,8 @@ import type { TransitionContext } from "@careerhq/core";
 import {
   CONFIRMATION_TTL_MS, generateConfirmationToken, hashConfirmationToken, payloadFingerprint,
 } from "@careerhq/core/gates";
-import type { Db } from "./client.js";
-import { candidateFacts, jobs, workspaces } from "./schema/index.js";
+import type { Db, DbOrTx } from "./client.js";
+import { jobs, workspaces } from "./schema/index.js";
 import { approveAnswer, createAnswer } from "./repos/answers.js";
 import {
   beginSubmission, completeSubmission, createSiteAttempt, getActiveConfirmation, recordPreview,
@@ -60,6 +60,38 @@ import { saveFormSnapshot } from "./repos/form-snapshots.js";
  * existing demo workspace rather than resetting it.
  */
 export const DEMO_WORKSPACE_NAME = "CareerHQ Demo";
+
+/**
+ * Advisory-lock key guarding the demo workspace singleton.
+ *
+ * The delete predicate below (`kind = "sandbox" AND name = DEMO_WORKSPACE_NAME`)
+ * is database-GLOBAL, not scoped to a caller: two overlapping `seedDemoWorkspace`
+ * calls destroy each other's in-flight rows, and the cascade takes out
+ * applications the other run is mid-transition on — which surfaces as
+ * `<id> → SHORTLISTED refused: application not found`. Wrapping the seed in a
+ * transaction (so nothing partial is ever visible) does not on its own stop two
+ * transactions interleaving, so the seed takes this lock as its first statement
+ * inside the transaction: `pg_advisory_xact_lock` is released by COMMIT/ROLLBACK,
+ * so a crashed or abandoned seed cannot leave it held.
+ *
+ * Tests that need to observe the demo workspace's row set without a concurrent
+ * reset moving it underneath them take the same lock via {@link lockDemoSeed}.
+ * Always acquire it BEFORE any row lock, so every holder orders its locks the
+ * same way and no pair can deadlock.
+ */
+export const DEMO_SEED_LOCK_KEY = 6_202_603_040_000;
+
+/**
+ * Takes {@link DEMO_SEED_LOCK_KEY} for the rest of `tx`. Must be called on a
+ * transaction handle: on a plain `Db` the implicit single-statement transaction
+ * commits immediately and the lock is released again before it is any use.
+ */
+export async function lockDemoSeed(tx: DbOrTx): Promise<void> {
+  // `sql.raw` on a module constant, not a bound parameter: `pg_advisory_xact_lock`
+  // is overloaded on (bigint) and (int, int), and a driver-inferred int4
+  // parameter picks the wrong arity for a key this size.
+  await tx.execute(sql.raw(`select pg_advisory_xact_lock(${DEMO_SEED_LOCK_KEY})`));
+}
 
 /** The compose service name of the local mail sink — mirrors the config default. */
 const DEFAULT_SANDBOX_SMTP_HOST = "mailpit";
@@ -85,10 +117,11 @@ export interface SeedDemoWorkspaceOptions {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const daysAgo = (n: number): Date => new Date(Date.now() - n * DAY_MS);
 const daysFromNow = (n: number): Date => new Date(Date.now() + n * DAY_MS);
+const minutesAgo = (n: number): Date => new Date(Date.now() - n * 60_000);
 
 /** Throws on a refused transition: the seed's own scripts must never be illegal. */
 async function transition(
-  db: Db,
+  db: DbOrTx,
   applicationId: string,
   to: ApplicationState,
   trigger: TransitionTrigger,
@@ -103,7 +136,21 @@ async function transition(
 // The Alex Demo persona
 // ---------------------------------------------------------------------------
 
+/**
+ * Stable handles for the seeded facts. Documents, reusable answers and the
+ * auto-apply form plan all cite facts BY KEY rather than by position in the
+ * insert order: a provenance chip that names the wrong fact is worse than no
+ * chip, because grounded citation is the claim the fact bank exists to make.
+ */
+type DemoFactKey =
+  | "legalName" | "preferredName" | "email" | "phone" | "portfolio"
+  | "northwind" | "vertexLead" | "migration" | "degree"
+  | "typescript" | "postgres" | "kubernetes"
+  | "remotePreference" | "relocation" | "workAuthorization" | "targetSalary"
+  | "availability" | "noticePeriod";
+
 interface DemoFact {
+  key: DemoFactKey;
   category: FactCategory;
   claim: string;
   detail?: string;
@@ -111,67 +158,88 @@ interface DemoFact {
   reviewBy: Date;
 }
 
+/** The seeded facts' ids, by key — what `sourceFactIds` is built from. */
+type DemoFactIds = Record<DemoFactKey, string>;
+
 function demoFacts(): DemoFact[] {
   return [
-    { category: "identity", claim: "Full legal name: Alex Demo", reviewBy: daysFromNow(180) },
-    { category: "identity", claim: "Preferred name: Alex", reviewBy: daysFromNow(180) },
-    { category: "contact", claim: "Email: alex.demo@example.com", reviewBy: daysFromNow(180) },
-    { category: "contact", claim: "Phone: +1-555-0100", reviewBy: daysFromNow(180) },
-    { category: "contact", claim: "Portfolio: https://alex.example.com", reviewBy: daysFromNow(365) },
+    { key: "legalName", category: "identity", claim: "Full legal name: Alex Demo", reviewBy: daysFromNow(180) },
+    { key: "preferredName", category: "identity", claim: "Preferred name: Alex", reviewBy: daysFromNow(180) },
+    { key: "email", category: "contact", claim: "Email: alex.demo@example.com", reviewBy: daysFromNow(180) },
+    { key: "phone", category: "contact", claim: "Phone: +1-555-0100", reviewBy: daysFromNow(180) },
+    { key: "portfolio", category: "contact", claim: "Portfolio: https://alex.example.com", reviewBy: daysFromNow(365) },
     {
+      key: "northwind",
       category: "experience",
       claim: "6 years as a backend engineer at Northwind Robotics",
       detail: "Owned the order-routing service: TypeScript on Node, PostgreSQL, ~2M events/day.",
       reviewBy: daysFromNow(180),
     },
     {
+      key: "vertexLead",
       category: "experience",
       claim: "2 years as engineering lead at Vertex Logistics",
       detail: "Led a team of five across the dispatch and billing product lines.",
       reviewBy: daysFromNow(180),
     },
     {
+      key: "migration",
       category: "experience",
       claim: "Migrated a monolith to event-driven services with zero customer-visible downtime",
       detail: "Strangler-fig migration over nine months; cut p99 checkout latency from 1.9s to 340ms.",
       reviewBy: daysFromNow(180),
     },
-    { category: "education", claim: "B.Sc. Computer Science, Riverbank University", reviewBy: daysFromNow(365) },
-    { category: "skill", claim: "TypeScript and Node.js, production, six years", reviewBy: daysFromNow(180) },
-    { category: "skill", claim: "PostgreSQL: schema design, query tuning, logical replication", reviewBy: daysFromNow(180) },
-    { category: "skill", claim: "Kubernetes and Terraform for service deployment", reviewBy: daysFromNow(180) },
-    { category: "preference", claim: "Prefers remote-first teams in European time zones", reviewBy: daysFromNow(180) },
-    { category: "preference", claim: "Open to relocation for a Series B or later company", reviewBy: daysFromNow(180) },
+    { key: "degree", category: "education", claim: "B.Sc. Computer Science, Riverbank University", reviewBy: daysFromNow(365) },
+    { key: "typescript", category: "skill", claim: "TypeScript and Node.js, production, six years", reviewBy: daysFromNow(180) },
+    { key: "postgres", category: "skill", claim: "PostgreSQL: schema design, query tuning, logical replication", reviewBy: daysFromNow(180) },
+    { key: "kubernetes", category: "skill", claim: "Kubernetes and Terraform for service deployment", reviewBy: daysFromNow(180) },
+    { key: "remotePreference", category: "preference", claim: "Prefers remote-first teams in European time zones", reviewBy: daysFromNow(180) },
+    { key: "relocation", category: "preference", claim: "Open to relocation for a Series B or later company", reviewBy: daysFromNow(180) },
     {
+      key: "workAuthorization",
       category: "authorization",
       claim: "EU work authorization: citizen, no sponsorship required",
       sensitivity: "sensitive",
       reviewBy: daysFromNow(365),
     },
     {
+      key: "targetSalary",
       category: "compensation",
       claim: "Target base: €110k",
       sensitivity: "sensitive",
       reviewBy: daysFromNow(90),
     },
-    { category: "availability", claim: "Available four weeks after signing", reviewBy: daysFromNow(180) },
+    { key: "availability", category: "availability", claim: "Available four weeks after signing", reviewBy: daysFromNow(180) },
     // Deliberately the one STALE fact: `review_by` is in the past, so the demo
     // shows the fact bank's staleness badge and the re-verify flow.
-    { category: "availability", claim: "Notice period: 4 weeks", reviewBy: daysAgo(21) },
+    { key: "noticePeriod", category: "availability", claim: "Notice period: 4 weeks", reviewBy: daysAgo(21) },
   ];
 }
 
-async function seedFacts(db: Db, workspaceId: string): Promise<void> {
-  for (const fact of demoFacts()) await createFact(db, { workspaceId, ...fact });
+async function seedFacts(db: DbOrTx, workspaceId: string): Promise<DemoFactIds> {
+  const ids = {} as DemoFactIds;
+  for (const { key, ...fact } of demoFacts()) {
+    ids[key] = (await createFact(db, { workspaceId, ...fact })).id;
+  }
+  return ids;
 }
 
-/** Minimal valid PDF literal — enough to satisfy "is a real PDF" checks. */
-const PLACEHOLDER_PDF = "%PDF-1.4\n"
-  + "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
-  + "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
-  + "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n"
-  + "trailer<</Root 1 0 R>>\n"
-  + "%%EOF";
+/**
+ * Minimal valid PDF literal — enough to satisfy "is a real PDF" checks. The
+ * label goes in a PDF comment so the two seeded variants are genuinely
+ * different files with different digests: the CV picker distinguishes them by
+ * `sha256`, and two byte-identical variants would make the "designed vs
+ * ATS-safe" choice the demo shows a label with nothing behind it.
+ */
+function placeholderPdf(label: string): string {
+  return "%PDF-1.4\n"
+    + `% ${label}\n`
+    + "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    + "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    + "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n"
+    + "trailer<</Root 1 0 R>>\n"
+    + "%%EOF";
+}
 
 /**
  * A 1×1 PNG. The submission receipt's evidence link has to resolve to a real
@@ -183,8 +251,15 @@ const PLACEHOLDER_PNG = Buffer.from(
   "base64",
 );
 
+/** The ATS-safe variant, which is the one the auto-apply attempt uploads. */
+interface SeededCv {
+  variantId: string;
+  filename: string;
+  sha256: string;
+}
+
 /** Fixed filenames, so six-hourly resets rewrite the same files instead of piling up. */
-async function seedCvVariants(db: Db, workspaceId: string, fileStorageDir: string): Promise<string> {
+async function seedCvVariants(db: DbOrTx, workspaceId: string, fileStorageDir: string): Promise<SeededCv> {
   const cvDir = path.join(fileStorageDir, "cvs");
   await mkdir(cvDir, { recursive: true });
 
@@ -193,17 +268,19 @@ async function seedCvVariants(db: Db, workspaceId: string, fileStorageDir: strin
     { label: "Alex Demo — ATS-safe", format: "ats", filename: "alex-demo-ats.pdf" },
   ];
 
-  const sha256 = createHash("sha256").update(PLACEHOLDER_PDF, "utf-8").digest("hex");
-  let atsVariantId = "";
+  let ats: SeededCv | null = null;
   for (const spec of specs) {
     const filePath = path.join(cvDir, spec.filename);
-    await writeFile(filePath, PLACEHOLDER_PDF, "utf-8");
+    const bytes = placeholderPdf(spec.label);
+    const sha256 = createHash("sha256").update(bytes, "utf-8").digest("hex");
+    await writeFile(filePath, bytes, "utf-8");
     const variant = await createCvVariant(db, {
       workspaceId, label: spec.label, format: spec.format, filePath, sha256,
     });
-    if (spec.format === "ats") atsVariantId = variant.id;
+    if (spec.format === "ats") ats = { variantId: variant.id, filename: spec.filename, sha256 };
   }
-  return atsVariantId;
+  if (!ats) throw new Error("demo seed: no ATS-safe CV variant");
+  return ats;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,24 +353,85 @@ function normalizedJobs(): Array<{ job: NormalizedJob; contentHash: string }> {
   });
 }
 
-/** Seeded, not generated: the demo deploys with no OpenRouter key. */
-const RERANK_NOTES: readonly (readonly [string, readonly string[]])[] = [
-  ["Strong match: remote-first, TypeScript and Postgres in the core stack, and the ownership level matches six years of backend work.", []],
-  ["Good match on stack and seniority. The platform remit is broader than Alex's last role, which is the stated direction of travel.", []],
-  ["Close match. Staff scope and event-driven Postgres work line up with the Northwind migration story.", ["salary band is above the target, so expect a levelling conversation"]],
-  ["Founding-engineer scope with a TypeScript stack; equity-heavy package needs weighing against the €110k base target.", ["compensation is partly equity"]],
-  ["Ledger correctness work is a good fit for the Postgres depth, though the domain is new.", []],
-  ["Solid full-stack match, but the seniority reads a step below the current role.", ["level may be junior to the target"]],
-  ["Kubernetes platform work with an event-driven core — a direct match for the dispatch experience.", []],
-  ["Reasonable match on stack; the product domain is further from anything in the fact bank.", []],
-  ["Remote-global and TypeScript-first with an explicit async-writing culture, which matches the stated preference.", []],
-  ["Developer-tools focus and a Terraform/Kubernetes platform; slightly less backend depth than the target role.", []],
+/**
+ * The recorded re-rank: seeded, not generated (the demo deploys with no
+ * OpenRouter key).
+ *
+ * Keyed by `external_id`, NOT by position. An earlier version was authored
+ * against `DEMO_JOB_SEEDS`' order but applied in the keyword ranking's order,
+ * so nine of the ten rationales described a different listing than the one they
+ * were attached to — Kingsley Logistics' €90k–€110k Platform Engineer carried
+ * "salary band is above the target", and Cobalt Freight's SENIOR Platform
+ * Engineer carried "the seniority reads a step below". Each note below states
+ * something checkable about its job's title, salary or description, and
+ * `demo-reset.test.ts` asserts exactly that.
+ */
+interface RerankNote {
+  /** `demo-0NN`, the stable external id assigned in `normalizedJobs`. */
+  externalId: string;
+  /** The re-ranked score, authored per note so the batch's order is a real ranking. */
+  score: number;
+  rationale: string;
+  redFlags: readonly string[];
+}
+
+const RERANK_NOTES: readonly RerankNote[] = [
+  {
+    externalId: "demo-001", score: 95, // Aurora Robotics — Senior Backend Engineer, €95k–€120k
+    rationale: "Strong match: remote-first, TypeScript and Postgres in the core stack, and the ownership level matches six years of backend work.",
+    redFlags: [],
+  },
+  {
+    externalId: "demo-007", score: 93, // Cobalt Freight — Senior Platform Engineer, event-driven dispatch
+    rationale: "Kubernetes platform work with an event-driven core — a direct match for the dispatch experience.",
+    redFlags: [],
+  },
+  {
+    externalId: "demo-003", score: 91, // Halcyon Data — Staff Engineer, Data Platform, €120k–€140k
+    rationale: "Close match. Staff scope and event-driven Postgres work line up with the Northwind migration story.",
+    redFlags: ["salary band is above the target, so expect a levelling conversation"],
+  },
+  {
+    externalId: "demo-002", score: 88, // Kingsley Logistics — Platform Engineer, Kubernetes/Terraform control plane
+    rationale: "Good match on stack and seniority. The platform remit is broader than Alex's last role, which is the stated direction of travel.",
+    redFlags: [],
+  },
+  {
+    externalId: "demo-009", score: 86, // Fathom Analytics Co — Remote (Global), async writing
+    rationale: "Remote-global and TypeScript-first with an explicit async-writing culture, which matches the stated preference.",
+    redFlags: [],
+  },
+  {
+    externalId: "demo-004", score: 82, // Lumen Health — Founding Engineer, €100k–€130k + equity
+    rationale: "Founding-engineer scope with a TypeScript stack; equity-heavy package needs weighing against the €110k base target.",
+    redFlags: ["compensation is partly equity"],
+  },
+  {
+    externalId: "demo-005", score: 74, // Ostrich Payments — Backend Engineer, Ledger
+    rationale: "Ledger correctness work is a good fit for the Postgres depth, though the domain is new.",
+    redFlags: [],
+  },
+  {
+    externalId: "demo-010", score: 71, // Pinewood Systems — Platform Engineer, developer tools focus
+    rationale: "Developer-tools focus and a Terraform/Kubernetes platform; slightly less backend depth than the target role.",
+    redFlags: [],
+  },
+  {
+    externalId: "demo-008", score: 68, // Meridian Studio — Backend Engineer, design collaboration product
+    rationale: "Reasonable match on stack; the product domain is further from anything in the fact bank.",
+    redFlags: [],
+  },
+  {
+    externalId: "demo-006", score: 63, // Brightline Labs — Full-Stack Engineer (no seniority prefix)
+    rationale: "Solid full-stack match, but the seniority reads a step below the current role.",
+    redFlags: ["level may be junior to the target"],
+  },
 ];
 
 /** Kingsley Logistics, Brightline Labs, Kestrel Mobility — see `seedDiscovery`. */
 const PROMOTED_EXTERNAL_IDS = ["demo-002", "demo-006", "demo-011"] as const;
 
-async function seedDiscovery(db: Db, workspaceId: string): Promise<string[]> {
+async function seedDiscovery(db: DbOrTx, workspaceId: string): Promise<string[]> {
   await saveScoringProfile(db, workspaceId, DEMO_SCORING_PROFILE);
 
   const items = normalizedJobs();
@@ -310,18 +448,18 @@ async function seedDiscovery(db: Db, workspaceId: string): Promise<string[]> {
   // is promoted out of the inbox — otherwise the promoted rows would keep a
   // score the inbox no longer explains.
   const scored = await db.select({
-    id: jobs.id, externalId: jobs.externalId, keywordScore: jobs.keywordScore,
+    id: jobs.id, externalId: jobs.externalId,
   }).from(jobs)
-    .where(and(eq(jobs.workspaceId, workspaceId), eq(jobs.status, "inbox")))
-    // `external_id` is a stable, zero-padded ordinal, so ties in the keyword
-    // score resolve the same way on every reset — the demo tells one story.
-    .orderBy(asc(jobs.externalId));
-  const top = [...scored]
-    .sort((a, b) => (b.keywordScore ?? 0) - (a.keywordScore ?? 0))
-    .slice(0, RERANK_NOTES.length);
-  await applyRerank(db, workspaceId, top.map((row, i) => {
-    const [rationale, redFlags] = RERANK_NOTES[i]!;
-    return { jobId: row.id, score: 96 - i * 4, rationale, redFlags: [...redFlags] };
+    .where(and(eq(jobs.workspaceId, workspaceId), eq(jobs.status, "inbox")));
+  const byExternalId = new Map(scored.map((row) => [row.externalId, row.id]));
+  // Each note names the listing it was written about, so the batch is exactly
+  // the set of listings that have a rationale — never "whatever the keyword
+  // ranking put in the top ten", which is a different ordering and attached
+  // every rationale to the wrong job.
+  await applyRerank(db, workspaceId, RERANK_NOTES.map((note) => {
+    const jobId = byExternalId.get(note.externalId);
+    if (!jobId) throw new Error(`demo seed: no discovery job ${note.externalId} to re-rank`);
+    return { jobId, score: note.score, rationale: note.rationale, redFlags: [...note.redFlags] };
   }));
 
   // These three listings become applications, so the demo shows the discovery →
@@ -330,9 +468,9 @@ async function seedDiscovery(db: Db, workspaceId: string): Promise<string[]> {
   // company here appears in `seedApplications` — a listing sitting in the inbox
   // while an application for the same role exists reads as a bug on camera.
   return PROMOTED_EXTERNAL_IDS.map((externalId) => {
-    const row = scored.find((job) => job.externalId === externalId);
-    if (!row) throw new Error(`demo seed: no discovery job ${externalId} to promote`);
-    return row.id;
+    const jobId = byExternalId.get(externalId);
+    if (!jobId) throw new Error(`demo seed: no discovery job ${externalId} to promote`);
+    return jobId;
   });
 }
 
@@ -352,7 +490,7 @@ interface SeededApplications {
 }
 
 async function seedApplications(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
   promotableJobIds: string[],
 ): Promise<SeededApplications> {
@@ -479,34 +617,61 @@ My CV is attached. I am happy to walk through any of the above.
 
 Alex Demo`;
 
+const DRAFT_COVER_LETTER_MD = `Dear Silvermark Labs team,
+
+Six years of backend engineering in TypeScript and Node, most of it on
+PostgreSQL, and two years leading a team of five at Vertex Logistics. That is
+the short version of why the Staff Engineer, Data Platform role reads as the
+next step rather than a sideways one.
+
+Alex Demo`;
+
 /**
  * Documents and reusable answers carry `sourceFactIds` because the UI renders a
  * provenance chip per source fact — an approved document with no sources would
  * render as ungrounded, which is exactly what the fact bank exists to prevent.
+ *
+ * Which facts is load-bearing, not decorative. Every id below is the fact the
+ * neighbouring sentence actually restates: an earlier version took
+ * `factIds.slice(0, 4)` — name, name, email, phone — so a cover letter about a
+ * strangler-fig migration rendered chips reading "Preferred name: Alex". The
+ * demo exists to show grounded citation; citing the wrong fact demonstrates the
+ * opposite. `demo-reset.test.ts` asserts each artifact's sources against the
+ * claims its own text contains.
  */
 async function seedMaterials(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
   apps: SeededApplications,
-  factIds: string[],
+  facts: DemoFactIds,
 ): Promise<void> {
-  const sources = factIds.slice(0, 4);
-
+  // "six years of backend engineering in TypeScript and Node on PostgreSQL,
+  // including two years leading a team of five at Vertex Logistics … the
+  // streaming-ingest work I did at Northwind Robotics".
   const emailBody = await createDocument(db, {
     applicationId: apps.readyForReview, kind: "email_body", contentMd: EMAIL_BODY_MD,
-    sourceFactIds: sources, model: "seeded/demo", origin: "ai",
+    sourceFactIds: [facts.northwind, facts.vertexLead, facts.typescript, facts.postgres],
+    model: "seeded/demo", origin: "ai",
   });
   await setDocumentApproval(db, workspaceId, emailBody.id, "approved");
   // A second, still-unapproved draft so the materials panel shows both states.
   await createDocument(db, {
-    applicationId: apps.readyForReview, kind: "cover_letter",
-    contentMd: "A shorter cover letter, still in draft — approve or reject it from the materials panel.",
-    sourceFactIds: sources.slice(0, 2), model: "seeded/demo", origin: "ai",
+    applicationId: apps.readyForReview, kind: "cover_letter", contentMd: DRAFT_COVER_LETTER_MD,
+    sourceFactIds: [facts.northwind, facts.vertexLead, facts.typescript, facts.postgres],
+    model: "seeded/demo", origin: "ai",
   });
 
+  // "six years building backend systems in TypeScript and Node … Northwind
+  // Robotics' order-routing service … on PostgreSQL … a strangler-fig move …
+  // I am remote-first in a European time zone and can start four weeks after
+  // signing."
   const coverLetter = await createDocument(db, {
     applicationId: apps.siteSubmission, kind: "cover_letter", contentMd: COVER_LETTER_MD,
-    sourceFactIds: sources, model: "seeded/demo", origin: "ai",
+    sourceFactIds: [
+      facts.northwind, facts.migration, facts.typescript, facts.postgres,
+      facts.remotePreference, facts.availability,
+    ],
+    model: "seeded/demo", origin: "ai",
   });
   await setDocumentApproval(db, workspaceId, coverLetter.id, "approved");
 
@@ -514,30 +679,39 @@ async function seedMaterials(
   await transition(db, apps.readyForReview, "READY_FOR_REVIEW", "user", { hasMaterials: true });
 }
 
-async function seedAnswers(db: Db, workspaceId: string, apps: SeededApplications, factIds: string[]): Promise<void> {
+async function seedAnswers(
+  db: DbOrTx,
+  workspaceId: string,
+  apps: SeededApplications,
+  facts: DemoFactIds,
+): Promise<void> {
   const reusable = [
     {
       questionRaw: "Why do you want to work here?",
       answer: "I want to build the second version of a system rather than maintain the first. "
         + "Your posting describes greenfield TypeScript with PostgreSQL as the record of truth, "
         + "which is the shape of system I spent nine months migrating towards at Northwind Robotics.",
+      // The nine-month migration, the stack it was built on, and where it happened.
+      sourceFactIds: [facts.migration, facts.northwind, facts.typescript, facts.postgres],
+      origin: "ai" as const,
+      confidence: 0.82,
+      sensitivity: "normal" as const,
     },
     {
       questionRaw: "Do you require visa sponsorship?",
       answer: "No — I hold EU citizenship and require no sponsorship.",
+      // Word for word the `authorization` fact, and the reason this answer is
+      // marked sensitive. Citing anything else here was the review's headline
+      // example of a provenance chip that undermines its own claim.
+      sourceFactIds: [facts.workAuthorization],
+      origin: "deterministic" as const,
+      confidence: 1,
+      sensitivity: "sensitive" as const,
     },
   ];
 
-  for (const [index, spec] of reusable.entries()) {
-    const answer = await createAnswer(db, {
-      applicationId: apps.siteSubmission,
-      questionRaw: spec.questionRaw,
-      answer: spec.answer,
-      origin: index === 1 ? "deterministic" : "ai",
-      sourceFactIds: factIds.slice(index, index + 2),
-      confidence: index === 1 ? 1 : 0.82,
-      sensitivity: index === 1 ? "sensitive" : "normal",
-    });
+  for (const spec of reusable) {
+    const answer = await createAnswer(db, { applicationId: apps.siteSubmission, ...spec });
     await approveAnswer(db, workspaceId, answer.id, { reusable: true });
   }
 
@@ -548,7 +722,9 @@ async function seedAnswers(db: Db, workspaceId: string, apps: SeededApplications
     answer: "The order-routing service at Northwind Robotics: event-driven, PostgreSQL of record, "
       + "roughly two million events a day. I owned it from design through to on-call.",
     origin: "ai",
-    sourceFactIds: factIds.slice(0, 2),
+    // The order-routing service is the `northwind` fact's detail, down to the
+    // ~2M events a day; "PostgreSQL of record" is the Postgres skill.
+    sourceFactIds: [facts.northwind, facts.postgres],
     confidence: 0.74,
   });
 }
@@ -557,7 +733,8 @@ async function seedAnswers(db: Db, workspaceId: string, apps: SeededApplications
 // Mailbox (Mailpit only)
 // ---------------------------------------------------------------------------
 
-const DEMO_MAILBOX_PASSWORD = "mailpit-has-no-auth";
+/** Exported so the seal test can assert the ciphertext against the real plaintext. */
+export const DEMO_MAILBOX_PASSWORD = "mailpit-has-no-auth";
 
 /**
  * A send-only connection pointing at Mailpit, the only SMTP host a sandbox
@@ -568,7 +745,7 @@ const DEMO_MAILBOX_PASSWORD = "mailpit-has-no-auth";
  * sync job uses, so the inbox panel is explorable regardless.
  */
 async function seedMailbox(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
   apps: SeededApplications,
   smtpHost: string,
@@ -690,15 +867,24 @@ function demoCanonicalForm(url: string): CanonicalForm {
   };
 }
 
-function demoPlannedAnswers(cvVariantId: string): PlannedAnswer[] {
+/**
+ * The form plan behind the auto-apply receipt. Every `fact`- and
+ * `saved_answer`-sourced field names the fact it was filled from: the form
+ * snapshot's evidence panel renders those ids, and a field claiming to be
+ * "answered from an approved fact" with an empty source list says the opposite
+ * of what it means to.
+ */
+function demoPlannedAnswers(cvVariantId: string, facts: DemoFactIds): PlannedAnswer[] {
   return [
-    { fieldId: "f-name", value: "Alex Demo", source: "fact", sourceFactIds: [], confidence: 0.98, needsUser: false, differsFromApproved: false, note: "" },
-    { fieldId: "f-email", value: "alex.demo@example.com", source: "fact", sourceFactIds: [], confidence: 0.98, needsUser: false, differsFromApproved: false, note: "" },
-    { fieldId: "f-phone", value: "+1-555-0100", source: "fact", sourceFactIds: [], confidence: 0.95, needsUser: false, differsFromApproved: false, note: "" },
+    { fieldId: "f-name", value: "Alex Demo", source: "fact", sourceFactIds: [facts.legalName], confidence: 0.98, needsUser: false, differsFromApproved: false, note: "" },
+    { fieldId: "f-email", value: "alex.demo@example.com", source: "fact", sourceFactIds: [facts.email], confidence: 0.98, needsUser: false, differsFromApproved: false, note: "" },
+    { fieldId: "f-phone", value: "+1-555-0100", source: "fact", sourceFactIds: [facts.phone], confidence: 0.95, needsUser: false, differsFromApproved: false, note: "" },
+    // Document-sourced fields cite the document, not a fact: the approved
+    // cover letter carries its own provenance.
     { fieldId: "f-cv", value: cvVariantId, source: "document", sourceFactIds: [], confidence: 1, needsUser: false, differsFromApproved: false, note: "ATS-safe variant" },
     { fieldId: "f-cover", value: COVER_LETTER_MD, source: "document", sourceFactIds: [], confidence: 1, needsUser: false, differsFromApproved: false, note: "approved cover letter" },
-    { fieldId: "f-auth", value: "no", source: "saved_answer", sourceFactIds: [], confidence: 1, needsUser: false, differsFromApproved: false, note: "sensitive: answered from an approved fact" },
-    { fieldId: "f-why", value: "I want to build the second version of a system rather than maintain the first.", source: "saved_answer", sourceFactIds: [], confidence: 0.82, needsUser: false, differsFromApproved: false, note: "" },
+    { fieldId: "f-auth", value: "no", source: "saved_answer", sourceFactIds: [facts.workAuthorization], confidence: 1, needsUser: false, differsFromApproved: false, note: "sensitive: answered from an approved fact" },
+    { fieldId: "f-why", value: "I want to build the second version of a system rather than maintain the first.", source: "saved_answer", sourceFactIds: [facts.migration, facts.northwind], confidence: 0.82, needsUser: false, differsFromApproved: false, note: "" },
   ];
 }
 
@@ -709,9 +895,10 @@ function demoPlannedAnswers(cvVariantId: string): PlannedAnswer[] {
  * evidence panel shows a real attempt history rather than a fabricated row.
  */
 async function seedSiteAttempt(
-  db: Db,
+  db: DbOrTx,
   apps: SeededApplications,
-  cvVariantId: string,
+  cv: SeededCv,
+  facts: DemoFactIds,
   demoAtsUrl: string,
   fileStorageDir: string,
 ): Promise<void> {
@@ -721,7 +908,7 @@ async function seedSiteAttempt(
   const url = `${demoAtsUrl}/apply/founding-engineer`;
   const host = new URL(url).hostname;
   const form = demoCanonicalForm(url);
-  const answers = demoPlannedAnswers(cvVariantId);
+  const answers = demoPlannedAnswers(cv.variantId, facts);
 
   const attempt = await createSiteAttempt(db, { applicationId: apps.siteSubmission, url });
   await saveFormSnapshot(db, { attemptId: attempt.id, form, answers });
@@ -734,7 +921,7 @@ async function seedSiteAttempt(
     parserVersion: form.parserVersion,
     formHash: payloadFingerprint(form.fields.map((f) => f.id)),
     answers: answers.map((a) => ({ fieldId: a.fieldId, value: a.value, source: a.source })),
-    attachments: [{ fieldId: "f-cv", filename: "alex-demo-ats.pdf", sha256: createHash("sha256").update(PLACEHOLDER_PDF).digest("hex") }],
+    attachments: [{ fieldId: "f-cv", filename: cv.filename, sha256: cv.sha256 }],
   };
   const fingerprint = payloadFingerprint(payload);
 
@@ -755,7 +942,11 @@ async function seedSiteAttempt(
   const begun = await beginSubmission(db, {
     attemptId: attempt.id,
     confirmationId: confirmation.id,
-    pendingReceipt: { channel: "company_site", payload, fingerprint, startedAt: daysAgo(4).toISOString() },
+    // Minutes, not days. `completeSubmission` transitions the application to
+    // SUBMITTED through the real guard, which stamps `submitted_at = now()` —
+    // a receipt claiming the ATS accepted this four days before the
+    // application says it was sent contradicts itself on the same screen.
+    pendingReceipt: { channel: "company_site", payload, fingerprint, startedAt: minutesAgo(3).toISOString() },
   });
   if (!begun.ok) throw new Error(`demo seed: beginSubmission refused: ${begun.reason}`);
 
@@ -774,7 +965,7 @@ async function seedSiteAttempt(
       screenshotPath,
       pageTextExcerpt: "Application received. Your reference is DEMO-ATS-4821. "
         + "We will be in touch within ten working days.",
-      acceptedAt: daysAgo(4).toISOString(),
+      acceptedAt: minutesAgo(2).toISOString(),
       fingerprint,
       host,
       url,
@@ -790,6 +981,23 @@ async function seedSiteAttempt(
  * Rebuilds the demo workspace from scratch. Safe to run repeatedly: the delete
  * is scoped to `kind = "sandbox" AND name = DEMO_WORKSPACE_NAME` and cascades,
  * so every run leaves exactly one demo workspace and nothing else is touched.
+ *
+ * The whole rebuild is ONE transaction, and it takes {@link DEMO_SEED_LOCK_KEY}
+ * before it touches a row. Both halves are load-bearing:
+ *
+ *   - Without the transaction, the demo workspace does not exist for the ~half
+ *     second between the delete and the insert. `getActiveWorkspace` bootstraps
+ *     a demo workspace when it finds none, so a single visitor request in that
+ *     window creates a SECOND `sandbox`/`CareerHQ Demo` row — measured at 12
+ *     resets out of 12. If the visitor's row wins the `asc(createdAt)`
+ *     tie-break, the app serves an empty demo until the next reset, up to six
+ *     hours later. The same window also served ~150 reads of a half-built
+ *     workspace. Inside a transaction the old row stays visible until the new
+ *     one commits, so there is no window and nothing to bootstrap; a mid-seed
+ *     failure rolls back rather than leaving a partial demo.
+ *   - Without the lock, two overlapping seeds still interleave: the delete
+ *     predicate is database-global, so each run's cascade removes rows the
+ *     other is mid-transition on.
  */
 export async function seedDemoWorkspace(
   db: Db,
@@ -799,30 +1007,30 @@ export async function seedDemoWorkspace(
   const demoAtsUrl = opts.demoAtsUrl?.trim().replace(/\/+$/, "") || DEFAULT_DEMO_ATS_URL;
   const masterKeyB64 = opts.masterKeyB64?.trim() || null;
 
-  // `delete`, not `delete where id = <the one we found>`: if a previous run
-  // ever left two rows matching the predicate, resolution would be ambiguous —
-  // clearing all of them and inserting one is the only self-healing shape.
-  await db.delete(workspaces)
-    .where(and(eq(workspaces.kind, "sandbox"), eq(workspaces.name, DEMO_WORKSPACE_NAME)));
-  const [workspace] = await db.insert(workspaces)
-    .values({ name: DEMO_WORKSPACE_NAME, kind: "sandbox" }).returning();
-  if (!workspace) throw new Error("demo seed: failed to create the demo workspace");
-  const workspaceId = workspace.id;
+  const workspaceId = await db.transaction(async (tx) => {
+    await lockDemoSeed(tx);
 
-  await seedFacts(db, workspaceId);
-  const cvVariantId = await seedCvVariants(db, workspaceId, opts.fileStorageDir);
-  const promotableJobIds = await seedDiscovery(db, workspaceId);
-  const apps = await seedApplications(db, workspaceId, promotableJobIds);
+    // `delete`, not `delete where id = <the one we found>`: if a previous run
+    // ever left two rows matching the predicate, resolution would be ambiguous —
+    // clearing all of them and inserting one is the only self-healing shape.
+    await tx.delete(workspaces)
+      .where(and(eq(workspaces.kind, "sandbox"), eq(workspaces.name, DEMO_WORKSPACE_NAME)));
+    const [workspace] = await tx.insert(workspaces)
+      .values({ name: DEMO_WORKSPACE_NAME, kind: "sandbox" }).returning();
+    if (!workspace) throw new Error("demo seed: failed to create the demo workspace");
 
-  const factRows = await db.select({ id: candidateFacts.id }).from(candidateFacts)
-    .where(eq(candidateFacts.workspaceId, workspaceId))
-    .orderBy(asc(candidateFacts.createdAt));
-  const factIds = factRows.map((row) => row.id);
+    const facts = await seedFacts(tx, workspace.id);
+    const cv = await seedCvVariants(tx, workspace.id, opts.fileStorageDir);
+    const promotableJobIds = await seedDiscovery(tx, workspace.id);
+    const apps = await seedApplications(tx, workspace.id, promotableJobIds);
 
-  await seedMaterials(db, workspaceId, apps, factIds);
-  await seedAnswers(db, workspaceId, apps, factIds);
-  await seedSiteAttempt(db, apps, cvVariantId, demoAtsUrl, opts.fileStorageDir);
-  if (masterKeyB64) await seedMailbox(db, workspaceId, apps, smtpHost, masterKeyB64);
+    await seedMaterials(tx, workspace.id, apps, facts);
+    await seedAnswers(tx, workspace.id, apps, facts);
+    await seedSiteAttempt(tx, apps, cv, facts, demoAtsUrl, opts.fileStorageDir);
+    if (masterKeyB64) await seedMailbox(tx, workspace.id, apps, smtpHost, masterKeyB64);
+
+    return workspace.id;
+  });
 
   return { workspaceId };
 }

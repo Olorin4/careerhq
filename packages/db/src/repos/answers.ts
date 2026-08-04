@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { normalizeQuestion } from "@careerhq/core";
 import type { AnswerOrigin, Sensitivity } from "@careerhq/contracts";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import { applicationAnswers, applications } from "../schema/index.js";
 import type { ApplicationAnswer } from "../index.js";
 
@@ -15,7 +15,7 @@ export interface CreateAnswerInput {
   sensitivity?: Sensitivity;
 }
 
-export async function createAnswer(db: Db, input: CreateAnswerInput): Promise<ApplicationAnswer> {
+export async function createAnswer(db: DbOrTx, input: CreateAnswerInput): Promise<ApplicationAnswer> {
   const [answer] = await db.insert(applicationAnswers).values({
     applicationId: input.applicationId,
     questionRaw: input.questionRaw,
@@ -42,7 +42,7 @@ function addMonths(date: Date, months: number): Date {
  * approved by the workspace that owns its application.
  */
 export async function approveAnswer(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
   id: string,
   opts: { reusable: boolean; reviewBy?: Date },
@@ -50,7 +50,7 @@ export async function approveAnswer(
   const reviewBy = opts.reviewBy ?? (opts.reusable ? addMonths(new Date(), 12) : null);
   const [updated] = await db.update(applicationAnswers).set({
     approval: "approved",
-    approvedAt: sql`now()`,
+    approvedAt: sql`clock_timestamp()`,
     reusable: opts.reusable,
     reviewBy,
   }).where(and(

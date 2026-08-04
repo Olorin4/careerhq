@@ -1,7 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import type { ApplicationState, TransitionTrigger } from "@careerhq/contracts";
 import { canTransition, computeNextAction, type TransitionContext } from "@careerhq/core";
-import type { Db, Tx } from "../client.js";
+import type { Db, DbOrTx, Tx } from "../client.js";
 import {
   applicationAttempts, applicationEvents, applications, jobs,
 } from "../schema/index.js";
@@ -14,7 +14,7 @@ export interface CreateApplicationInput {
   asExternalSubmitted?: boolean; submittedAt?: Date;
 }
 
-export async function createApplication(db: Db, input: CreateApplicationInput): Promise<Application> {
+export async function createApplication(db: DbOrTx, input: CreateApplicationInput): Promise<Application> {
   return db.transaction(async (tx) => {
     // Companies are UNIQUE(workspace_id, name) since migration 0001 and discovery
     // ingest fills that table en masse, so a bare insert here would 23505 the
@@ -57,7 +57,7 @@ export interface TransitionArgs {
   ctx?: TransitionContext; actor?: string; followUpDays?: number;
 }
 
-export async function transitionApplication(db: Db, args: TransitionArgs): Promise<TransitionOutcome> {
+export async function transitionApplication(db: DbOrTx, args: TransitionArgs): Promise<TransitionOutcome> {
   return db.transaction((tx) => transitionApplicationTx(tx, args));
 }
 
@@ -86,7 +86,7 @@ export async function transitionApplicationTx(tx: Tx, args: TransitionArgs): Pro
   const [updated] = await tx.update(applications).set({
     state: args.to, submittedAt,
     nextAction: next?.label ?? null, nextActionDue: next?.due ?? null,
-    updatedAt: sql`now()`,
+    updatedAt: sql`clock_timestamp()`,
   }).where(eq(applications.id, current.id)).returning();
   return { ok: true, application: updated! };
 }
@@ -109,7 +109,7 @@ export async function setApplicationCvVariant(
   cvVariantId: string | null,
 ): Promise<Application | null> {
   const [updated] = await db.update(applications)
-    .set({ cvVariantId, updatedAt: sql`now()` })
+    .set({ cvVariantId, updatedAt: sql`clock_timestamp()` })
     .where(eq(applications.id, applicationId))
     .returning();
   return updated ?? null;

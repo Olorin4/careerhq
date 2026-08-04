@@ -1,10 +1,10 @@
 import { asc, eq } from "drizzle-orm";
 import type { CvFormat } from "@careerhq/contracts";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import { cvVariants } from "../schema/index.js";
 import type { CvVariant } from "../index.js";
 
-export async function createCvVariant(db: Db, input: {
+export async function createCvVariant(db: DbOrTx, input: {
   workspaceId: string; label: string; format: CvFormat; filePath: string; sha256: string;
 }): Promise<CvVariant> {
   const [variant] = await db.insert(cvVariants).values({

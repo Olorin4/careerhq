@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { AttemptStatus } from "@careerhq/contracts";
 import { canAttemptTransition } from "@careerhq/core";
 import { payloadFingerprint } from "@careerhq/core/gates";
-import type { Db, Tx } from "../client.js";
+import type { Db, DbOrTx, Tx } from "../client.js";
 import { applicationAttempts, attemptConfirmations } from "../schema/index.js";
 import type { ApplicationAttempt, AttemptConfirmation, NewApplicationAttempt } from "../index.js";
 import { transitionApplicationTx } from "./applications.js";
@@ -91,7 +91,7 @@ export interface SiteAttemptDraft {
   url: string;
 }
 
-export async function createSiteAttempt(db: Db, input: {
+export async function createSiteAttempt(db: DbOrTx, input: {
   applicationId: string; url: string;
 }): Promise<ApplicationAttempt> {
   const draftPayload: SiteAttemptDraft = { url: input.url };
@@ -168,7 +168,7 @@ export async function markAttemptBlocked(
  * confirmation dialog still holding the previous token cannot redeem it. At
  * most one confirmation for an attempt is ever redeemable.
  */
-export async function recordPreview(db: Db, input: {
+export async function recordPreview(db: DbOrTx, input: {
   attemptId: string; payloadFingerprint: string; target: string; tokenHash: string; expiresAt: Date;
 }): Promise<AttemptOutcome> {
   return refusable(() => db.transaction(async (tx) => {
@@ -181,7 +181,7 @@ export async function recordPreview(db: Db, input: {
     });
 
     await tx.update(attemptConfirmations)
-      .set({ consumedAt: sql`now()` })
+      .set({ consumedAt: sql`clock_timestamp()` })
       .where(and(
         eq(attemptConfirmations.attemptId, attempt.id),
         isNull(attemptConfirmations.consumedAt),
@@ -221,7 +221,7 @@ export async function getLatestConfirmation(
 
 /** The newest confirmation for the attempt that is neither consumed nor expired. */
 export async function getActiveConfirmation(
-  db: Db,
+  db: DbOrTx,
   attemptId: string,
 ): Promise<AttemptConfirmation | null> {
   const [row] = await db.select().from(attemptConfirmations)
@@ -246,7 +246,7 @@ export async function getActiveConfirmation(
  * so two concurrent callers cannot both win the token even if they read it at
  * the same instant.
  */
-export async function beginSubmission(db: Db, input: {
+export async function beginSubmission(db: DbOrTx, input: {
   attemptId: string; confirmationId: string; pendingReceipt: unknown;
 }): Promise<AttemptOutcome> {
   return refusable(() => db.transaction(async (tx) => {
@@ -270,7 +270,7 @@ export async function beginSubmission(db: Db, input: {
     }
 
     const consumed = await tx.update(attemptConfirmations)
-      .set({ consumedAt: sql`now()` })
+      .set({ consumedAt: sql`clock_timestamp()` })
       .where(and(
         eq(attemptConfirmations.id, confirmation.id),
         isNull(attemptConfirmations.consumedAt),
@@ -296,7 +296,7 @@ export async function beginSubmission(db: Db, input: {
  * attempt SUBMITTING — in flight, blocking, and visible to a human via
  * `markNeedsReconcile`/`resolveReconcile`.
  */
-export async function completeSubmission(db: Db, input: {
+export async function completeSubmission(db: DbOrTx, input: {
   attemptId: string; confirmedReceipt: unknown;
 }): Promise<AttemptOutcome> {
   return refusable(() => db.transaction(async (tx) => {

@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { AnswerOrigin, ApprovalState, DocumentKind } from "@careerhq/contracts";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import { applications, generatedDocuments } from "../schema/index.js";
 import type { GeneratedDocument } from "../index.js";
 
@@ -13,7 +13,7 @@ export interface CreateDocumentInput {
   origin?: AnswerOrigin; // default "ai"
 }
 
-export async function createDocument(db: Db, input: CreateDocumentInput): Promise<GeneratedDocument> {
+export async function createDocument(db: DbOrTx, input: CreateDocumentInput): Promise<GeneratedDocument> {
   const [doc] = await db.insert(generatedDocuments).values({
     applicationId: input.applicationId,
     kind: input.kind,
@@ -32,14 +32,14 @@ export async function createDocument(db: Db, input: CreateDocumentInput): Promis
  * approved/rejected by the workspace that owns its application.
  */
 export async function setDocumentApproval(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
   id: string,
   approval: ApprovalState,
 ): Promise<GeneratedDocument | null> {
   const [updated] = await db.update(generatedDocuments).set({
     approval,
-    approvedAt: approval === "approved" ? sql`now()` : null,
+    approvedAt: approval === "approved" ? sql`clock_timestamp()` : null,
   }).where(and(
     eq(generatedDocuments.id, id),
     inArray(

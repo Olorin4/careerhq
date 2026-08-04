@@ -192,6 +192,8 @@ Design notes:
 
 - Session middleware resolves the active workspace; the demo deployment pins it to the sandbox workspace and disables login.
 - `docker-compose.demo.yml` sets `SANDBOX_FORCE_SAFE=true`, points SMTP at Mailpit, sets the auto-apply origin allowlist to the `demo-ats` service, runs `ai` in replay mode, and schedules `demo-reset` (truncate sandbox workspace + reseed) every 6 hours.
+- `demo-reset` is registered only when `DEMO_MODE=true`, and the worker `unschedule`s it when demo mode is off — a schedule row outlives the process that created it, so a one-off demo run must not leave the job firing forever. The worker also runs one reset at boot: pg-boss does not fire a schedule on registration, so without it a freshly deployed demo box is empty until the next cron boundary.
+- The reset is a single transaction holding `pg_advisory_xact_lock(DEMO_SEED_LOCK_KEY)`. The demo workspace is a database-global singleton (`kind = 'sandbox' AND name = 'CareerHQ Demo'`) that `getActiveWorkspace` **bootstraps when missing**, so an un-transactional delete-then-rebuild let a single visitor request create a rival demo workspace, and two overlapping resets deleted rows each other was mid-write on.
 - The sandbox block is evaluated inside `evaluateSubmissionGates` (`packages/core/src/gates`), the single gate matrix both `apps/web/src/lib/email-submission.ts` and `apps/web/src/lib/site-submission.ts` call before their one mutation — a UI or route-handler bug cannot bypass it.
 - Demo mutations are rate-limited; credential setup is disabled for sandbox workspaces.
 

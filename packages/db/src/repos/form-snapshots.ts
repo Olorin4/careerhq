@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import { applicationAttempts, applications, formSnapshots } from "../schema/index.js";
 import type { FormSnapshot } from "../index.js";
 
@@ -11,7 +11,7 @@ import type { FormSnapshot } from "../index.js";
  * by `captured_at`, so a re-parse after a crash/retry leaves the earlier
  * snapshot as history rather than clobbering it.
  */
-export async function saveFormSnapshot(db: Db, input: {
+export async function saveFormSnapshot(db: DbOrTx, input: {
   attemptId: string; form: CanonicalForm; answers: PlannedAnswer[];
 }): Promise<FormSnapshot> {
   const [snapshot] = await db.insert(formSnapshots).values({

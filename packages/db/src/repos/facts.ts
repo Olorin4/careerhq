@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { FactCategory, Sensitivity } from "@careerhq/contracts";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import { candidateFacts } from "../schema/index.js";
 import type { CandidateFact } from "../index.js";
 
@@ -10,7 +10,7 @@ export interface FactInput {
   reviewBy: Date;
 }
 
-export async function createFact(db: Db, input: FactInput): Promise<CandidateFact> {
+export async function createFact(db: DbOrTx, input: FactInput): Promise<CandidateFact> {
   const [fact] = await db.insert(candidateFacts).values({
     workspaceId: input.workspaceId,
     category: input.category,
@@ -41,7 +41,7 @@ export async function updateFact(
 }
 
 export async function archiveFact(db: Db, workspaceId: string, id: string): Promise<void> {
-  await db.update(candidateFacts).set({ archivedAt: sql`now()` })
+  await db.update(candidateFacts).set({ archivedAt: sql`clock_timestamp()` })
     .where(and(eq(candidateFacts.id, id), eq(candidateFacts.workspaceId, workspaceId)));
 }
 
@@ -52,7 +52,7 @@ export async function reverifyFact(
   reviewBy: Date,
 ): Promise<CandidateFact | null> {
   const [updated] = await db.update(candidateFacts).set({
-    verifiedAt: sql`now()`,
+    verifiedAt: sql`clock_timestamp()`,
     reviewBy,
   }).where(and(eq(candidateFacts.id, id), eq(candidateFacts.workspaceId, workspaceId))).returning();
   return updated ?? null;

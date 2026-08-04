@@ -43,6 +43,13 @@
       "when": 1785795470304,
       "tag": "0005_old_the_enforcers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785867141012,
+      "tag": "0006_clock_timestamp_defaults",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,7 @@ import {
   type ApplicationState, type AtsType, type NormalizedJob, type RerankResult, type ScoringProfile,
 } from "@careerhq/contracts";
 import { computeNextAction, scoreJob } from "@careerhq/core";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import {
   applicationEvents, applications, companies, ingestRuns, jobs, scoringProfiles, watchlistCompanies,
 } from "../schema/index.js";
@@ -21,7 +21,7 @@ const DEFAULT_INGEST_RUNS_LIMIT = 20;
 export interface UpsertResult { inserted: number; updated: number; duplicates: number }
 
 export async function upsertNormalizedJobs(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
   items: Array<{ job: NormalizedJob; contentHash: string }>,
 ): Promise<UpsertResult> {
@@ -54,7 +54,7 @@ export async function upsertNormalizedJobs(
           salaryRaw: job.salaryRaw,
           postedAt: job.postedAt,
           contentHash,
-          lastSeenAt: sql`now()`,
+          lastSeenAt: sql`clock_timestamp()`,
           expiredAt: null,
         }).where(eq(jobs.id, existing.id));
         updated += 1;
@@ -95,7 +95,7 @@ export async function upsertNormalizedJobs(
   });
 }
 
-export async function scoreInboxJobs(db: Db, workspaceId: string, profile: ScoringProfile): Promise<number> {
+export async function scoreInboxJobs(db: DbOrTx, workspaceId: string, profile: ScoringProfile): Promise<number> {
   const rows = await db.select().from(jobs).where(and(
     eq(jobs.workspaceId, workspaceId),
     eq(jobs.status, "inbox"),
@@ -116,7 +116,7 @@ export async function scoreInboxJobs(db: Db, workspaceId: string, profile: Scori
 
 export async function markExpiredJobs(db: Db, workspaceId: string, olderThanDays = EXPIRY_DAYS): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanDays * 86_400_000);
-  const updated = await db.update(jobs).set({ expiredAt: sql`now()` })
+  const updated = await db.update(jobs).set({ expiredAt: sql`clock_timestamp()` })
     .where(and(
       eq(jobs.workspaceId, workspaceId),
       isNull(jobs.expiredAt),
@@ -126,7 +126,7 @@ export async function markExpiredJobs(db: Db, workspaceId: string, olderThanDays
   return updated.length;
 }
 
-export async function recordIngestRun(db: Db, run: NewIngestRun & { finishedAt: Date }): Promise<void> {
+export async function recordIngestRun(db: DbOrTx, run: NewIngestRun & { finishedAt: Date }): Promise<void> {
   await db.insert(ingestRuns).values(run);
 }
 
@@ -173,7 +173,7 @@ export async function countInboxDuplicates(db: Db, workspaceId: string): Promise
 }
 
 export async function applyRerank(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
   results: RerankResult["results"],
 ): Promise<number> {
@@ -213,11 +213,11 @@ export async function getScoringProfile(db: Db, workspaceId: string): Promise<Sc
   return parsed.success ? parsed.data : DEFAULT_SCORING_PROFILE;
 }
 
-export async function saveScoringProfile(db: Db, workspaceId: string, profile: ScoringProfile): Promise<void> {
+export async function saveScoringProfile(db: DbOrTx, workspaceId: string, profile: ScoringProfile): Promise<void> {
   await db.insert(scoringProfiles).values({ workspaceId, profile })
     .onConflictDoUpdate({
       target: scoringProfiles.workspaceId,
-      set: { profile, updatedAt: sql`now()` },
+      set: { profile, updatedAt: sql`clock_timestamp()` },
     });
 }
 
@@ -249,7 +249,7 @@ export type PromoteJobOutcome = { ok: true; applicationId: string } | { ok: fals
  * not in the inbox, or already has an application (covers "already promoted"
  * and any other terminal/duplicate state) to keep promotion idempotent.
  */
-export async function promoteJob(db: Db, workspaceId: string, jobId: string): Promise<PromoteJobOutcome> {
+export async function promoteJob(db: DbOrTx, workspaceId: string, jobId: string): Promise<PromoteJobOutcome> {
   return db.transaction(async (tx) => {
     const [job] = await tx.select().from(jobs)
       .where(and(eq(jobs.id, jobId), eq(jobs.workspaceId, workspaceId)))

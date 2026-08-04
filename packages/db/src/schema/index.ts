@@ -37,7 +37,7 @@ export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   kind: workspaceKind("kind").notNull().default("personal"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 });
 
 export const companies = pgTable("companies", {
@@ -62,8 +62,8 @@ export const jobs = pgTable("jobs", {
   salaryRaw: text("salary_raw"),
   postedAt: timestamp("posted_at", { withTimezone: true }),
   contentHash: text("content_hash"),
-  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
-  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
   expiredAt: timestamp("expired_at", { withTimezone: true }),
   keywordScore: real("keyword_score"),
   keywordBreakdown: jsonb("keyword_breakdown"),
@@ -87,8 +87,8 @@ export const applications = pgTable("applications", {
   nextAction: text("next_action"),
   nextActionDue: timestamp("next_action_due", { withTimezone: true }),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 }, (t) => [index("applications_workspace_state").on(t.workspaceId, t.state)]);
 
 export const applicationEvents = pgTable("application_events", {
@@ -99,7 +99,7 @@ export const applicationEvents = pgTable("application_events", {
   trigger: transitionTrigger("trigger").notNull(),
   actor: text("actor").notNull().default("owner"),
   payload: jsonb("payload"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 }, (t) => [index("application_events_application").on(t.applicationId, t.createdAt)]);
 
 export const applicationAttempts = pgTable("application_attempts", {
@@ -114,7 +114,7 @@ export const applicationAttempts = pgTable("application_attempts", {
   pendingReceipt: jsonb("pending_receipt"),
   confirmedReceipt: jsonb("confirmed_receipt"),
   failureReason: text("failure_reason"),
-  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
 }, (t) => [
   uniqueIndex("attempts_one_submitted_per_application")
@@ -130,10 +130,10 @@ export const candidateFacts = pgTable("candidate_facts", {
   detail: text("detail"),
   evidenceUrl: text("evidence_url"),
   sensitivity: sensitivity("sensitivity").notNull().default("normal"),
-  verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull().defaultNow(),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
   reviewBy: timestamp("review_by", { withTimezone: true }).notNull(),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 });
 
 export const cvVariants = pgTable("cv_variants", {
@@ -143,14 +143,14 @@ export const cvVariants = pgTable("cv_variants", {
   format: cvFormat("format").notNull(),
   filePath: text("file_path").notNull(),
   sha256: text("sha256").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 });
 
 export const ingestRuns = pgTable("ingest_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
   source: text("source").notNull(),
-  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   fetched: integer("fetched").notNull().default(0),
   inserted: integer("inserted").notNull().default(0),
@@ -163,7 +163,7 @@ export const scoringProfiles = pgTable("scoring_profiles", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
   profile: jsonb("profile").notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 }, (t) => [uniqueIndex("scoring_profiles_workspace").on(t.workspaceId)]);
 
 export const watchlistCompanies = pgTable("watchlist_companies", {
@@ -172,7 +172,7 @@ export const watchlistCompanies = pgTable("watchlist_companies", {
   companyName: text("company_name").notNull(),
   atsType: atsType("ats_type").notNull(),
   boardSlug: text("board_slug").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 }, (t) => [uniqueIndex("watchlist_workspace_ats_slug").on(t.workspaceId, t.atsType, t.boardSlug)]);
 
 export const generatedDocuments = pgTable("generated_documents", {
@@ -185,7 +185,7 @@ export const generatedDocuments = pgTable("generated_documents", {
   origin: answerOrigin("origin").notNull().default("ai"),
   approval: approvalState("approval").notNull().default("draft"),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 }, (t) => [index("generated_documents_application").on(t.applicationId, t.createdAt)]);
 
 export const applicationAnswers = pgTable("application_answers", {
@@ -202,7 +202,7 @@ export const applicationAnswers = pgTable("application_answers", {
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   reusable: boolean("reusable").notNull().default(false),
   reviewBy: timestamp("review_by", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 }, (t) => [
   index("application_answers_application").on(t.applicationId, t.createdAt),
   index("application_answers_reusable").on(t.reusable, t.questionNorm),
@@ -213,7 +213,7 @@ export const credentials = pgTable("credentials", {
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
   kind: text("kind").notNull(),                       // "smtp" | "imap" (free text; app-level)
   ciphertext: bytea("ciphertext").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 });
 
 export const emailConnections = pgTable("email_connections", {
@@ -231,7 +231,7 @@ export const emailConnections = pgTable("email_connections", {
   healthDetail: text("health_detail"),                // redacted reason
   syncState: jsonb("sync_state"),                     // { [folder]: lastUid }
   lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 });
 
 export const emailMessages = pgTable("email_messages", {
@@ -255,7 +255,7 @@ export const emailMessages = pgTable("email_messages", {
   suggestedTransition: applicationState("suggested_transition"),
   suggestionState: suggestionState("suggestion_state"),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 }, (t) => [
   uniqueIndex("email_messages_workspace_message_id").on(t.workspaceId, t.messageId),
   index("email_messages_application").on(t.applicationId, t.receivedAt),
@@ -269,7 +269,7 @@ export const attemptConfirmations = pgTable("attempt_confirmations", {
   payloadFingerprint: text("payload_fingerprint").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 }, (t) => [index("attempt_confirmations_attempt").on(t.attemptId, t.createdAt)]);
 
 export const formSnapshots = pgTable("form_snapshots", {
@@ -283,5 +283,5 @@ export const formSnapshots = pgTable("form_snapshots", {
   plannedAnswers: jsonb("planned_answers").notNull(),    // PlannedAnswer[]
   currentStep: integer("current_step").notNull().default(0),
   recoveryState: jsonb("recovery_state"),                // non-secret per-step progress
-  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
 }, (t) => [index("form_snapshots_attempt").on(t.attemptId, t.capturedAt)]);
