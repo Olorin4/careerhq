@@ -1,7 +1,11 @@
 import type { WorkspaceKind } from "@careerhq/contracts";
 import { loadConfig } from "@careerhq/config";
 import { and, asc, eq } from "drizzle-orm";
-import { DEMO_WORKSPACE_NAME, workspaces, type Db } from "@careerhq/db";
+// `DbOrTx`, not `Db`, for the same reason apps/web's resolver takes one: the
+// demo-mode branch can only be tested against a row set this suite controls,
+// and establishing that row set on a shared database is only safe inside a
+// transaction that rolls back.
+import { DEMO_WORKSPACE_NAME, workspaces, type DbOrTx } from "@careerhq/db";
 
 export interface GetPersonalWorkspaceIdOptions {
   /** Defaults to `loadConfig().demoMode` — pass explicitly only in tests. */
@@ -21,7 +25,7 @@ export interface GetPersonalWorkspaceIdOptions {
  * rather than creating a workspace when none exists yet (e.g. before the seed,
  * or before the demo reset job has run in demo mode).
  */
-export async function getPersonalWorkspaceId(db: Db, opts: GetPersonalWorkspaceIdOptions = {}): Promise<string | null> {
+export async function getPersonalWorkspaceId(db: DbOrTx, opts: GetPersonalWorkspaceIdOptions = {}): Promise<string | null> {
   const demoMode = opts.demoMode ?? loadConfig().demoMode;
   const kind: WorkspaceKind = demoMode ? "sandbox" : "personal";
   const [ws] = await db
