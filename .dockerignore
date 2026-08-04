@@ -10,3 +10,38 @@ node_modules
 var
 .env
 .env.local
+
+# Image slimming for the hosted demo (spec P6 §3). The VPS has ~23 GB of disk
+# shared with the owner's other stacks, so anything the running containers do
+# not read stays out of the build context.
+#
+# Tests never run inside the image (CI runs them on the host), and the workspace
+# tsconfigs compile src/**/*.ts wholesale — dropping the specs shrinks the copy
+# without changing a single emitted file.
+**/*.test.ts
+**/*.test.tsx
+
+# Fixtures are test inputs — EXCEPT packages/ai/fixtures, which the demo reads
+# at RUNTIME. AI_MODE=replay resolves AI_REPLAY_DIR (default
+# packages/ai/fixtures/replay, relative to the repo root = /app in the image),
+# and the demo deploys no OPENROUTER_API_KEY, so a missing fixture directory is
+# the difference between "generates instantly" and "falls back to the
+# deterministic floor for every draft". The negation must stay directly below
+# the exclusion: `.dockerignore` is last-match-wins, and it re-includes the
+# whole tree by directory name, so fixtures added under it later are covered
+# without touching this file.
+**/fixtures
+!packages/ai/fixtures
+
+# Prose and process. `docs/` is served by GitHub, not by the app; `.claude/` and
+# `.superpowers/` are agent scaffolding.
+docs
+.claude
+career-hq-product-spec.md
+
+# Local tool output that can appear in a working tree.
+coverage
+**/test-results
+**/playwright-report
+.vscode
+.idea

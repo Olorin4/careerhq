@@ -18,7 +18,7 @@
 # dependency that makes `require("playwright")` resolve inside the externalised
 # Next bundle — that is the pin that matters for THIS image.
 # Bump all four together — worker image, web image, and both npm pins.
-FROM mcr.microsoft.com/playwright:v1.62.1-noble AS base
+FROM mcr.microsoft.com/playwright:v1.62.1-noble AS build
 RUN corepack enable
 WORKDIR /app
 # The lockfile has an importer entry for every workspace package, so copying
@@ -26,6 +26,23 @@ WORKDIR /app
 # Copy the whole workspace; .dockerignore keeps node_modules, build output and
 # the file volume out of the context.
 COPY . .
-RUN pnpm install --frozen-lockfile
+# `--prod=false` is pnpm's default; stated for symmetry with Dockerfile.worker,
+# whose closing note explains why the dev half is not dropped again afterwards.
+RUN pnpm install --frozen-lockfile --prod=false
 RUN pnpm --filter @careerhq/web... build
+# `.next/cache` is webpack's incremental build cache — `next start` never opens
+# it. Deleted HERE, in the stage that gets discarded, so the runtime image never
+# carries a layer it was removed from (a `rm` after the COPY would leave the
+# bytes in the parent layer and shrink nothing).
+RUN rm -rf apps/web/.next/cache
+
+# See Dockerfile.worker for what the runtime stage's single COPY leaves behind.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble AS runtime
+RUN corepack enable
+WORKDIR /app
+COPY --from=build /app /app
+# Corepack's cached pnpm tarball. It matters more here than in the worker: this
+# image's CMD *is* pnpm, so without it every container start first downloads
+# pnpm from registry.npmjs.org before the app can boot. See Dockerfile.worker.
+COPY --from=build /root/.cache/node /root/.cache/node
 CMD ["pnpm", "--filter", "@careerhq/web", "start"]

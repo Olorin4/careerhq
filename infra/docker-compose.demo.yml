@@ -1,0 +1,231 @@
+# Overlay for the public hosted demo (spec P6 §3). Always used WITH the base
+# file, never alone — it carries no images, only the demo's env, its hard
+# resource caps and the ports it takes away:
+#
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.demo.yml up -d --build
+#
+# ------------------------------------------------------------------ why caps
+# The target box is a Hetzner CX23: 3.7 GB RAM, 2 GB swap, ~23 GB free disk,
+# already running the owner's other production services (edge-nginx on 80/443,
+# kelevo-tms staging api+postgres+redis, outreach, iwd-backend, twilio-app).
+# The demo is the guest here. Every `mem_limit` below is a hard ceiling the
+# kernel enforces, so a runaway Chromium or a Next.js leak gets OOM-killed
+# inside its own container instead of pushing a neighbour into swap. The
+# budget: 900 + 1200 + 400 + 128 + 128 = 2756 MB worst case, leaving ~950 MB
+# for the host and the neighbours' headroom. Raise nothing here without
+# re-doing that arithmetic.
+#
+# `logging` is capped for the same reason in the other dimension: json-file is
+# unbounded by default, and a chatty container filling 23 GB of shared disk
+# takes the neighbours down as surely as memory pressure would.
+#
+# --------------------------------------------------------------- why no port
+# Only `web` is published, and only on `127.0.0.1:3100`. The box's edge-nginx
+# terminates TLS on 80/443 and reaches its backends over the loopback publish
+# (it is not attached to this stack's Docker network), so a loopback publish is
+# what matches the neighbours' wiring — and `127.0.0.1` means the port is
+# unreachable from the internet even for the seconds between `up` and the
+# vhost being in place. Postgres, Mailpit and demo-ats lose their published
+# ports entirely (`!reset`): they are reachable only by service name on the
+# compose network. Mailpit's UI in particular would otherwise be an open,
+# unauthenticated mail viewer on a public IP.
+services:
+  postgres:
+    # Not published: the demo's database is reachable only from `web`/`worker`
+    # on the compose network. Inspect it with `docker compose exec postgres
+    # psql -U careerhq`, never from the host's port space.
+    ports: !reset []
+    mem_limit: 400m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # One-shot schema migration, so a fresh box needs no Node/pnpm toolchain of
+  # its own:
+  #
+  #   docker compose -f infra/docker-compose.yml -f infra/docker-compose.demo.yml \
+  #     --profile tools run --rm migrate
+  #
+  # It is the worker image with a different command — byte-identical build
+  # arguments, so it costs no extra disk, and `drizzle-kit` is present because
+  # Dockerfile.worker's closing note explains why the dev half stays.
+  #
+  # Two deliberate deviations from every other service here:
+  #
+  # `profiles: [tools]` keeps it out of `up -d` entirely — it is not part of the
+  # running stack, it is a command you invoke.
+  #
+  # `restart: "no"` rather than `unless-stopped`, because `unless-stopped`
+  # restarts a container that exited 0 as readily as one that crashed, and this
+  # one is *supposed* to exit 0. The demo's long-running services all carry
+  # `unless-stopped`; a one-shot must not.
+  migrate:
+    profiles: ["tools"]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    command: ["pnpm", "--filter", "@careerhq/db", "db:migrate"]
+    environment:
+      DATABASE_URL: postgres://careerhq:careerhq@postgres:5432/careerhq
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  mailpit:
+    # Both ports gone. 8025 is the mail UI: unauthenticated, and every message
+    # the demo "sends" lands in it. 1025 is SMTP. Neither belongs on a public
+    # IP; `web`/`worker` reach mailpit:1025 in-network, which is exactly what
+    # SANDBOX_SMTP_ALLOWED_HOST pins them to.
+    ports: !reset []
+    mem_limit: 128m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  demo-ats:
+    # The fictional ATS. Internal only — it is the auto-apply target, not a
+    # site anyone should browse directly, and publishing it would put a second
+    # unauthenticated app on the box's port space for no gain.
+    ports: !reset []
+    mem_limit: 128m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  web:
+    ports: !override ["127.0.0.1:3100:3000"]
+    mem_limit: 900m
+    restart: unless-stopped
+    # Playwright's base image inherits Docker's 64 MB /dev/shm, which is where
+    # Chromium puts its renderer's shared buffers. `web` launches Chromium
+    # in-process for the interactive prepare/preview/confirm flow, so a cramped
+    # /dev/shm shows up as a tab crashing mid-capture. This is tmpfs and counts
+    # against mem_limit above, so it cannot escape the container's budget.
+    shm_size: 256m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    healthcheck:
+      # "Is the HTTP server answering", nothing more: ANY response counts,
+      # including a 500. Deliberate — this gates `up -d` and the runbook's
+      # wait, and a health probe that also judged the database would flap the
+      # container every time Postgres hiccuped, on a page that is not what
+      # health means here. Task 11's deploy waits on this.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/overview').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    environment:
+      # --- the demo switch itself -------------------------------------------
+      # Selects the sandbox workspace, disables credential setup server-side,
+      # renders the reset banner, and arms the per-action rate limiter.
+      DEMO_MODE: "true"
+      # Independent of DEMO_MODE by design (see .env.example): forces EVERY
+      # submission through the sandbox host allow-list regardless of which
+      # workspace resolution actually returned. Belt-and-braces against a
+      # workspace-resolution regression on the one deployment where strangers
+      # drive the app.
+      SANDBOX_FORCE_SAFE: "true"
+      DEMO_RATE_LIMIT_PER_MIN: "30"
+
+      # --- the three submission gates, all shut ------------------------------
+      # Restated here rather than left to the base file's defaults: this is the
+      # file an auditor reads, and "it defaults to false upstream" is not the
+      # same reassurance as seeing it false.
+      SUBMISSIONS_LIVE_EMAIL: "false"
+      SUBMISSIONS_LIVE_COMPANY_SITE: "false"
+      SANDBOX_SMTP_ALLOWED_HOST: mailpit
+      SANDBOX_SITE_ALLOWED_HOST: demo-ats
+
+      # --- AI: replay only, and no key to spend ------------------------------
+      # AI_MODE=replay serves the committed fixtures under
+      # packages/ai/fixtures/replay. A fixture miss falls through to the
+      # deterministic floor; it never reaches a provider.
+      AI_MODE: replay
+      # Set EXPLICITLY, and it has to be. The base file passes
+      # `AI_REPLAY_DIR: ${AI_REPLAY_DIR:-}`, i.e. the empty string, and unlike
+      # SANDBOX_*_ALLOWED_HOST and DEMO_ATS_URL (which both `.trim() || default`
+      # for exactly this reason) `packages/config`'s AI_REPLAY_DIR has only a
+      # zod `.default()` — which fires on `undefined`, never on `""`. An empty
+      # value therefore resolves to the repo root, `/app`, and every fixture
+      # lookup misses in silence: no error, just a demo that quietly falls back
+      # to the deterministic floor for every draft. Naming the absolute path
+      # here is immune to that regardless of how config is fixed later.
+      AI_REPLAY_DIR: /app/packages/ai/fixtures/replay
+      # `!reset` DELETES the key the base file passes through, rather than
+      # setting it empty: the demo must be auditable with `docker compose exec
+      # web env`, and an absent variable is a stronger statement than a blank
+      # one. With no key the demo cannot spend tokens or depend on provider
+      # uptime, which is the point.
+      OPENROUTER_API_KEY: !reset null
+
+      # --- credential encryption ---------------------------------------------
+      # Deliberately public. This exact literal is documented in SECURITY.md
+      # ("The hosted demo's key is public on purpose") and fixed by the owner's
+      # P6 decision: it seals ONE fictional password, for a Mailpit mailbox
+      # that cannot deliver to anyone, in a sandbox workspace, on a deployment
+      # where sending is gated off three independent ways. It is here so the
+      # demo's email panel is explorable rather than blank and the encryption
+      # path is genuinely exercised.
+      #
+      # Do NOT regenerate it: the seeded connection is encrypted with this key,
+      # so a fresh key makes the seeded mailbox stop opening after every
+      # rebuild. Do NOT copy it into any real deployment — see SECURITY.md.
+      # It appears in no other compose file and in no .env.example.
+      CAREERHQ_MASTER_KEY: OzZdiB1qt0pWEwQJz3gUO/NfITgm/7QA76cur9qI6cc=
+
+      # --- browser budget -----------------------------------------------------
+      # One headless Chromium per process. Enforced per process, so `web` and
+      # `worker` each get one and the BOX can see two; that pair is what the
+      # 900m/1200m limits above are sized for.
+      AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "1"
+
+  worker:
+    mem_limit: 1200m
+    restart: unless-stopped
+    # The worker hosts the queue-path Chromium; same /dev/shm reasoning as web.
+    shm_size: 256m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    environment:
+      DEMO_MODE: "true"
+      SANDBOX_FORCE_SAFE: "true"
+      # Registers the demo.reset queue and its schedule, and seeds once at boot
+      # so a freshly deployed box is not empty until the first cron boundary.
+      DEMO_RESET_CRON: "0 */6 * * *"
+
+      SUBMISSIONS_LIVE_EMAIL: "false"
+      SUBMISSIONS_LIVE_COMPANY_SITE: "false"
+      SANDBOX_SMTP_ALLOWED_HOST: mailpit
+      SANDBOX_SITE_ALLOWED_HOST: demo-ats
+
+      # The base file leaves AI_MODE off the worker because only `web`
+      # generates materials. Set here anyway, and honestly labelled: the
+      # worker's one AI pass (discovery re-rank) short-circuits to
+      # `skipped_no_key` before it ever consults the mode, so today this is
+      # inert. It is here as a fail-safe, not a feature — the day anything in
+      # the worker does reach the AI client, replay is what it must find, and a
+      # process that inherits `live` by omission on a public box is exactly the
+      # accident this variable exists to prevent.
+      AI_MODE: replay
+      # The base file does not pass AI_REPLAY_DIR to the worker at all, so the
+      # zod default would apply cleanly here — set anyway, so the two services
+      # provably read the same directory and neither depends on the other's
+      # accident. See the note on web for why "" would not have worked.
+      AI_REPLAY_DIR: /app/packages/ai/fixtures/replay
+      OPENROUTER_API_KEY: !reset null
+
+      # Same public demo key as web, for the same reason: the worker's email
+      # sync decrypts the seeded connection. See the note on web above and
+      # SECURITY.md.
+      CAREERHQ_MASTER_KEY: OzZdiB1qt0pWEwQJz3gUO/NfITgm/7QA76cur9qI6cc=
+
+      AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "1"
