@@ -170,7 +170,7 @@ As of P5, the live parts of this diagram are `web`, `worker`, `postgres`, `mailp
 
 ## Documentation
 
-- [`career-hq-product-spec.md`](career-hq-product-spec.md) — the normative product specification (v0.3).
+- [`career-hq-product-spec.md`](career-hq-product-spec.md) — the normative product specification (v0.4).
 - [`docs/architecture.md`](docs/architecture.md) — system diagram, data model, monorepo layout, gated-submission sequence.
 - [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P5 (done) through P7.
 - [`docs/adr/0001-postgres-and-pg-boss.md`](docs/adr/0001-postgres-and-pg-boss.md) — why Postgres + pg-boss over SQLite/Redis.

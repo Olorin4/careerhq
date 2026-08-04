@@ -1,6 +1,6 @@
 # Career HQ — Architecture
 
-Companion to [`career-hq-product-spec.md`](../career-hq-product-spec.md) (v0.3). The spec says *what*; this document says *how and where*.
+Companion to [`career-hq-product-spec.md`](../career-hq-product-spec.md) (v0.4). The spec says *what*; this document says *how and where*.
 
 ## 1. System overview
 

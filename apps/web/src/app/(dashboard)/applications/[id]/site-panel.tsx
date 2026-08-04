@@ -541,6 +541,24 @@ function ConsentFieldRow({
         </p>
         <p className="site-field-consent-copy">{CONSENT_COPY}</p>
         <ConsentControl field={field} answer={answer} cvVariants={cvVariants} onCommit={onCommit} disabled={disabled} />
+        {/*
+          Declining is an ANSWER, not an omission, and it must not require
+          tick-then-untick to express. This commits exactly what the untick path
+          commits — "" — so a declined row and an untouched one are the same
+          bytes in the fingerprinted payload, both readable as "no consent
+          given". Optional rows only: a required consent field cannot be cleared
+          and still previewed, so offering it there would be a dead button.
+        */}
+        {!field.required && (
+          <button
+            type="button"
+            className="site-consent-decline"
+            onClick={() => onCommit(field.id, "")}
+            disabled={disabled}
+          >
+            Decline / leave unticked
+          </button>
+        )}
         <div className="site-field-meta">
           <span className={`badge site-badge-source-${answer.source}`}>{SOURCE_LABELS[answer.source]}</span>
           <span className="site-field-confidence">{Math.round(answer.confidence * 100)}%</span>
@@ -548,6 +566,10 @@ function ConsentFieldRow({
           {answer.differsFromApproved && (
             <span className="badge site-badge-differs">Differs from approved</span>
           )}
+          {/* The planner's CONSENT_NOTE ("you must answer this yourself for each
+              application") lands here — the row's own explanation of why no
+              saved answer was reused. */}
+          {answer.note && <span className="site-field-note">{answer.note}</span>}
         </div>
       </td>
     </tr>

@@ -1,6 +1,6 @@
 # Career HQ Product Specification
 
-**Version:** 0.3
+**Version:** 0.4
 **Status:** Working specification
 **Product description:** An AI-assisted, self-hosted job-search workflow platform that helps a user discover suitable roles, prepare high-quality grounded applications, submit them through supported channels under an explicit safety protocol, and track outcomes.
 
@@ -209,7 +209,12 @@ Greenhouse and Lever adapters first; a generic parser assists on unknown sites w
 - On site changes, preserve mapped answers and show the failed step and field.
 - Never auto-retry a final submission with an uncertain outcome (→ `NEEDS_RECONCILE`).
 - Detect duplicate applications to the same requisition; require explicit override.
-- On CAPTCHA, login walls, identity verification, assessments, unsupported file controls, or legal attestations: pause and return control to the user.
+- On CAPTCHA, login walls, identity verification, assessments, or unsupported file controls: pause and return control to the user.
+- Legal attestations return control to the user at the FIELD, not by abandoning the attempt, whenever they can be presented honestly:
+  - A required attestation **checkbox** is not a pause. It is presented on the review screen as its own consent row, showing the statement's full text and an explicitly unticked box the user ticks personally. CareerHQ never pre-ticks it and never derives it from a profile value or a model.
+  - An attestation that is **not a simple tick** — a typed signature, a "type your full legal name" input, a signature date — still pauses the page: there is no way to render it as a tick without putting words in the user's mouth.
+  - Consent is **never reused across applications.** An attestation or criminal-history answer approved on one application never auto-satisfies another, whatever the adapter mapped the field to; it is asked again, every time.
+  - A declined attestation is an answer, not an omission: it is recorded as an empty value from the user, and the submitted form must reflect it — a box the site shipped pre-ticked is unticked before submit.
 
 ## 11. Gated submission protocol (normative)
 
