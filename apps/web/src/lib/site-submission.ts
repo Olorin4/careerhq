@@ -20,12 +20,14 @@ import {
   CONFIRMATION_TTL_MS, evaluateSubmissionGates, generateConfirmationToken, hashConfirmationToken,
   payloadFingerprint, type GateCheckInput,
 } from "@careerhq/core/gates";
+import { reserveEvidenceScreenshot } from "@careerhq/core/storage";
 import {
   applicationEvents as applicationEventsTable, beginSubmission, completeSubmission,
   createSiteAttempt, cvVariants as cvVariantsTable, failSubmission, findRequisitionAttempt,
   formSnapshots as formSnapshotsTable,
   getApplicationDetail, getAttempt, getLatestConfirmation, getLatestSnapshot, hasBlockingAttempt, isFactStale,
-  listAnswers, listCvVariants, listFacts, listReusableAnswers, markAttemptBlocked, markAttemptReady,
+  listAnswers, listCvVariants, listEvidenceScreenshotPaths, listFacts, listReusableAnswers,
+  markAttemptBlocked, markAttemptReady,
   markNeedsReconcile, recordPreview, saveFormSnapshot, updateSnapshotAnswers, workspaces as workspacesTable,
   type ApplicationAttempt, type CandidateFact, type CvVariant, type Db, type FormSnapshot,
 } from "@careerhq/db";
@@ -1089,6 +1091,32 @@ export async function confirmAndSubmitSite(
       reason: "the auto-apply browser is not available in this process",
     };
   }
+  // Room on disk for the one thing this submission is guaranteed to produce:
+  // the confirmation screenshot `submit` writes under `FILE_STORAGE_DIR`
+  // (`site-driver.ts`'s `runSiteSubmit`, and the worker's queue variant into
+  // its own directory — one store, two writers).
+  //
+  // It is HERE, and not at the write, because the write happens AFTER the
+  // submit click: by then the application is in, and refusing would either
+  // lose a real submission or leave an attempt whose receipt names evidence
+  // that was never stored. Before the token, before the browser, before
+  // anything is typed — the attempt stays PENDING_CONFIRMATION with its token
+  // intact, and the same `blocked` shape every other harmless failure uses
+  // carries the reason.
+  //
+  // Demo-only, and inert otherwise: a self-hosted install's screenshots are
+  // the records of real applications it made, and nothing quotas or reclaims
+  // those. The database read that feeds the collector is only paid for when
+  // the collector will actually run.
+  const evidenceRefusal = await reserveEvidenceScreenshot({
+    fileStorageDir: config.fileStorageDir,
+    referencedPaths: config.demoMode ? await listEvidenceScreenshotPaths(db) : [],
+    demoMode: config.demoMode,
+  });
+  if (evidenceRefusal) {
+    return { status: "blocked", code: "evidence_store_full", reason: evidenceRefusal };
+  }
+
   // A wired-up `submit` is not the same as a browser that can start. The probe
   // is a real launch/close round trip, and it runs HERE — before the token is
   // burned and before anything is typed — so an image or host without Chromium

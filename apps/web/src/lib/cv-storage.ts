@@ -1,5 +1,14 @@
-import { readdir, stat, unlink } from "node:fs/promises";
-import path from "node:path";
+import { mb, ORPHAN_GRACE_MS, pruneAndMeasure } from "@careerhq/core/storage";
+
+/**
+ * The orphan collector and the grace window are NOT defined here any more:
+ * they live in `@careerhq/core/storage`, shared with the evidence-screenshot
+ * store that `confirmAndSubmitSite` and the worker's submit job reserve
+ * against. Two subtly different implementations of "delete what no row points
+ * at, but never an in-flight write" is how the next leak happens. This module
+ * is now only the CV store's numbers and its refusal.
+ */
+export { ORPHAN_GRACE_MS };
 
 /**
  * The disk ceiling for CV uploads (spec P6 §3; P6 task-3 review advisory B,
@@ -39,82 +48,17 @@ export const DEMO_MAX_CV_BYTES = 2 * 1024 * 1024;
 export const DEMO_MAX_CV_STORE_BYTES = 64 * 1024 * 1024;
 
 /**
- * And a file COUNT, because bytes alone do not bound the cost of the scan
- * below (or of inodes): 64 MB of 4 KB PDFs is sixteen thousand files. A
+ * And a file COUNT, because bytes alone do not bound the cost of the
+ * collector's scan (or of inodes): 64 MB of 4 KB PDFs is sixteen thousand
+ * files. A
  * hundred is far more CVs than a demo ever legitimately holds.
  */
 export const DEMO_MAX_CV_STORE_FILES = 100;
-
-/**
- * How long an unreferenced file is left alone before it counts as garbage.
- *
- * The prune below deletes files no `cv_variants` row points at. A file is
- * briefly unreferenced by construction — `writeFile` lands before
- * `createCvVariant` commits — so without a grace window a concurrent upload
- * could delete another request's file in that gap. Five minutes is far longer
- * than that window and far shorter than the six-hourly reset, so reclamation
- * still happens on the first upload after a reset.
- */
-export const ORPHAN_GRACE_MS = 5 * 60_000;
-
-function mb(bytes: number): string {
-  return `${Math.round(bytes / (1024 * 1024))} MB`;
-}
 
 /** One refusal for both ceilings: which one the visitor hit is not their problem. */
 const STORE_FULL_REASON =
   `the demo's CV storage is full (${mb(DEMO_MAX_CV_STORE_BYTES)} or `
   + `${DEMO_MAX_CV_STORE_FILES} files) — it is reclaimed after the next demo reset`;
-
-interface StoreUsage {
-  files: number;
-  bytes: number;
-}
-
-/**
- * One `readdir` + `stat` pass that both collects garbage and measures what is
- * left. Deleting first is what keeps the ceiling from becoming a one-way door:
- * the six-hourly reset drops the demo workspace and every `cv_variants` row
- * with it but leaves the uploaded PDFs behind (`seedCvVariants` rewrites its
- * own two fixed filenames and touches nothing else), so without this the
- * uploads of every past visitor would still count against the ceiling forever
- * and the upload form would brick itself permanently after ~7 minutes of
- * abuse. With it, a reset really does return the budget.
- *
- * Every unlink is best-effort: losing the race to another pass, or to an
- * operator with `rm`, means the file is already gone, which is the outcome
- * this wanted anyway.
- */
-async function pruneAndMeasure(dir: string, keep: ReadonlySet<string>, now: number): Promise<StoreUsage> {
-  let names: string[];
-  try {
-    names = await readdir(dir);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { files: 0, bytes: 0 };
-    throw err;
-  }
-
-  const measured = await Promise.all(names.map(async (name): Promise<StoreUsage> => {
-    const filePath = path.join(dir, name);
-    let info;
-    try {
-      info = await stat(filePath);
-    } catch {
-      return { files: 0, bytes: 0 };
-    }
-    if (!info.isFile()) return { files: 0, bytes: 0 };
-    if (!keep.has(filePath) && now - info.mtimeMs > ORPHAN_GRACE_MS) {
-      await unlink(filePath).catch(() => undefined);
-      return { files: 0, bytes: 0 };
-    }
-    return { files: 1, bytes: info.size };
-  }));
-
-  return measured.reduce(
-    (total, one) => ({ files: total.files + one.files, bytes: total.bytes + one.bytes }),
-    { files: 0, bytes: 0 },
-  );
-}
 
 export interface CvUploadRequest {
   /** The `cvs/` directory the file would be written into. */
@@ -153,7 +97,7 @@ export async function reserveCvUpload(request: CvUploadRequest): Promise<string 
   }
 
   const used = await pruneAndMeasure(
-    request.dir,
+    [request.dir],
     new Set(request.referencedPaths),
     request.now ?? Date.now(),
   );

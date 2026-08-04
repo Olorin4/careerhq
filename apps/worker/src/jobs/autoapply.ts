@@ -16,8 +16,10 @@ import type { RawFormPage } from "@careerhq/autoapply";
 import {
   allowsCaptureTarget, effectiveWorkspaceKind, refuseCaptureTarget, type CaptureTargetPolicy,
 } from "@careerhq/autoapply/policy";
+import { reserveEvidenceScreenshot } from "@careerhq/core/storage";
 import {
-  cvVariants as cvVariantsTable, getApplicationDetail, getAttempt, getLatestSnapshot, updateRecoveryState,
+  cvVariants as cvVariantsTable, getApplicationDetail, getAttempt, getLatestSnapshot,
+  listEvidenceScreenshotPaths, updateRecoveryState,
   workspaces as workspacesTable,
   type ApplicationAttempt, type Db, type FormSnapshot,
 } from "@careerhq/db";
@@ -189,6 +191,10 @@ async function resolveFilePaths(
  * `${fileStorageDir}/autoapply/${attemptId}.png` only once `fillAndSubmit`
  * has actually returned; a throw leaves neither the file nor the recovery
  * write behind, and the session is always closed.
+ *
+ * In demo mode that directory shares a bounded, reclaimed store with the web
+ * app's `site-screenshots/`, and the room for this job's screenshot is
+ * reserved before the browser opens — see the reservation below.
  */
 export async function runSubmitJob(db: Db, config: AppConfig, data: SubmitJobData): Promise<void> {
   const attempt = await loadWorkspaceAttempt(db, data.workspaceId, data.attemptId);
@@ -203,6 +209,31 @@ export async function runSubmitJob(db: Db, config: AppConfig, data: SubmitJobDat
   const policy = await capturePolicy(db, config, data.workspaceId);
   const refusal = refuseCaptureTarget(form.url, policy);
   if (refusal) throw new Error(`autoapply submit: refusing to open ${form.url}: ${refusal}`);
+
+  // Room on disk for the screenshot this job is about to produce, checked in
+  // exactly the position the host gate above occupies and for the same reason:
+  // before a browser is started, so a refusal costs nothing and leaves the
+  // attempt and its snapshot exactly as they were. It cannot be checked at the
+  // `writeFile` below, which happens after the submit click — by then the
+  // application is in and the evidence is the only thing worth keeping.
+  //
+  // `apps/web`'s interactive path reserves against the SAME store (this
+  // directory plus `site-screenshots/`) through the same function, so the two
+  // processes cannot each spend the whole budget, and the collector inside it
+  // works from the database's live set with a grace window, so neither
+  // process's in-flight write is ever the other's victim.
+  //
+  // A throw is this job's failure shape — `runSubmitJob` returns void and
+  // every other refusal in it throws — and pg-boss records it as a failed job.
+  // Nothing is written and no recovery state claims evidence that does not
+  // exist. Demo-only: a self-hosted worker's screenshots are records of real
+  // applications and are neither quota'd nor reclaimed.
+  const storeRefusal = await reserveEvidenceScreenshot({
+    fileStorageDir: config.fileStorageDir,
+    referencedPaths: config.demoMode ? await listEvidenceScreenshotPaths(db) : [],
+    demoMode: config.demoMode,
+  });
+  if (storeRefusal) throw new Error(`autoapply submit: ${storeRefusal}`);
 
   const session = await openSession();
   try {

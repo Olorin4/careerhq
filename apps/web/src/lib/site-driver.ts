@@ -196,6 +196,17 @@ async function runSiteSubmit(
       },
     });
 
+    // The demo's ceiling on this store is NOT checked here, on purpose.
+    //
+    // This line runs after the submit click: the application is already in, so
+    // a refusal at this point would either throw away the only evidence of a
+    // real submission or leave an attempt whose receipt names a screenshot
+    // that was never written. The check belongs where nothing has been spent —
+    // `confirmAndSubmitSite`'s `reserveEvidenceScreenshot`, which runs before
+    // the token is burned and before the browser is asked for a page, and
+    // which also reclaims the orphans this directory accumulates across the
+    // six-hourly demo reset (`@careerhq/core/storage`). This write is
+    // unconditional by design.
     const dir = path.join(config.fileStorageDir, "site-screenshots");
     await mkdir(dir, { recursive: true });
     const screenshotPath = path.join(dir, `${randomUUID()}.png`);

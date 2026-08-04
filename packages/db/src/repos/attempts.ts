@@ -3,7 +3,7 @@ import type { AttemptStatus } from "@careerhq/contracts";
 import { canAttemptTransition } from "@careerhq/core";
 import { payloadFingerprint } from "@careerhq/core/gates";
 import type { Db, DbOrTx, Tx } from "../client.js";
-import { applicationAttempts, attemptConfirmations } from "../schema/index.js";
+import { applicationAttempts, attemptConfirmations, formSnapshots } from "../schema/index.js";
 import type { ApplicationAttempt, AttemptConfirmation, NewApplicationAttempt } from "../index.js";
 import { transitionApplicationTx } from "./applications.js";
 
@@ -395,4 +395,36 @@ export async function hasBlockingAttempt(db: Db, applicationId: string): Promise
     confirmed: rows.some((r) => r.status === "SUBMITTED"),
     inFlight: rows.some((r) => IN_FLIGHT.includes(r.status)),
   };
+}
+
+/**
+ * Every evidence-screenshot path the database still points at, across all
+ * workspaces — the live set for the demo's screenshot collector
+ * (`@careerhq/core/storage`'s `reserveEvidenceScreenshot`).
+ *
+ * Deliberately NOT workspace-scoped, for exactly the reason `listCvFilePaths`
+ * is not: the collector deletes whatever it does not see here, so scoping it
+ * would delete another workspace's evidence. It is also deliberately the union
+ * of BOTH writers' references, because the two of them share one store:
+ *
+ *   - `application_attempts.confirmed_receipt->>'screenshotPath'` — what
+ *     apps/web's `completeSubmission` records for an interactive submission
+ *     (and what `seedDemoWorkspace` records for the seeded one), and
+ *   - `form_snapshots.recovery_state->>'screenshotPath'` — what the worker's
+ *     `runSubmitJob` records for the queue variant.
+ *
+ * `pending_receipt` carries no screenshot path (nothing has been captured when
+ * it is written), so it is not read; a receipt shape that grows one must be
+ * added here in the same commit, or its file becomes collectable.
+ */
+export async function listEvidenceScreenshotPaths(db: Db): Promise<string[]> {
+  const [receipts, recoveries] = await Promise.all([
+    db.select({ p: sql<string | null>`${applicationAttempts.confirmedReceipt}->>'screenshotPath'` })
+      .from(applicationAttempts),
+    db.select({ p: sql<string | null>`${formSnapshots.recoveryState}->>'screenshotPath'` })
+      .from(formSnapshots),
+  ]);
+  return [...receipts, ...recoveries]
+    .map((row) => row.p)
+    .filter((p): p is string => typeof p === "string" && p.length > 0);
 }

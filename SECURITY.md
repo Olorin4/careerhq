@@ -103,6 +103,16 @@ A rate alone would bound how often a visitor writes, not how much they
 accumulate. Neither bound applies outside demo mode — a self-hosted install
 owns its own disk.
 
+Auto-apply evidence screenshots are the other disk write a visitor can reach,
+from both the web app (`site-screenshots/`) and the worker's queue variant
+(`autoapply/`). They share one 64 MB / 200-file ceiling, reserved *before* the
+submit click so a full store refuses a submission rather than losing the
+evidence of one, and reclaimed by the same collector — every file no attempt
+receipt or form snapshot points at, aged past a five-minute grace window
+(`packages/core/src/storage/index.ts`). Also demo-only: a self-hoster's
+screenshots are the records of applications they really made, and nothing here
+deletes them.
+
 ## Known limitations
 
 Stated plainly rather than omitted.

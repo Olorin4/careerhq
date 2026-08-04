@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { eq } from "drizzle-orm";
@@ -36,6 +36,7 @@ import {
   confirmAndSubmitSite, prepareSiteApplication, previewSiteSubmission, updatePlannedAnswer,
   type PrepareOutcome, type SiteDeps, type SiteSubmitResult,
 } from "./site-submission";
+import { DEMO_MAX_EVIDENCE_STORE_FILES, ORPHAN_GRACE_MS } from "@careerhq/core/storage";
 import { withSiteBrowserReservation } from "./site-driver.js";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -1378,5 +1379,155 @@ d("two concurrent confirms, through the real browser reservation", () => {
     expect(retried.status).toBe("submitted");
     expect(loserCalls).toHaveLength(1);
     expect((await getAttempt(db, loser.attemptId))?.status).toBe("SUBMITTED");
+  });
+});
+
+/**
+ * The demo's evidence-screenshot ceiling (the CV-upload leak's twin, closed
+ * here): `submit` writes a confirmation PNG under `FILE_STORAGE_DIR` on every
+ * successful submission, the six-hourly reset cascades the rows away and
+ * leaves the files, and nothing bounded or reclaimed them.
+ *
+ * Both halves are load-bearing and both are tested here against a real
+ * directory: the ceiling must actually refuse, and the collector must actually
+ * give the budget back — a ceiling with no reclamation would brick auto-apply
+ * on the demo permanently, which is worse than the leak.
+ *
+ * The refusal's position is the point of most of these assertions. It lands
+ * BEFORE `beginSubmission`, because the screenshot is written after the submit
+ * click: refusing any later would either throw away the evidence of a real
+ * application or leave an attempt whose receipt names a file that was never
+ * stored.
+ */
+d("the demo's evidence-screenshot store", () => {
+  /** A `FILE_STORAGE_DIR` of its own per test, so the store is exactly what the test put there. */
+  function storeDir(): string {
+    return mkdtempSync(path.join(tmpdir(), "careerhq-site-shots-"));
+  }
+
+  function demoConfig(fileStorageDir: string): AppConfig {
+    return config({ DEMO_MODE: "true", FILE_STORAGE_DIR: fileStorageDir });
+  }
+
+  /** `count` screenshots in one of the store's two directories, aged `ageMs` into the past. */
+  function fillStore(fileStorageDir: string, dir: string, count: number, ageMs: number): void {
+    const dirPath = path.join(fileStorageDir, dir);
+    mkdirSync(dirPath, { recursive: true });
+    const stamp = (Date.now() - ageMs) / 1000;
+    for (let i = 0; i < count; i += 1) {
+      const filePath = path.join(dirPath, `shot-${i}.png`);
+      writeFileSync(filePath, "png");
+      utimesSync(filePath, stamp, stamp);
+    }
+  }
+
+  it("refuses a full store before the token burns, then lets the SAME token through once the reset's orphans are reclaimed", async () => {
+    const fileStorageDir = storeDir();
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Full Disk Co");
+
+    // A store at the file ceiling whose files are all inside the grace window
+    // — i.e. every one of them could be someone's in-flight write. Nothing is
+    // reclaimable, so the ceiling is the only thing that can answer.
+    fillStore(fileStorageDir, "site-screenshots", DEMO_MAX_EVIDENCE_STORE_FILES, 0);
+
+    const outcome = await confirmAndSubmitSite(
+      deps({ config: demoConfig(fileStorageDir), submit: stubSubmit(calls) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+
+    expect(outcome).toMatchObject({ status: "blocked", code: "evidence_store_full" });
+    if (outcome.status !== "blocked") return;
+    expect(outcome.reason).toMatch(/storage is full/);
+    expect(outcome.reason).toMatch(/nothing was submitted/);
+
+    // Nothing typed, nothing burned, nothing parked: the attempt is exactly as
+    // it was and the same token is still live.
+    expect(calls).toHaveLength(0);
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect(attempt?.pendingReceipt).toBeNull();
+    expect((await getActiveConfirmation(db, prepared.attemptId))?.consumedAt ?? null).toBeNull();
+    // And the guard did not "make room" by deleting live-looking files.
+    expect(readdirSync(path.join(fileStorageDir, "site-screenshots")))
+      .toHaveLength(DEMO_MAX_EVIDENCE_STORE_FILES);
+
+    // Now age them past the grace window — what the six-hourly reset leaves
+    // behind, since it drops every attempt and snapshot that pointed at them
+    // and touches no files. The next confirm reclaims the lot and goes
+    // through, on the token the refusal did not spend.
+    fillStore(fileStorageDir, "site-screenshots", DEMO_MAX_EVIDENCE_STORE_FILES, ORPHAN_GRACE_MS + 60_000);
+
+    const retried = await confirmAndSubmitSite(
+      deps({ config: demoConfig(fileStorageDir), submit: stubSubmit(calls) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+
+    expect(retried.status).toBe("submitted");
+    expect(calls).toHaveLength(1);
+    expect(readdirSync(path.join(fileStorageDir, "site-screenshots"))).toEqual([]);
+    expect((await getAttempt(db, prepared.attemptId))?.status).toBe("SUBMITTED");
+  });
+
+  // The collector's live set is the database, and this attempt's own receipt
+  // is in it the moment it commits. A submission must never be able to reclaim
+  // the evidence of an earlier one.
+  it("never reclaims a screenshot an attempt's receipt still points at", async () => {
+    const fileStorageDir = storeDir();
+    const first = await previewed("Kept Evidence Co");
+    const evidence = path.join(fileStorageDir, "site-screenshots", "kept.png");
+    mkdirSync(path.dirname(evidence), { recursive: true });
+    writeFileSync(evidence, "png");
+
+    const submitted = await confirmAndSubmitSite(
+      deps({
+        config: demoConfig(fileStorageDir),
+        submit: async (args) => ({
+          confirmationId: "NR-kept",
+          finalUrl: `${args.url}/thanks`,
+          screenshotPath: evidence,
+          pageText: "Thanks! Confirmation ID: NR-kept",
+        }),
+      }),
+      { workspaceId, attemptId: first.attemptId, presentedToken: first.token, retypedTarget: APPLY_HOST },
+    );
+    expect(submitted.status).toBe("submitted");
+
+    // Age it well past the grace window and run another confirm's collector
+    // over the same store, alongside a file nothing points at.
+    const stamp = (Date.now() - (ORPHAN_GRACE_MS + 60_000)) / 1000;
+    utimesSync(evidence, stamp, stamp);
+    const orphan = path.join(fileStorageDir, "site-screenshots", "orphan.png");
+    writeFileSync(orphan, "png");
+    utimesSync(orphan, stamp, stamp);
+
+    const second = await previewed("Second Confirm Co");
+    const outcome = await confirmAndSubmitSite(
+      deps({ config: demoConfig(fileStorageDir), submit: stubSubmit([]) }),
+      { workspaceId, attemptId: second.attemptId, presentedToken: second.token, retypedTarget: APPLY_HOST },
+    );
+
+    expect(outcome.status).toBe("submitted");
+    expect(readdirSync(path.join(fileStorageDir, "site-screenshots"))).toEqual(["kept.png"]);
+  });
+
+  // A personal, self-hosted install owns its disk, and its screenshots are the
+  // records of applications it really made. Neither bound nor collector runs.
+  it("neither refuses nor reclaims outside demo mode", async () => {
+    const fileStorageDir = storeDir();
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Self Hosted Co");
+
+    fillStore(fileStorageDir, "site-screenshots", DEMO_MAX_EVIDENCE_STORE_FILES + 5, ORPHAN_GRACE_MS + 60_000);
+
+    const outcome = await confirmAndSubmitSite(
+      deps({ config: config({ FILE_STORAGE_DIR: fileStorageDir }), submit: stubSubmit(calls) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+
+    expect(outcome.status).toBe("submitted");
+    expect(calls).toHaveLength(1);
+    expect(readdirSync(path.join(fileStorageDir, "site-screenshots")))
+      .toHaveLength(DEMO_MAX_EVIDENCE_STORE_FILES + 5);
   });
 });

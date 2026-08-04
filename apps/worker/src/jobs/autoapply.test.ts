@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { eq } from "drizzle-orm";
@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { AppConfig } from "@careerhq/config";
 import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
 import type { RawFormPage } from "@careerhq/autoapply";
+import { DEMO_MAX_EVIDENCE_STORE_FILES, ORPHAN_GRACE_MS } from "@careerhq/core/storage";
 import {
   createApplication, createCvVariant, createDb, createSiteAttempt, getAttempt,
   getLatestSnapshot, saveFormSnapshot, workspaces, type Db,
@@ -342,5 +343,132 @@ d("runSubmitJob", () => {
       workspaceId: "00000000-0000-0000-0000-000000000000", attemptId,
     })).rejects.toThrow();
     expect(openSessionMock).not.toHaveBeenCalled();
+  });
+  /**
+   * The demo's evidence-screenshot ceiling, from the worker's side. This job
+   * and apps/web's interactive path write into the SAME store (this
+   * directory plus `site-screenshots/`), so the guard has to be the same one,
+   * checked in the same place: before a browser opens, where a refusal costs
+   * nothing.
+   */
+  describe("the demo's evidence-screenshot store", () => {
+    /** A `FILE_STORAGE_DIR` of its own, so the store is exactly what the test put there. */
+    function demoStore(): string {
+      return mkdtempSync(path.join(tmpdir(), "careerhq-worker-shots-"));
+    }
+
+    function fillStore(dir: string, sub: string, count: number, ageMs: number): void {
+      const dirPath = path.join(dir, sub);
+      mkdirSync(dirPath, { recursive: true });
+      const stamp = (Date.now() - ageMs) / 1000;
+      for (let i = 0; i < count; i += 1) {
+        const filePath = path.join(dirPath, `shot-${i}.png`);
+        writeFileSync(filePath, "png");
+        utimesSync(filePath, stamp, stamp);
+      }
+    }
+
+    it("refuses before opening a session when the store is full, writing nothing and claiming no evidence", async () => {
+      const dir = demoStore();
+      const { attemptId } = await siteAttempt("Full Store Co");
+      await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+      // Inside the grace window: every one of these could be an in-flight
+      // write, so none is reclaimable and the ceiling is what must answer.
+      fillStore(dir, "site-screenshots", DEMO_MAX_EVIDENCE_STORE_FILES, 0);
+
+      await expect(runSubmitJob(db, config({ demoMode: true, fileStorageDir: dir }), { workspaceId, attemptId }))
+        .rejects.toThrow(/storage is full/);
+
+      // The whole point of refusing here rather than at the write: no browser
+      // was started, so no click happened, and the snapshot carries no
+      // recovery state claiming a screenshot that does not exist.
+      expect(openSessionMock).not.toHaveBeenCalled();
+      expect(fillAndSubmitMock).not.toHaveBeenCalled();
+      expect((await getLatestSnapshot(db, attemptId))?.recoveryState).toBeNull();
+      expect(() => readFileSync(path.join(dir, "autoapply", `${attemptId}.png`))).toThrow();
+      // It did not delete live-looking files to make room, either.
+      expect(readdirSync(path.join(dir, "site-screenshots"))).toHaveLength(DEMO_MAX_EVIDENCE_STORE_FILES);
+    });
+
+    it("reclaims the orphans a reset left across BOTH directories and then submits", async () => {
+      const dir = demoStore();
+      const { attemptId } = await siteAttempt("Reclaimed Store Co");
+      await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+      // What the six-hourly reset leaves: the PNGs of every past submission,
+      // web's and the worker's alike, with every row that pointed at them gone.
+      fillStore(dir, "site-screenshots", DEMO_MAX_EVIDENCE_STORE_FILES, ORPHAN_GRACE_MS + 60_000);
+      fillStore(dir, "autoapply", 20, ORPHAN_GRACE_MS + 60_000);
+
+      fillAndSubmitMock.mockResolvedValueOnce({
+        confirmationId: "NR-reclaimed",
+        finalUrl: "https://acme.example/apply/1/done",
+        screenshotPng: Buffer.from("fake-png-bytes"),
+        pageText: "Thanks for applying!",
+      });
+
+      await runSubmitJob(db, config({ demoMode: true, fileStorageDir: dir }), { workspaceId, attemptId });
+
+      expect(readdirSync(path.join(dir, "site-screenshots"))).toEqual([]);
+      // Only this job's own screenshot is left in its directory.
+      expect(readdirSync(path.join(dir, "autoapply"))).toEqual([`${attemptId}.png`]);
+      const latest = await getLatestSnapshot(db, attemptId);
+      expect(latest?.recoveryState).toMatchObject({
+        kind: "submit_result", screenshotPath: path.join(dir, "autoapply", `${attemptId}.png`),
+      });
+    });
+
+    it("never reclaims a screenshot a form snapshot's recovery state still points at", async () => {
+      const dir = demoStore();
+      const { attemptId: keptAttemptId } = await siteAttempt("Kept Worker Evidence Co");
+      await saveFormSnapshot(db, { attemptId: keptAttemptId, form: canonicalForm(), answers: plannedAnswers() });
+      fillAndSubmitMock.mockResolvedValueOnce({
+        confirmationId: "NR-kept",
+        finalUrl: "https://acme.example/apply/1/done",
+        screenshotPng: Buffer.from("fake-png-bytes"),
+        pageText: "Thanks for applying!",
+      });
+      await runSubmitJob(db, config({ demoMode: true, fileStorageDir: dir }), { workspaceId, attemptId: keptAttemptId });
+
+      // Age its evidence well past the grace window and add a true orphan
+      // beside it, then run a second job's collector over the same store.
+      const kept = path.join(dir, "autoapply", `${keptAttemptId}.png`);
+      const stamp = (Date.now() - (ORPHAN_GRACE_MS + 60_000)) / 1000;
+      utimesSync(kept, stamp, stamp);
+      const orphan = path.join(dir, "autoapply", "orphan.png");
+      writeFileSync(orphan, "png");
+      utimesSync(orphan, stamp, stamp);
+
+      const { attemptId } = await siteAttempt("Second Worker Job Co");
+      await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+      fillAndSubmitMock.mockResolvedValueOnce({
+        confirmationId: "NR-second",
+        finalUrl: "https://acme.example/apply/1/done",
+        screenshotPng: Buffer.from("fake-png-bytes"),
+        pageText: "Thanks for applying!",
+      });
+      await runSubmitJob(db, config({ demoMode: true, fileStorageDir: dir }), { workspaceId, attemptId });
+
+      expect(readdirSync(path.join(dir, "autoapply")).sort())
+        .toEqual([`${attemptId}.png`, `${keptAttemptId}.png`].sort());
+    });
+
+    it("neither refuses nor reclaims outside demo mode — a self-hoster's evidence is a record, not garbage", async () => {
+      const dir = demoStore();
+      const { attemptId } = await siteAttempt("Self Hosted Worker Co");
+      await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+      fillStore(dir, "site-screenshots", DEMO_MAX_EVIDENCE_STORE_FILES + 5, ORPHAN_GRACE_MS + 60_000);
+
+      fillAndSubmitMock.mockResolvedValueOnce({
+        confirmationId: "NR-selfhosted",
+        finalUrl: "https://acme.example/apply/1/done",
+        screenshotPng: Buffer.from("fake-png-bytes"),
+        pageText: "Thanks for applying!",
+      });
+
+      await runSubmitJob(db, config({ fileStorageDir: dir }), { workspaceId, attemptId });
+
+      expect(readdirSync(path.join(dir, "site-screenshots")))
+        .toHaveLength(DEMO_MAX_EVIDENCE_STORE_FILES + 5);
+    });
   });
 });
