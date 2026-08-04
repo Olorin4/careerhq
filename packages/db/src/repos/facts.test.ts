@@ -34,7 +34,7 @@ d("facts repo", () => {
       reviewBy: new Date("2027-01-01"),
     });
     expect(fact.sensitivity).toBe("normal");
-    await archiveFact(db, fact.id);
+    await archiveFact(db, workspaceId, fact.id);
     const visible = await listFacts(db, workspaceId);
     expect(visible.find((f) => f.id === fact.id)).toBeUndefined();
     const all = await listFacts(db, workspaceId, { includeArchived: true });
@@ -50,7 +50,22 @@ d("facts repo", () => {
     const fact = await createFact(db, {
       workspaceId, category: "experience", claim: "Built a TMS", reviewBy: new Date("2026-01-01"),
     });
-    const updated = await reverifyFact(db, fact.id, new Date("2027-06-01"));
+    const updated = await reverifyFact(db, workspaceId, fact.id, new Date("2027-06-01"));
     expect(updated?.reviewBy.toISOString()).toBe("2027-06-01T00:00:00.000Z");
+  });
+
+  it("refuses to archive a fact belonging to another workspace", async () => {
+    const other = await db.insert(workspaces).values({ name: `t-other-${Date.now()}`, kind: "personal" }).returning();
+    const otherId = other[0]!.id;
+    try {
+      const fact = await createFact(db, {
+        workspaceId: otherId, category: "skill", claim: "Other workspace fact", reviewBy: new Date("2027-01-01"),
+      });
+      await archiveFact(db, workspaceId, fact.id);              // wrong workspace
+      const stillVisible = await listFacts(db, otherId);
+      expect(stillVisible.find((f) => f.id === fact.id)).toBeDefined();  // untouched
+    } finally {
+      await db.delete(workspaces).where(eq(workspaces.id, otherId));
+    }
   });
 });

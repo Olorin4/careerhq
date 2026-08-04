@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { dismissJobAction, promoteJobAction } from "./actions.js";
+import { safeExternalHref } from "../../../lib/safe-url.js";
 
 export interface ScoreBreakdownRow {
   term: string;
@@ -58,11 +59,13 @@ export function JobRow({ job }: { job: JobRowData }) {
 
   if (dismissed) return null;
 
+  const safeUrl = safeExternalHref(job.url);
+
   return (
     <article className="job-row">
       <header className="job-row-header">
-        {job.url ? (
-          <a href={job.url} target="_blank" rel="noopener noreferrer" className="job-row-link">
+        {safeUrl ? (
+          <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="job-row-link">
             <strong>{job.title}</strong> · {job.company}
           </a>
         ) : (

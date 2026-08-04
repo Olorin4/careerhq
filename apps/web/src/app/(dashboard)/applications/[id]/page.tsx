@@ -8,6 +8,7 @@ import {
 } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { safeExternalHref } from "../../../../lib/safe-url.js";
 import { TransitionButtons } from "../transition-buttons.js";
 import { CvSelect } from "./cv-select.js";
 import { EmailPanel } from "./email-panel.js";
@@ -42,6 +43,7 @@ export default async function ApplicationDetailPage({
   const detail = await getApplicationDetail(db, id);
   if (!detail) notFound();
   const { application, job, events } = detail;
+  const safeJobUrl = safeExternalHref(job.url);
 
   const [company] = job.companyId
     ? await db.select().from(companiesTable).where(eq(companiesTable.id, job.companyId))
@@ -77,9 +79,13 @@ export default async function ApplicationDetailPage({
       </h1>
       {job.url && (
         <p>
-          <a href={job.url} target="_blank" rel="noreferrer">
-            {job.url}
-          </a>
+          {safeJobUrl ? (
+            <a href={safeJobUrl} target="_blank" rel="noreferrer">
+              {job.url}
+            </a>
+          ) : (
+            job.url
+          )}
         </p>
       )}
       <p>

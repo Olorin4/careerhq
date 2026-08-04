@@ -150,7 +150,7 @@ async function draftedAttempt(companyName: string, subjectSuffix: string): Promi
     contentMd: "Dear hiring team, please find my application attached.",
     sourceFactIds: [],
   });
-  expect(await setDocumentApproval(db, doc.id, "approved")).not.toBeNull();
+  expect(await setDocumentApproval(db, workspaceId, doc.id, "approved")).not.toBeNull();
   expect(await setApplicationCvVariant(db, app.id, cvVariantId)).not.toBeNull();
 
   for (const to of ["SHORTLISTED", "PREPARING"] as const) {

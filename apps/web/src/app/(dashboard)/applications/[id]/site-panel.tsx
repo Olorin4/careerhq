@@ -10,6 +10,7 @@ import {
 import { isConsentOnlyField, isSensitiveField, requiresUserBeforeSubmit } from "@careerhq/core";
 import type { ApplicationAttempt, CvVariant, FormSnapshot, SiteAttemptDraft } from "@careerhq/db";
 import type { PrepareOutcome, SiteConfirmOutcome, SitePreviewOutcome } from "../../../../lib/site-submission.js";
+import { safeExternalHref } from "../../../../lib/safe-url.js";
 import { resolveReconcileAction } from "./email-actions.js";
 import {
   confirmAndSubmitSiteAction, prepareSiteApplicationAction, previewSiteSubmissionAction,
@@ -298,14 +299,15 @@ function PrepareOutcomePane({
   onOverride: () => void;
 }) {
   if (outcome.status === "blocked") {
+    const safeUrl = safeExternalHref(url.trim());
     return (
       <div className="site-outcome site-outcome-blocked">
         <p>Paused — {humanize(outcome.kind)}</p>
         <p>{outcome.detail}</p>
         <p className="site-outcome-hint">
           This is a pause, not a failure: nothing was submitted.{" "}
-          {url.trim() && (
-            <a href={url.trim()} target="_blank" rel="noreferrer">Open the application in your browser</a>
+          {safeUrl && (
+            <a href={safeUrl} target="_blank" rel="noreferrer">Open the application in your browser</a>
           )}{" "}
           to finish it yourself.{BLOCKER_HINT[outcome.kind] ? ` ${BLOCKER_HINT[outcome.kind]}` : ""}
         </p>
@@ -401,11 +403,16 @@ function ReviewForm({
     : cvVariantId
       ? cvVariants.find((v) => v.id === cvVariantId)
       : undefined;
+  const safeReviewUrl = safeExternalHref(reviewUrl);
 
   return (
     <div className="site-review">
       <p className="site-review-url">
-        Reviewing <a href={reviewUrl} target="_blank" rel="noreferrer">{reviewUrl}</a>
+        Reviewing {safeReviewUrl ? (
+          <a href={safeReviewUrl} target="_blank" rel="noreferrer">{reviewUrl}</a>
+        ) : (
+          reviewUrl
+        )}
       </p>
 
       <p className="site-cv-line">
@@ -800,16 +807,24 @@ function SiteConfirmOutcomePane({
   onResolved: () => void;
 }) {
   switch (outcome.status) {
-    case "submitted":
+    case "submitted": {
+      const safeFinalUrl = safeExternalHref(outcome.finalUrl);
       return (
         <div className="site-outcome site-outcome-submitted">
           <p>Submitted — confirmation <code>{outcome.confirmationId ?? "(none reported by the site)"}</code></p>
-          <p><a href={outcome.finalUrl} target="_blank" rel="noreferrer">{outcome.finalUrl}</a></p>
+          <p>
+            {safeFinalUrl ? (
+              <a href={safeFinalUrl} target="_blank" rel="noreferrer">{outcome.finalUrl}</a>
+            ) : (
+              outcome.finalUrl
+            )}
+          </p>
           {outcome.screenshotPath && (
             <p className="site-outcome-hint">Evidence saved to <code>{outcome.screenshotPath}</code></p>
           )}
         </div>
       );
+    }
     case "blocked":
       return (
         <div className="site-outcome site-outcome-blocked">

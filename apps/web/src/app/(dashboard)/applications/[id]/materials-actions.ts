@@ -39,7 +39,8 @@ const approvalIdSchema = z.object({ id: z.string().uuid() });
 export async function approveDocumentAction(raw: { id: string }): Promise<{ ok: boolean }> {
   const { id } = approvalIdSchema.parse(raw);
   const db = getDb();
-  const updated = await setDocumentApproval(db, id, "approved");
+  const ws = await getActiveWorkspace(db);
+  const updated = await setDocumentApproval(db, ws.id, id, "approved");
   if (updated) revalidatePath(`/applications/${updated.applicationId}`);
   return { ok: updated !== null };
 }
@@ -47,7 +48,8 @@ export async function approveDocumentAction(raw: { id: string }): Promise<{ ok: 
 export async function rejectDocumentAction(raw: { id: string }): Promise<{ ok: boolean }> {
   const { id } = approvalIdSchema.parse(raw);
   const db = getDb();
-  const updated = await setDocumentApproval(db, id, "rejected");
+  const ws = await getActiveWorkspace(db);
+  const updated = await setDocumentApproval(db, ws.id, id, "rejected");
   if (updated) revalidatePath(`/applications/${updated.applicationId}`);
   return { ok: updated !== null };
 }

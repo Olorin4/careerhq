@@ -36,7 +36,8 @@ const reverifySchema = z.object({ id: z.string().uuid(), reviewBy: z.coerce.date
 export async function reverifyFactAction(formData: FormData): Promise<void> {
   const input = reverifySchema.parse(Object.fromEntries(formData));
   const db = getDb();
-  await reverifyFact(db, input.id, input.reviewBy);
+  const ws = await getActiveWorkspace(db);
+  await reverifyFact(db, ws.id, input.id, input.reviewBy);
   revalidatePath("/facts");
 }
 
@@ -45,6 +46,7 @@ const archiveSchema = z.object({ id: z.string().uuid() });
 export async function archiveFactAction(formData: FormData): Promise<void> {
   const input = archiveSchema.parse(Object.fromEntries(formData));
   const db = getDb();
-  await archiveFact(db, input.id);
+  const ws = await getActiveWorkspace(db);
+  await archiveFact(db, ws.id, input.id);
   revalidatePath("/facts");
 }

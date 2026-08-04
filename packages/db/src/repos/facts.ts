@@ -25,6 +25,7 @@ export async function createFact(db: Db, input: FactInput): Promise<CandidateFac
 
 export async function updateFact(
   db: Db,
+  workspaceId: string,
   id: string,
   patch: Partial<Omit<FactInput, "workspaceId">>,
 ): Promise<CandidateFact | null> {
@@ -35,19 +36,25 @@ export async function updateFact(
     ...(patch.evidenceUrl !== undefined ? { evidenceUrl: patch.evidenceUrl } : {}),
     ...(patch.sensitivity !== undefined ? { sensitivity: patch.sensitivity } : {}),
     ...(patch.reviewBy !== undefined ? { reviewBy: patch.reviewBy } : {}),
-  }).where(eq(candidateFacts.id, id)).returning();
+  }).where(and(eq(candidateFacts.id, id), eq(candidateFacts.workspaceId, workspaceId))).returning();
   return updated ?? null;
 }
 
-export async function archiveFact(db: Db, id: string): Promise<void> {
-  await db.update(candidateFacts).set({ archivedAt: sql`now()` }).where(eq(candidateFacts.id, id));
+export async function archiveFact(db: Db, workspaceId: string, id: string): Promise<void> {
+  await db.update(candidateFacts).set({ archivedAt: sql`now()` })
+    .where(and(eq(candidateFacts.id, id), eq(candidateFacts.workspaceId, workspaceId)));
 }
 
-export async function reverifyFact(db: Db, id: string, reviewBy: Date): Promise<CandidateFact | null> {
+export async function reverifyFact(
+  db: Db,
+  workspaceId: string,
+  id: string,
+  reviewBy: Date,
+): Promise<CandidateFact | null> {
   const [updated] = await db.update(candidateFacts).set({
     verifiedAt: sql`now()`,
     reviewBy,
-  }).where(eq(candidateFacts.id, id)).returning();
+  }).where(and(eq(candidateFacts.id, id), eq(candidateFacts.workspaceId, workspaceId))).returning();
   return updated ?? null;
 }
 

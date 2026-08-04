@@ -82,7 +82,8 @@ export async function approveAnswerAction(
 ): Promise<{ ok: boolean }> {
   const { id, reusable } = approveSchema.parse(raw);
   const db = getDb();
-  const updated = await approveAnswer(db, id, { reusable });
+  const ws = await getActiveWorkspace(db);
+  const updated = await approveAnswer(db, ws.id, id, { reusable });
   if (updated) {
     revalidatePath(`/applications/${updated.applicationId}`);
     if (updated.reusable) revalidatePath("/answers");
@@ -95,7 +96,8 @@ const idSchema = z.object({ id: z.string().uuid() });
 export async function rejectAnswerAction(raw: { id: string }): Promise<{ ok: boolean }> {
   const { id } = idSchema.parse(raw);
   const db = getDb();
-  const updated = await rejectAnswer(db, id);
+  const ws = await getActiveWorkspace(db);
+  const updated = await rejectAnswer(db, ws.id, id);
   if (updated) revalidatePath(`/applications/${updated.applicationId}`);
   return { ok: updated !== null };
 }

@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { normalizeQuestion } from "@careerhq/core";
 import type { AnswerOrigin, Sensitivity } from "@careerhq/contracts";
 import type { Db } from "../client.js";
@@ -35,8 +35,15 @@ function addMonths(date: Date, months: number): Date {
   return result;
 }
 
+/**
+ * Scoped to `workspaceId` via the answer's application (there is no
+ * `workspace_id` column on `application_answers` itself) — mirrors
+ * `listReusableAnswers`'s application join so an answer can only be
+ * approved by the workspace that owns its application.
+ */
 export async function approveAnswer(
   db: Db,
+  workspaceId: string,
   id: string,
   opts: { reusable: boolean; reviewBy?: Date },
 ): Promise<ApplicationAnswer | null> {
@@ -46,13 +53,26 @@ export async function approveAnswer(
     approvedAt: sql`now()`,
     reusable: opts.reusable,
     reviewBy,
-  }).where(eq(applicationAnswers.id, id)).returning();
+  }).where(and(
+    eq(applicationAnswers.id, id),
+    inArray(
+      applicationAnswers.applicationId,
+      db.select({ id: applications.id }).from(applications).where(eq(applications.workspaceId, workspaceId)),
+    ),
+  )).returning();
   return updated ?? null;
 }
 
-export async function rejectAnswer(db: Db, id: string): Promise<ApplicationAnswer | null> {
+/** Scoped to `workspaceId` via the answer's application — see `approveAnswer`. */
+export async function rejectAnswer(db: Db, workspaceId: string, id: string): Promise<ApplicationAnswer | null> {
   const [updated] = await db.update(applicationAnswers).set({ approval: "rejected" })
-    .where(eq(applicationAnswers.id, id)).returning();
+    .where(and(
+      eq(applicationAnswers.id, id),
+      inArray(
+        applicationAnswers.applicationId,
+        db.select({ id: applications.id }).from(applications).where(eq(applications.workspaceId, workspaceId)),
+      ),
+    )).returning();
   return updated ?? null;
 }
 

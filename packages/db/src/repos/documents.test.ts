@@ -34,9 +34,9 @@ d("documents repo", () => {
     });
     expect(doc.approval).toBe("draft");
     expect(doc.origin).toBe("ai");
-    const approved = await setDocumentApproval(db, doc.id, "approved");
+    const approved = await setDocumentApproval(db, workspaceId, doc.id, "approved");
     expect(approved?.approvedAt).toBeInstanceOf(Date);
-    const rejected = await setDocumentApproval(db, doc.id, "rejected");
+    const rejected = await setDocumentApproval(db, workspaceId, doc.id, "rejected");
     expect(rejected?.approvedAt).toBeNull();
   });
 
@@ -62,7 +62,7 @@ d("documents repo", () => {
     });
     expect(await hasApprovedMaterials(db, app.id)).toBe(false);
 
-    await setDocumentApproval(db, draft.id, "rejected");
+    await setDocumentApproval(db, workspaceId, draft.id, "rejected");
     expect(await hasApprovedMaterials(db, app.id)).toBe(false);
   });
 
@@ -71,7 +71,7 @@ d("documents repo", () => {
     const doc = await createDocument(db, {
       applicationId: app.id, kind: "email_body", contentMd: "Draft", sourceFactIds: [],
     });
-    await setDocumentApproval(db, doc.id, "approved");
+    await setDocumentApproval(db, workspaceId, doc.id, "approved");
     expect(await hasApprovedMaterials(db, app.id)).toBe(true);
   });
 
@@ -81,8 +81,24 @@ d("documents repo", () => {
     const doc = await createDocument(db, {
       applicationId: appA.id, kind: "cover_letter", contentMd: "Draft", sourceFactIds: [],
     });
-    await setDocumentApproval(db, doc.id, "approved");
+    await setDocumentApproval(db, workspaceId, doc.id, "approved");
     expect(await hasApprovedMaterials(db, appA.id)).toBe(true);
     expect(await hasApprovedMaterials(db, appB.id)).toBe(false);
+  });
+
+  it("refuses to approve a document belonging to another workspace", async () => {
+    const other = await db.insert(workspaces).values({ name: `t-other-${Date.now()}`, kind: "personal" }).returning();
+    const otherId = other[0]!.id;
+    try {
+      const otherApp = await createApplication(db, { workspaceId: otherId, companyName: "Other Corp", jobTitle: "Eng" });
+      const doc = await createDocument(db, {
+        applicationId: otherApp.id, kind: "cover_letter", contentMd: "Other workspace draft", sourceFactIds: [],
+      });
+      const result = await setDocumentApproval(db, workspaceId, doc.id, "approved"); // wrong workspace
+      expect(result).toBeNull();
+      expect(await hasApprovedMaterials(db, otherApp.id)).toBe(false); // untouched
+    } finally {
+      await db.delete(workspaces).where(eq(workspaces.id, otherId));
+    }
   });
 });
