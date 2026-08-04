@@ -51,7 +51,11 @@ export function JobRow({ job }: { job: JobRowData }) {
   function handleDismiss() {
     setError(null);
     startTransition(async () => {
-      await dismissJobAction({ jobId: job.id });
+      const result = await dismissJobAction({ jobId: job.id });
+      if (!result.ok) {
+        setError(result.reason);
+        return;
+      }
       setDismissed(true);
       router.refresh();
     });

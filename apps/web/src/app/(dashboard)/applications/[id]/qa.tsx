@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type FormEvent } from "react";
+import { useActionState, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicationAnswer } from "@careerhq/db";
 import { ProvenanceChips } from "../../../../components/provenance-chips.js";
@@ -77,8 +77,11 @@ function ManualAnswerForm({
   onQuestionChange: (value: string) => void;
   sensitive: boolean;
 }) {
+  // Same reasoning as the materials panel's manual draft form: the action
+  // reports why it saved nothing rather than throwing or failing silently.
+  const [saveError, saveManualAnswer] = useActionState(saveManualAnswerAction, null);
   return (
-    <form action={saveManualAnswerAction} className="qa-manual-form">
+    <form action={saveManualAnswer} className="qa-manual-form">
       <input type="hidden" name="applicationId" value={applicationId} />
       <input type="hidden" name="sensitivity" value={sensitive ? "sensitive" : "normal"} />
       <label>
@@ -97,6 +100,7 @@ function ManualAnswerForm({
         <textarea name="answer" rows={4} required />
       </label>
       <button type="submit">Save manual answer</button>
+      {saveError && <p className="qa-error">{saveError}</p>}
     </form>
   );
 }
@@ -185,7 +189,7 @@ export function QaPanel({ applicationId, answers, factClaims }: QaPanelProps) {
     startTransition(async () => {
       const approveResult = await approveAnswerAction({ id, reusable });
       if (approveResult.ok) router.refresh();
-      else setError("Could not approve this answer.");
+      else setError(`Could not approve this answer: ${approveResult.reason}`);
     });
   }
 
@@ -193,7 +197,7 @@ export function QaPanel({ applicationId, answers, factClaims }: QaPanelProps) {
     startTransition(async () => {
       const rejectResult = await rejectAnswerAction({ id });
       if (rejectResult.ok) router.refresh();
-      else setError("Could not reject this answer.");
+      else setError(`Could not reject this answer: ${rejectResult.reason}`);
     });
   }
 

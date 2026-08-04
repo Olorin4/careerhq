@@ -109,6 +109,11 @@ const envSchema = z.object({
   // refuses server-side, and the layout shows the non-dismissible banner.
   // Off by default, like every other gate in this file.
   DEMO_MODE: boolFromEnv,
+  // How many times a single mutating action may run per minute in demo mode
+  // (apps/web/src/lib/rate-limit.ts). Only consulted when DEMO_MODE is on —
+  // a personal install is never throttled — but parsed always, so a nonsense
+  // value fails at startup rather than the first time a visitor clicks.
+  DEMO_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(30),
   // Compared against a connection's SMTP host by the sandbox gate. An empty
   // value (what Compose passes for an unset variable) must not become an empty
   // allow-list entry — it falls back to the default, like the model lists.
@@ -199,6 +204,8 @@ export interface AppConfig {
   sandboxForceSafe: boolean;
   /** Puts the app on the sandbox workspace and disables credential setup; default false. */
   demoMode: boolean;
+  /** Per-action, per-minute call budget applied only in demo mode; default 30. */
+  demoRateLimitPerMin: number;
   /** Never empty: the only SMTP host a sandbox workspace may submit to. */
   sandboxSmtpAllowedHost: string;
   /** Never empty: the only site hostname a sandbox workspace may auto-apply to. */
@@ -242,6 +249,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     submissionsLiveCompanySite: parsed.SUBMISSIONS_LIVE_COMPANY_SITE,
     sandboxForceSafe: parsed.SANDBOX_FORCE_SAFE,
     demoMode: parsed.DEMO_MODE,
+    demoRateLimitPerMin: parsed.DEMO_RATE_LIMIT_PER_MIN,
     sandboxSmtpAllowedHost: parsed.SANDBOX_SMTP_ALLOWED_HOST,
     sandboxSiteAllowedHost: parsed.SANDBOX_SITE_ALLOWED_HOST,
     followUpDays: parsed.FOLLOW_UP_DAYS,

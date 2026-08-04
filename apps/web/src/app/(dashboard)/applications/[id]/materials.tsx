@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DOCUMENT_KINDS, type DocumentKind } from "@careerhq/contracts";
 import type { GeneratedDocument } from "@careerhq/db";
@@ -107,6 +107,10 @@ function MaterialSection({
   const [fellBack, setFellBack] = useState(false);
   const [outcome, setOutcome] = useState<GenerationOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The manual form posts straight to the server action; `useActionState`
+  // carries back the reason a save did nothing (currently only the demo rate
+  // limit) so it is never silently dropped.
+  const [manualError, saveManualDraft] = useActionState(createManualDocumentAction, null);
 
   async function runNonStreamingFallback() {
     setFellBack(true);
@@ -188,7 +192,7 @@ function MaterialSection({
     startTransition(async () => {
       const result = await approveDocumentAction({ id: document.id });
       if (result.ok) router.refresh();
-      else setError("Could not approve this document.");
+      else setError(`Could not approve this document: ${result.reason}`);
     });
   }
 
@@ -197,7 +201,7 @@ function MaterialSection({
     startTransition(async () => {
       const result = await rejectDocumentAction({ id: document.id });
       if (result.ok) router.refresh();
-      else setError("Could not reject this document.");
+      else setError(`Could not reject this document: ${result.reason}`);
     });
   }
 
@@ -263,7 +267,7 @@ function MaterialSection({
         )}
       </div>
 
-      <form action={createManualDocumentAction} className="materials-manual-form">
+      <form action={saveManualDraft} className="materials-manual-form">
         <input type="hidden" name="applicationId" value={applicationId} />
         <input type="hidden" name="kind" value={kind} />
         <label>
@@ -276,6 +280,7 @@ function MaterialSection({
           />
         </label>
         <button type="submit">Save manual draft</button>
+        {manualError && <p className="materials-error">{manualError}</p>}
       </form>
     </div>
   );

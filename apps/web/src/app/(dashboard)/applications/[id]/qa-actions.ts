@@ -6,6 +6,7 @@ import { classifyQuestionSensitivity } from "@careerhq/core";
 import { approveAnswer, createAnswer, rejectAnswer } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { demoRateLimit } from "../../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import { runGeneration, type GenerationOutcome } from "../../../../lib/generation.js";
 
@@ -32,6 +33,8 @@ export async function askQuestionAction(
   raw: { applicationId: string; question: string },
 ): Promise<AskQuestionResult> {
   const args = askSchema.parse(raw);
+  const limited = demoRateLimit("askQuestion");
+  if (limited) return { outcome: { status: "failed", error: limited } };
   const db = getDb();
   const config = loadConfig();
   const ws = await getActiveWorkspace(db);
@@ -61,9 +64,19 @@ const manualAnswerSchema = z.object({
  * `createManualDocumentAction`, and the only path that can ever write a
  * `sensitivity: "sensitive"` row, since `runGeneration` never persists an AI
  * answer to a sensitive question.
+ *
+ * Shaped for `useActionState` like `createManualDocumentAction`: it returns the
+ * reason it did nothing (or null on success) rather than throwing, so a
+ * rate-limited save is visible in the form instead of silently dropping what
+ * the user typed.
  */
-export async function saveManualAnswerAction(formData: FormData): Promise<void> {
+export async function saveManualAnswerAction(
+  _previous: string | null,
+  formData: FormData,
+): Promise<string | null> {
   const input = manualAnswerSchema.parse(Object.fromEntries(formData));
+  const limited = demoRateLimit("saveManualAnswer");
+  if (limited) return limited;
   const db = getDb();
   await createAnswer(db, {
     applicationId: input.applicationId,
@@ -73,31 +86,41 @@ export async function saveManualAnswerAction(formData: FormData): Promise<void> 
     sensitivity: input.sensitivity,
   });
   revalidatePath(`/applications/${input.applicationId}`);
+  return null;
 }
 
 const approveSchema = z.object({ id: z.string().uuid(), reusable: z.boolean() });
 
+/** Carries a reason so the panel can say WHY, rather than only that it failed. */
+export type AnswerActionResult = { ok: true } | { ok: false; reason: string };
+
+const ANSWER_GONE = "this answer no longer exists";
+
 export async function approveAnswerAction(
   raw: { id: string; reusable: boolean },
-): Promise<{ ok: boolean }> {
+): Promise<AnswerActionResult> {
   const { id, reusable } = approveSchema.parse(raw);
+  const limited = demoRateLimit("approveAnswer");
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
   const ws = await getActiveWorkspace(db);
   const updated = await approveAnswer(db, ws.id, id, { reusable });
-  if (updated) {
-    revalidatePath(`/applications/${updated.applicationId}`);
-    if (updated.reusable) revalidatePath("/answers");
-  }
-  return { ok: updated !== null };
+  if (!updated) return { ok: false, reason: ANSWER_GONE };
+  revalidatePath(`/applications/${updated.applicationId}`);
+  if (updated.reusable) revalidatePath("/answers");
+  return { ok: true };
 }
 
 const idSchema = z.object({ id: z.string().uuid() });
 
-export async function rejectAnswerAction(raw: { id: string }): Promise<{ ok: boolean }> {
+export async function rejectAnswerAction(raw: { id: string }): Promise<AnswerActionResult> {
   const { id } = idSchema.parse(raw);
+  const limited = demoRateLimit("rejectAnswer");
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
   const ws = await getActiveWorkspace(db);
   const updated = await rejectAnswer(db, ws.id, id);
-  if (updated) revalidatePath(`/applications/${updated.applicationId}`);
-  return { ok: updated !== null };
+  if (!updated) return { ok: false, reason: ANSWER_GONE };
+  revalidatePath(`/applications/${updated.applicationId}`);
+  return { ok: true };
 }

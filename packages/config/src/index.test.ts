@@ -261,4 +261,18 @@ describe("loadConfig", () => {
   it("enables demoMode for DEMO_MODE=true", () => {
     expect(loadConfig({ ...BASE, DEMO_MODE: "true" }).demoMode).toBe(true);
   });
+
+  // The per-action budget the hosted demo's rate limiter spends (spec P6 §3).
+  // Only consulted when demoMode is on, but parsed always: a nonsense value
+  // should fail at startup, not the first time a visitor clicks something.
+  it("defaults demoRateLimitPerMin to 30", () => {
+    expect(loadConfig(BASE).demoRateLimitPerMin).toBe(30);
+  });
+  it("takes an explicit DEMO_RATE_LIMIT_PER_MIN", () => {
+    expect(loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "5" }).demoRateLimitPerMin).toBe(5);
+  });
+  it("rejects a non-positive DEMO_RATE_LIMIT_PER_MIN", () => {
+    expect(() => loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "0" })).toThrow(/DEMO_RATE_LIMIT_PER_MIN/);
+    expect(() => loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "-1" })).toThrow(/DEMO_RATE_LIMIT_PER_MIN/);
+  });
 });
