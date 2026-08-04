@@ -7,8 +7,6 @@
 //
 // Also exports `parseForm`, the single ATS-dispatch entry point later tasks
 // use: detectAts → parseGreenhouse | parseLever | parseGenericForm(generic).
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { canonicalFormSchema, type CanonicalField, type CanonicalForm, type FieldKind } from "@careerhq/contracts";
 import { detectAts } from "../detect.js";
 import { parseGenericForm } from "../generic.js";
@@ -16,10 +14,10 @@ import { rawFieldId, type RawField, type RawFormPage } from "../raw.js";
 import { isAttestationCheckbox } from "./attestation.js";
 import { hashRawFormPage, parseGreenhouse } from "./greenhouse.js";
 
-// Re-exported so callers (and this file's own fixture-hash tripwire below)
-// can import the hashing helper from either adapter module — it traces back
-// to the single declaration in greenhouse.ts, so the index.ts barrel's
-// `export *` from both adapters is not an ambiguous re-export.
+// Re-exported so callers can import the hashing helper from either adapter
+// module — it traces back to the single declaration in greenhouse.ts, so the
+// index.ts barrel's `export *` from both adapters is not an ambiguous
+// re-export.
 export { hashRawFormPage };
 
 interface NameHint {
@@ -121,23 +119,10 @@ export function parseLever(page: RawFormPage): CanonicalForm {
   return canonicalFormSchema.parse({ ...generic, fields });
 }
 
-// `import.meta.dirname` — see the identical note in greenhouse.ts's
-// FIXTURE_PATH: webpack's static `new URL(literal, import.meta.url)` asset
-// analysis breaks apps/web's production build once this module is reachable
-// from a server action.
-const FIXTURE_PATH = path.resolve(import.meta.dirname, "..", "..", "fixtures", "lever-page.json");
-
-function loadFixtureRawPage(): RawFormPage {
-  return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as RawFormPage;
-}
-
-/**
- * sha256 of the committed `fixtures/lever-page.json` — the parser-drift
- * tripwire (spec §10.5), same pattern as GREENHOUSE_FIXTURE_HASH: if
- * apps/demo-ats's Lever markup drifts without regenerating the fixture
- * (`scripts/write-fixture.ts lever`), the matching test fails.
- */
-export const LEVER_FIXTURE_HASH: string = hashRawFormPage(loadFixtureRawPage());
+// The Lever parser-drift tripwire moved out of this module for the same reason
+// as Greenhouse's — see the note in greenhouse.ts. It is now
+// `readLeverFixtureHash()` in `../testing/fixtures.ts`, called only by the
+// tests, so nothing here reads disk at import time.
 
 /**
  * The single ATS-dispatch entry point later tasks (Task 7+) use: detect the

@@ -1,26 +1,12 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { greenhousePage } from "@careerhq/demo-ats";
-import { rawFieldId, type RawField, type RawFormPage } from "../raw.js";
+import { rawFieldId, type RawField } from "../raw.js";
+import { loadGreenhouseFixture as loadFixture, readGreenhouseFixtureHash } from "../testing/fixtures.js";
 import { rawPageFromHtml } from "../testing/from-html.js";
-import { GREENHOUSE_FIXTURE_HASH, hashRawFormPage, parseGreenhouse } from "./greenhouse.js";
+import { hashRawFormPage, parseGreenhouse } from "./greenhouse.js";
 
 const job = { id: "eng-1", title: "Senior Robotics Engineer", company: "Northwind Robotics" };
 const url = "https://northwind.example/greenhouse/jobs/eng-1";
-
-const FIXTURE_PATH = path.resolve(
-  fileURLToPath(new URL(".", import.meta.url)),
-  "..",
-  "..",
-  "fixtures",
-  "greenhouse-page.json",
-);
-
-function loadFixture(): RawFormPage {
-  return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as RawFormPage;
-}
 
 function idFor(selector: string): string {
   return rawFieldId({ selector } as RawField);
@@ -91,10 +77,10 @@ describe("parseGreenhouse (committed fixture)", () => {
   });
 });
 
-describe("GREENHOUSE_FIXTURE_HASH (parser-drift tripwire)", () => {
+describe("readGreenhouseFixtureHash (parser-drift tripwire)", () => {
   it("still matches the sha256 of the live demo-ats helper output", () => {
     const livePage = rawPageFromHtml(greenhousePage(job), url);
-    expect(hashRawFormPage(livePage)).toBe(GREENHOUSE_FIXTURE_HASH);
+    expect(hashRawFormPage(livePage)).toBe(readGreenhouseFixtureHash());
   });
 });
 

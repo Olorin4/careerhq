@@ -1,39 +1,15 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { leverPage } from "@careerhq/demo-ats";
-import { rawFieldId, type RawField, type RawFormPage } from "../raw.js";
+import { rawFieldId, type RawField } from "../raw.js";
+import {
+  loadGreenhouseFixture, loadLeverFixture as loadFixture, readGreenhouseFixtureHash, readLeverFixtureHash,
+} from "../testing/fixtures.js";
 import { rawPageFromHtml } from "../testing/from-html.js";
-import { GREENHOUSE_FIXTURE_HASH, parseGreenhouse } from "./greenhouse.js";
-import { hashRawFormPage, LEVER_FIXTURE_HASH, parseForm, parseLever } from "./lever.js";
+import { parseGreenhouse } from "./greenhouse.js";
+import { hashRawFormPage, parseForm, parseLever } from "./lever.js";
 
 const job = { id: "eng-1", title: "Senior Robotics Engineer", company: "Northwind Robotics" };
 const url = "https://northwind.example/lever/jobs/eng-1";
-
-const FIXTURE_PATH = path.resolve(
-  fileURLToPath(new URL(".", import.meta.url)),
-  "..",
-  "..",
-  "fixtures",
-  "lever-page.json",
-);
-
-const GREENHOUSE_FIXTURE_PATH = path.resolve(
-  fileURLToPath(new URL(".", import.meta.url)),
-  "..",
-  "..",
-  "fixtures",
-  "greenhouse-page.json",
-);
-
-function loadFixture(): RawFormPage {
-  return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as RawFormPage;
-}
-
-function loadGreenhouseFixture(): RawFormPage {
-  return JSON.parse(readFileSync(GREENHOUSE_FIXTURE_PATH, "utf8")) as RawFormPage;
-}
 
 function idFor(selector: string): string {
   return rawFieldId({ selector } as RawField);
@@ -130,10 +106,10 @@ describe("attestation checkboxes map to legal_attestation", () => {
   });
 });
 
-describe("LEVER_FIXTURE_HASH (parser-drift tripwire)", () => {
+describe("readLeverFixtureHash (parser-drift tripwire)", () => {
   it("still matches the sha256 of the live demo-ats helper output", () => {
     const livePage = rawPageFromHtml(leverPage(job), url);
-    expect(hashRawFormPage(livePage)).toBe(LEVER_FIXTURE_HASH);
+    expect(hashRawFormPage(livePage)).toBe(readLeverFixtureHash());
   });
 });
 
@@ -141,7 +117,7 @@ describe("parseForm dispatch", () => {
   it("dispatches a greenhouse-marked page to parseGreenhouse", () => {
     const page = loadGreenhouseFixture();
     expect(parseForm(page)).toEqual(parseGreenhouse(page));
-    expect(GREENHOUSE_FIXTURE_HASH).toBe(hashRawFormPage(page));
+    expect(readGreenhouseFixtureHash()).toBe(hashRawFormPage(page));
   });
 
   it("dispatches a lever-marked page to parseLever", () => {
