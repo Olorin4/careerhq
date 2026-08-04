@@ -96,6 +96,20 @@ function optionalString(value: string | undefined): string | null {
 }
 
 /**
+ * A string setting whose documented default must apply to an *empty* value as
+ * well as an absent one. Zod's `.default()` fires on `undefined` alone, and
+ * Compose's `${VAR:-}` form — used for every variable an operator may leave
+ * unset — passes "", so a plain `.default()` is silently inert in exactly the
+ * deployment that relies on it. `AI_REPLAY_DIR` is the case that bit: "" ran
+ * through `resolveSharedDir` to the repo root, where no fixture lives, and
+ * every AI replay missed with nothing logged anywhere. Numeric and enum
+ * settings do not need this — "" fails their parse loudly at startup.
+ */
+function blankableDefault(fallback: string) {
+  return z.string().default(fallback).transform((value) => value.trim() || fallback);
+}
+
+/**
  * The compose service name of the local mail sink. A sandbox workspace may
  * only send to this host (spec §11's `sandbox_blocked` gate), so the value has
  * to point at something that cannot reach a real recruiter.
@@ -141,18 +155,12 @@ const envSchema = z.object({
   // Compared against a connection's SMTP host by the sandbox gate. An empty
   // value (what Compose passes for an unset variable) must not become an empty
   // allow-list entry — it falls back to the default, like the model lists.
-  SANDBOX_SMTP_ALLOWED_HOST: z
-    .string()
-    .default(DEFAULT_SANDBOX_SMTP_HOST)
-    .transform((v) => v.trim() || DEFAULT_SANDBOX_SMTP_HOST),
+  SANDBOX_SMTP_ALLOWED_HOST: blankableDefault(DEFAULT_SANDBOX_SMTP_HOST),
   // The company-site equivalent, compared against the target URL's hostname.
   // Same empty-value rule: Compose passes "" for anything the user never set.
-  SANDBOX_SITE_ALLOWED_HOST: z
-    .string()
-    .default(DEFAULT_SANDBOX_SITE_HOST)
-    .transform((v) => v.trim() || DEFAULT_SANDBOX_SITE_HOST),
+  SANDBOX_SITE_ALLOWED_HOST: blankableDefault(DEFAULT_SANDBOX_SITE_HOST),
   FOLLOW_UP_DAYS: z.coerce.number().int().positive().default(7),
-  FILE_STORAGE_DIR: z.string().default("var/files").transform(resolveSharedDir),
+  FILE_STORAGE_DIR: blankableDefault("var/files").transform(resolveSharedDir),
   // AI features are off by default (deterministic floor) until a key is provisioned.
   OPENROUTER_API_KEY: z.string().optional(),
   AI_FAST_MODELS: z
@@ -163,21 +171,26 @@ const envSchema = z.object({
     .string()
     .default(DEFAULT_AI_WRITING_MODELS.join(","))
     .transform((value) => parseModelList(value, DEFAULT_AI_WRITING_MODELS)),
-  INGEST_CRON: z.string().default("0 */6 * * *"),
-  EMAIL_SYNC_CRON: z.string().default("*/15 * * * *"),
+  // The crons take the same treatment: an empty cron string schedules
+  // nothing, so a blank value would quietly turn the worker's ingest, email
+  // poll or demo reset off rather than fall back to the documented interval.
+  INGEST_CRON: blankableDefault("0 */6 * * *"),
+  EMAIL_SYNC_CRON: blankableDefault("*/15 * * * *"),
   // How often the worker wipes and reseeds the demo workspace. Only scheduled
   // when DEMO_MODE is on (apps/worker/src/main.ts) — a personal deployment must
   // never register a job that deletes data — but parsed always, like the other
   // crons, so a typo fails at startup rather than six hours later.
-  DEMO_RESET_CRON: z.string().default("0 */6 * * *"),
+  DEMO_RESET_CRON: blankableDefault("0 */6 * * *"),
   AI_MODE: z.enum(AI_MODES, {
     errorMap: () => ({
       message: `AI_MODE must be one of: ${AI_MODES.join(", ")}`,
     }),
   }).default("live"),
   // Where withReplay's filesystem store keeps recorded AI calls. Fixtures are
-  // committed, so the default points at the in-repo directory.
-  AI_REPLAY_DIR: z.string().default("packages/ai/fixtures/replay").transform(resolveSharedDir),
+  // committed, so the default points at the in-repo directory — and it is
+  // `blankableDefault` because Compose passes `AI_REPLAY_DIR: ${AI_REPLAY_DIR:-}`,
+  // which is the empty string for anyone who never set it.
+  AI_REPLAY_DIR: blankableDefault("packages/ai/fixtures/replay").transform(resolveSharedDir),
   // The libsodium secretbox key used to seal/open email credentials
   // (packages/db/src/crypto.ts). Unset (or empty, as Compose passes with
   // `${CAREERHQ_MASTER_KEY:-}`) disables email connections entirely — there
@@ -198,10 +211,8 @@ const envSchema = z.object({
   AUTOAPPLY_MAX_CONCURRENT_BROWSERS: z.coerce.number().int().positive().default(1),
   // The fictional ATS (apps/demo-ats): the only site auto-apply demos target.
   // Compose's service name is the default; a local run points at localhost.
-  DEMO_ATS_URL: z
-    .string()
-    .default(DEFAULT_DEMO_ATS_URL)
-    .transform((v) => v.trim().replace(/\/+$/, "") || DEFAULT_DEMO_ATS_URL)
+  DEMO_ATS_URL: blankableDefault(DEFAULT_DEMO_ATS_URL)
+    .transform((v) => v.replace(/\/+$/, "") || DEFAULT_DEMO_ATS_URL)
     .refine(
       (v) => {
         // Not `URL.canParse`: it accepts "demo-ats:3001" (scheme "demo-ats"),

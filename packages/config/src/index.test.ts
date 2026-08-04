@@ -27,6 +27,20 @@ describe("loadConfig", () => {
   it("rejects non-numeric FOLLOW_UP_DAYS", () => {
     expect(() => loadConfig({ ...BASE, FOLLOW_UP_DAYS: "soon" })).toThrow();
   });
+  // The other half of the empty-value audit. Zod's .default() never fires on
+  // "", so every setting had to be checked: the string ones now fall back
+  // (see FILE_STORAGE_DIR / AI_REPLAY_DIR / the crons below), and the numeric,
+  // boolean and enum ones fail at startup instead — loud, not silent, which is
+  // an acceptable answer for a value nobody can guess a meaning for.
+  it("fails loudly rather than silently on an empty numeric, boolean or enum setting", () => {
+    expect(() => loadConfig({ ...BASE, FOLLOW_UP_DAYS: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_BROWSER_TIMEOUT_MS: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, DEMO_MODE: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, SUBMISSIONS_LIVE_EMAIL: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, AI_MODE: "" })).toThrow(/AI_MODE/);
+  });
   it("resolves a relative FILE_STORAGE_DIR against the repo root, not cwd", () => {
     // vitest runs with cwd = packages/config; the shared file tree is at the
     // repo root, so seed and web must agree on the same absolute directory.
@@ -36,6 +50,13 @@ describe("loadConfig", () => {
   });
   it("keeps an absolute FILE_STORAGE_DIR as given (the Docker volume path)", () => {
     expect(loadConfig({ ...BASE, FILE_STORAGE_DIR: "/app/var/files" }).fileStorageDir).toBe("/app/var/files");
+  });
+  // Same empty-value trap as AI_REPLAY_DIR: "" would resolve to the repo root
+  // and scatter uploaded CVs across the checkout instead of var/files.
+  it("falls back to var/files when FILE_STORAGE_DIR is empty or whitespace", () => {
+    const expected = path.resolve(process.cwd(), "../..", "var/files");
+    expect(loadConfig({ ...BASE, FILE_STORAGE_DIR: "" }).fileStorageDir).toBe(expected);
+    expect(loadConfig({ ...BASE, FILE_STORAGE_DIR: "  " }).fileStorageDir).toBe(expected);
   });
 
   it("defaults AI features off: no OPENROUTER_API_KEY → null", () => {
@@ -97,6 +118,13 @@ describe("loadConfig", () => {
   it("passes through a custom EMAIL_SYNC_CRON", () => {
     expect(loadConfig({ ...BASE, EMAIL_SYNC_CRON: "*/5 * * * *" }).emailSyncCron).toBe("*/5 * * * *");
   });
+  // An empty cron schedules nothing at all, so a blank value has to fall back
+  // to the documented interval rather than silently disabling the job.
+  it("falls back to the documented cron when a cron variable is empty", () => {
+    expect(loadConfig({ ...BASE, INGEST_CRON: "" }).ingestCron).toBe("0 */6 * * *");
+    expect(loadConfig({ ...BASE, EMAIL_SYNC_CRON: "" }).emailSyncCron).toBe("*/15 * * * *");
+    expect(loadConfig({ ...BASE, DEMO_RESET_CRON: "" }).demoResetCron).toBe("0 */6 * * *");
+  });
 
   it("defaults aiMode to live", () => {
     expect(loadConfig(BASE).aiMode).toBe("live");
@@ -151,6 +179,19 @@ describe("loadConfig", () => {
   });
   it("keeps an absolute AI_REPLAY_DIR as given (the container path)", () => {
     expect(loadConfig({ ...BASE, AI_REPLAY_DIR: "/app/fixtures" }).aiReplayDir).toBe("/app/fixtures");
+  });
+  // The failure this guards is silent, not loud: Compose passes
+  // `AI_REPLAY_DIR: ${AI_REPLAY_DIR:-}` — "" for anyone who never set it —
+  // zod's .default() fires only on undefined, and "" resolved to the repo
+  // root, where no fixture lives. Every replay then missed with no error.
+  it("falls back to the committed fixtures dir when AI_REPLAY_DIR is empty", () => {
+    const dir = loadConfig({ ...BASE, AI_REPLAY_DIR: "" }).aiReplayDir;
+    expect(dir).toBe(path.resolve(process.cwd(), "../..", "packages/ai/fixtures/replay"));
+    expect(dir).not.toBe(path.resolve(process.cwd(), "../.."));
+  });
+  it("falls back to the committed fixtures dir when AI_REPLAY_DIR is whitespace only", () => {
+    expect(loadConfig({ ...BASE, AI_REPLAY_DIR: "   " }).aiReplayDir)
+      .toBe(path.resolve(process.cwd(), "../..", "packages/ai/fixtures/replay"));
   });
 
   it("defaults masterKey to null: email connections disabled with no key configured", () => {
