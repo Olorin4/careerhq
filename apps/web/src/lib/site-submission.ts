@@ -906,7 +906,13 @@ export async function confirmAndSubmitSite(
 
   const gateInput: GateCheckInput = {
     envGateOpen: config.submissionsLiveCompanySite,
-    workspaceKind: workspace.kind,
+    // Belt-and-braces (spec P6 §3): SANDBOX_FORCE_SAFE forces every workspace
+    // through the sandbox path independently of workspace.kind — a second,
+    // independent layer so a regression in workspace resolution (which
+    // workspace this really is) doesn't also disable the sandbox host
+    // allow-list. Deliberately not derived from/coupled to DEMO_MODE; it is
+    // its own hard-safety switch.
+    workspaceKind: config.sandboxForceSafe ? "sandbox" : workspace.kind,
     // Only consulted for sandbox workspaces; a sandbox may reach exactly one host.
     sandboxTargetAllowed: payload.host === config.sandboxSiteAllowedHost,
     tokenRecord: confirmation

@@ -782,6 +782,54 @@ d("confirmAndSubmitSite", () => {
     expect((await getActiveConfirmation(db, prepared.attemptId))?.consumedAt ?? null).toBeNull();
   });
 
+  // Belt-and-braces (spec P6 §3): SANDBOX_FORCE_SAFE is an independent hard
+  // switch, not a DEMO_MODE alias — it must sandbox-block a PERSONAL
+  // workspace's live-looking submit, proving the gate input's workspaceKind
+  // is actually forced rather than merely read from the (personal) workspace row.
+  it("forces the sandbox path for a PERSONAL workspace when SANDBOX_FORCE_SAFE is set → sandbox_blocked, nothing clicked, token unburned", async () => {
+    const calls: SubmitCall[] = [];
+    const outsideUrl = "http://careers.northwind.example/greenhouse/jobs/force-safe-co";
+    const outsideHost = "careers.northwind.example";
+
+    const prepared = await previewed(
+      "Force Safe Co", { submit: stubSubmit(calls) }, workspaceId, outsideUrl,
+    );
+
+    const outcome = await confirmAndSubmitSite(deps({
+      config: config({ SANDBOX_FORCE_SAFE: "true" }), submit: stubSubmit(calls),
+    }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: outsideHost,
+    });
+    expect(outcome).toMatchObject({ status: "blocked", code: "sandbox_blocked" });
+
+    // Nothing was typed and nothing was burned: the driver was never reached,
+    // the attempt is still confirmable, and the token is still unconsumed.
+    expect(calls).toHaveLength(0);
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect((await getActiveConfirmation(db, prepared.attemptId))?.consumedAt ?? null).toBeNull();
+  });
+
+  // Guard: the exact same PERSONAL-workspace + off-allow-list-host case must
+  // NOT be sandbox-blocked with the flag off — proving the flag, not
+  // something else about the fixture, is what blocked the test above.
+  it("does not sandbox-block the same personal-workspace case when SANDBOX_FORCE_SAFE is false", async () => {
+    const calls: SubmitCall[] = [];
+    const outsideUrl = "http://careers.northwind.example/greenhouse/jobs/not-forced-co";
+    const outsideHost = "careers.northwind.example";
+
+    const prepared = await previewed(
+      "Not Forced Co", { submit: stubSubmit(calls) }, workspaceId, outsideUrl,
+    );
+
+    const outcome = await confirmAndSubmitSite(deps({
+      config: config({ SANDBOX_FORCE_SAFE: "false" }), submit: stubSubmit(calls),
+    }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: outsideHost,
+    });
+    expect(outcome.status).toBe("submitted");
+  });
+
   it("refuses before the token burns when no browser can start → driver_unavailable", async () => {
     const calls: SubmitCall[] = [];
     const prepared = await previewed("No Chromium Co");
