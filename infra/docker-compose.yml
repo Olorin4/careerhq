@@ -47,8 +47,10 @@ services:
       SUBMISSIONS_LIVE_COMPANY_SITE: ${SUBMISSIONS_LIVE_COMPANY_SITE:-false}
       SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
       SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-demo-ats}
-      # Fictional ATS target for auto-apply demos (spec P5). The web app only
-      # links to it; the worker is what drives a browser against it.
+      # Fictional ATS target for auto-apply demos (spec P5). `web` is what
+      # drives a browser against it: the interactive prepare/preview/confirm
+      # flow launches Chromium in-process (apps/web/src/lib/site-driver.ts),
+      # which is why Dockerfile.web is built on the Playwright base image.
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
       AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
     ports: ["3000:3000"]
@@ -79,7 +81,9 @@ services:
       SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-demo-ats}
       # Auto-apply (spec P5): the fictional ATS the Playwright driver targets,
       # and the driver's per-action budget (navigation, one field, the submit
-      # wait) — not the budget for a whole attempt.
+      # wait) — not the budget for a whole attempt. The worker carries the
+      # driver for P6's queue path; its autoapply consumers are not registered
+      # yet (see apps/worker/src/main.ts).
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
       AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
     volumes: [files:/app/var/files]

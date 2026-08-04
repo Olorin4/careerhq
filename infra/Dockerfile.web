@@ -1,4 +1,22 @@
-FROM node:22-alpine AS base
+# The web service drives a real browser too, so it needs the same base the
+# worker needs — NOT node:22-alpine.
+#
+# `apps/web/src/lib/site-driver.ts` (`makeSiteCapture`/`makeSiteSubmit`, wired
+# into the "use server" auto-apply actions) calls `openSession()` →
+# `chromium.launch()` in-process: the interactive prepare/preview/confirm flow
+# does not hand the page off to `apps/worker`. On alpine that launch cannot
+# succeed — no libnss3/libatk/libgbm/fonts, and Playwright publishes no musl
+# browser builds — so under compose every prepare failed to read the page and
+# every confirm reported a browser it never started.
+#
+# Everything Dockerfile.worker's header says about the tag applies here
+# verbatim: it MUST stay in lockstep with the `playwright` version pinned in
+# apps/worker/package.json (apps/web reaches the driver through
+# `@careerhq/worker/autoapply`, so that is the pin that matters), because the
+# npm package only launches the browser build it shipped with and the image
+# carries exactly that build under PLAYWRIGHT_BROWSERS_PATH=/ms-playwright.
+# Bump all three together — worker image, web image, npm pin.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble AS base
 RUN corepack enable
 WORKDIR /app
 # The lockfile has an importer entry for every workspace package, so copying
