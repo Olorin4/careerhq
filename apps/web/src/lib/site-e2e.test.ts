@@ -14,13 +14,20 @@
  * progress.md's Task 12 FINDING):
  *
  *   1. The happy-path round trip runs against LEVER's `/lever/jobs/eng-2`,
- *      not greenhouse. The greenhouse fixture carries a REQUIRED
- *      legal-attestation checkbox (on every job id — it is a property of the
- *      template), which `detectBlockers` correctly treats as a permanent
- *      page-level blocker (spec §10.6: CareerHQ must never tick a legal
- *      attestation on the user's behalf) — it can never reach "ready", so a
- *      greenhouse URL is this file's `blocked` proof instead (case 6a),
- *      alongside a captcha URL (case 6b).
+ *      not greenhouse, for reasons that predate the 2026-08-04 attestation
+ *      revision below and still hold independently of it (the greenhouse
+ *      fixture's multi-step flow is exercised directly by apps/worker's
+ *      driver.test.ts instead).
+ *
+ *      Revision (2026-08-04): a required attestation CHECKBOX (the
+ *      greenhouse fixture's `legal_attestation`) is no longer a permanent
+ *      page-level blocker — it is field-level consent the user ticks on the
+ *      review screen (spec §10.6, revised). The greenhouse fixture now
+ *      reaches "ready" and is this file's proof of that demotion (case 6a
+ *      below). What still cannot be rendered honestly, and so still blocks
+ *      with kind `legal_attestation`, is a typed-signature/date attestation
+ *      (demo-ats's `/signature/jobs/:id` fixture) — that is this file's
+ *      `blocked` proof instead (case 6b), alongside a captcha URL (case 6c).
  *   2. The `apps/worker` ⇄ `apps/web` package-export seam (`exports` on
  *      apps/worker/package.json, `apps/worker/src/autoapply/index.ts`,
  *      `@careerhq/worker` as an apps/web dependency) was wired in Task 13,
@@ -100,6 +107,7 @@ const BROWSER_TIMEOUT_MS = 60_000;
 const leverUrl = (jobId: string): string => `${DEMO_ATS_URL}/lever/jobs/${jobId}`;
 const greenhouseUrl = (jobId: string): string => `${DEMO_ATS_URL}/greenhouse/jobs/${jobId}`;
 const captchaUrl = (jobId: string): string => `${DEMO_ATS_URL}/captcha/jobs/${jobId}`;
+const signatureUrl = (jobId: string): string => `${DEMO_ATS_URL}/signature/jobs/${jobId}`;
 
 const FACT_EMAIL = "alex.rivera@example.com";
 
@@ -185,6 +193,47 @@ async function settleLeverBlocking(prepared: ReadyPrepare): Promise<void> {
     const value = LEVER_SETTLE_VALUES[field.label];
     if (value === undefined) {
       throw new Error(`no settle value configured for blocking field "${field.label}" — update LEVER_SETTLE_VALUES`);
+    }
+    const result = await updatePlannedAnswer(deps(), {
+      workspaceId, snapshotId: prepared.snapshotId, fieldId, value,
+    });
+    expect(result).toEqual({ ok: true });
+  }
+}
+
+/**
+ * The fact bank resolves the greenhouse fixture's identity/contact/resume
+ * fields the same way it resolves Lever's (see `LEVER_SETTLE_VALUES`), and
+ * the demographics radios are optional (spec: voluntary self-identification
+ * is never required). That leaves three sensitive-but-reusable fields for
+ * the user, plus the now-demoted `legal_attestation` checkbox — the
+ * "demotes the greenhouse checkbox attestation" case below settles the
+ * attestation itself (it is the thing under test) and calls this for the
+ * rest via `skip`.
+ */
+const GREENHOUSE_SETTLE_VALUES: Record<string, string> = {
+  "Are you legally authorized to work in the country of this job posting? (Work Authorization)": "yes",
+  "Will you now or in the future require visa sponsorship?": "no",
+  "Why do you want to work at Northwind Robotics?": "Looking forward to contributing to Northwind's autonomy stack.",
+};
+
+async function settleGreenhouseBlocking(prepared: ReadyPrepare, skip: Set<string>): Promise<void> {
+  for (const fieldId of prepared.blocking) {
+    if (skip.has(fieldId)) continue;
+    const field = prepared.form.fields.find((f) => f.id === fieldId);
+    if (!field) throw new Error(`blocking field ${fieldId} missing from the parsed form`);
+    // The generic parser gives every "Voluntary Self-Identification" radio
+    // option (gender, veteran status) its own field id, each individually
+    // sensitive (canonicalField "demographics") and therefore `needsUser`
+    // regardless of the HTML `required` attribute — none of them carry it,
+    // this section is opt-in. The user declines each by leaving it blank,
+    // exactly the "deliberately left empty" path `updatePlannedAnswer`'s doc
+    // comment describes for an optional field the planner could not settle.
+    const value = field.canonicalField === "demographics" ? "" : GREENHOUSE_SETTLE_VALUES[field.label];
+    if (value === undefined) {
+      throw new Error(
+        `no settle value configured for blocking field "${field.label}" — update GREENHOUSE_SETTLE_VALUES`,
+      );
     }
     const result = await updatePlannedAnswer(deps(), {
       workspaceId, snapshotId: prepared.snapshotId, fieldId, value,
@@ -411,12 +460,18 @@ d("company-site end-to-end round trip against demo-ats", () => {
   );
 
   it(
-    "pauses on the greenhouse fixture's required legal attestation -> blocked, no submission recorded",
+    "pauses on the signature fixture's required legal attestation -> blocked, no submission recorded",
     async () => {
-      // Any greenhouse job id renders the same required attestation checkbox;
-      // this one is unique to this test so the assertion cannot collide with
-      // driver.test.ts, which submits to greenhouse `eng-1` in parallel.
-      const jobUrl = greenhouseUrl("e2e-attestation");
+      // A required attestation CHECKBOX (the greenhouse fixture's
+      // `legal_attestation`) is demoted to field-level consent as of the
+      // 2026-08-04 revision — see the "demotes the greenhouse checkbox
+      // attestation" case below for that proof. What still cannot be
+      // rendered as a tick CareerHQ could honestly complete on the user's
+      // behalf is a typed-signature/date attestation, so that fixture is
+      // this file's `blocked` proof now. Any signature job id renders the
+      // same required signature fields; this one is unique to this test so
+      // the assertion cannot collide with other suites.
+      const jobUrl = signatureUrl("e2e-attestation");
       const applicationId = await readyApplication("Attestation Robotics Co", jobUrl);
       const before = await submissionsFor("e2e-attestation");
 
@@ -431,6 +486,64 @@ d("company-site end-to-end round trip against demo-ats", () => {
       // A paused attempt captured nothing to submit — no snapshot, no click.
       expect(await getLatestSnapshot(db, attempts[0]!.id)).toBeNull();
       expect(await submissionsFor("e2e-attestation")).toHaveLength(before.length);
+    },
+    BROWSER_TIMEOUT_MS,
+  );
+
+  it(
+    "demotes the greenhouse checkbox attestation to a consent tick: prepare -> ready -> user ticks it -> submitted, ticked",
+    async () => {
+      // Any greenhouse job id renders the same required attestation checkbox;
+      // this one is unique to this test so the assertion cannot collide with
+      // driver.test.ts, which submits to greenhouse `eng-1` in parallel.
+      const jobUrl = greenhouseUrl("e2e-attestation-demoted");
+      const applicationId = await readyApplication("Consent Tick Robotics Co", jobUrl);
+      const before = await submissionsFor("e2e-attestation-demoted");
+
+      const outcome = await prepareSiteApplication(deps(), { workspaceId, applicationId, url: jobUrl });
+      expect(outcome.status).toBe("ready");
+      if (outcome.status !== "ready") throw new Error(`prepare failed: ${JSON.stringify(outcome)}`);
+
+      const attestationField = outcome.form.fields.find((f) => f.canonicalField === "legal_attestation");
+      if (!attestationField) throw new Error("no legal_attestation field on the greenhouse fixture");
+      // Never pre-ticked, never profile/ai-sourced: the planner hands it back
+      // to the user with an empty value, exactly like any other consent-only
+      // field (spec §10.6, revised).
+      const plannedAttestation = outcome.answers.find((a) => a.fieldId === attestationField.id);
+      expect(plannedAttestation).toMatchObject({ needsUser: true, source: "user", value: "" });
+      expect(outcome.blocking).toContain(attestationField.id);
+
+      // The user personally ticks it, seeing the exact attestation text.
+      const tick = await updatePlannedAnswer(deps(), {
+        workspaceId, snapshotId: outcome.snapshotId, fieldId: attestationField.id, value: "true",
+      });
+      expect(tick).toEqual({ ok: true });
+
+      await settleGreenhouseBlocking(outcome, new Set([attestationField.id]));
+
+      const preview = await previewSiteSubmission(deps(), { workspaceId, attemptId: outcome.attemptId });
+      expect(preview.status).toBe("ok");
+      if (preview.status !== "ok") throw new Error(`preview failed: ${JSON.stringify(preview)}`);
+      expect(preview.payload.host).toBe(HOST);
+      // The tick is inside the fingerprinted payload — source "user", value "true".
+      const previewedAttestation = preview.payload.answers.find((a) => a.fieldId === attestationField.id);
+      expect(previewedAttestation).toMatchObject({ value: "true", source: "user" });
+
+      const confirm = await confirmAndSubmitSite(deps(), {
+        workspaceId, attemptId: outcome.attemptId, presentedToken: preview.token, retypedTarget: HOST,
+      });
+      expect(confirm.status).toBe("submitted");
+      if (confirm.status !== "submitted") throw new Error(`confirm failed: ${JSON.stringify(confirm)}`);
+
+      const [application] = await db.select().from(applications).where(eq(applications.id, applicationId));
+      expect(application?.state).toBe("SUBMITTED");
+
+      // The recorded demo-ats submission carries the attestation as ticked.
+      const after = await submissionsFor("e2e-attestation-demoted");
+      expect(after.length).toBe(before.length + 1);
+      const created = after.find((s) => s.id === confirm.confirmationId);
+      expect(created).toBeDefined();
+      expect(created?.fields["legal_attestation"]).toBe("true");
     },
     BROWSER_TIMEOUT_MS,
   );
