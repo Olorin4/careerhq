@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseHTML } from "linkedom";
 import { chromium } from "playwright";
-import { greenhousePage, leverPage, type DemoJob } from "@careerhq/demo-ats";
+import { consentPage, greenhousePage, leverPage, type DemoJob } from "@careerhq/demo-ats";
 import { rawPageFromHtml } from "@careerhq/autoapply/testing";
 import { detectBlockers, parseForm, rawFieldId, type RawFormPage } from "@careerhq/autoapply";
 import type { PlannedAnswer } from "@careerhq/contracts";
@@ -274,6 +274,77 @@ live("driver against demo-ats", () => {
     expect(created?.fields["legal_attestation"]).toBe("true");
     expect(created?.fields["gender"]).toBe("decline");
     expect(created?.files[0]?.filename).toBe("resume.pdf");
+  }, 60_000);
+
+  /**
+   * The consent regression (final review F1). A checkbox the page ships
+   * PRE-TICKED and a planned value of "" ("no consent given" — what the review
+   * screen's consent row commits when the user unticks) must end up UNTICKED in
+   * the form the browser actually posts. An unchecked checkbox is simply absent
+   * from a form POST, so the stored submission is a direct read of what was
+   * sent: no inference, no re-reading of the page we just drove.
+   *
+   * Before the fix the driver skipped every empty value, so the pre-ticked box
+   * was never touched and submitted STILL TICKED while the receipt recorded
+   * `value: "" source: "user"` — the receipt saying the opposite of the truth.
+   */
+  it("unticks a PRE-TICKED checkbox whose planned value is empty, and leaves one planned 'true' ticked", async () => {
+    const jobId = "consent-1";
+    const before = await submissionsFor(jobId);
+
+    const url = `${DEMO_ATS_URL}/consent/jobs/${jobId}`;
+    const raw = await capturePage(session, url, deps);
+    const form = parseForm(raw);
+
+    const idFor = (name: string): string => {
+      const field = raw.fields.find((f) => f.name === name);
+      if (!field) throw new Error(`no raw field named ${name}`);
+      return rawFieldId(field);
+    };
+
+    const values: Array<[string, string]> = [
+      [idFor("name"), "Ada Lovelace"],
+      [idFor("email"), "ada@example.com"],
+      [idFor("resume"), "cv-variant-1"],
+      // Consent GIVEN on the required attestation…
+      [idFor("legal_attestation"), "true"],
+      // …DECLINED on the pre-ticked background-check box. "" is exactly what
+      // the consent row commits on untick — never "false".
+      [idFor("background_check_consent"), ""],
+      // …and kept on the other pre-ticked box, so this proves the driver is
+      // honouring the planned value rather than blanket-clearing checkboxes.
+      [idFor("talent_pool_opt_in"), "true"],
+    ];
+    const answers: PlannedAnswer[] = values.map(([fieldId, value]) => ({
+      fieldId,
+      value,
+      source: "user",
+      sourceFactIds: [],
+      confidence: 1,
+      needsUser: false,
+      differsFromApproved: false,
+      note: "",
+    }));
+
+    const result = await fillAndSubmit(session, {
+      url,
+      form,
+      answers,
+      files: { [idFor("resume")]: resumePath },
+      deps,
+    });
+
+    expect(result.confirmationId).toMatch(/^NR-[0-9a-f]{8}$/);
+
+    const after = await submissionsFor(jobId);
+    expect(after.length).toBe(before.length + 1);
+    const created = after.find((submission) => submission.id === result.confirmationId);
+    expect(created).toBeDefined();
+    expect(created?.fields["name"]).toBe("Ada Lovelace");
+    expect(created?.fields["legal_attestation"]).toBe("true");
+    expect(created?.fields["talent_pool_opt_in"]).toBe("true");
+    // The load-bearing assertion: the declined consent is NOT in the posted body.
+    expect(created?.fields["background_check_consent"]).toBeUndefined();
   }, 60_000);
 });
 

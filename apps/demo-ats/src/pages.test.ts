@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { captchaPage, confirmationPage, greenhousePage, leverPage, loginPage, signaturePage } from "./pages.js";
+import {
+  captchaPage,
+  confirmationPage,
+  consentPage,
+  greenhousePage,
+  leverPage,
+  loginPage,
+  signaturePage,
+} from "./pages.js";
 
 const job = { id: "eng-1", title: "Senior Robotics Engineer", company: "Northwind Robotics" };
 
@@ -45,6 +53,25 @@ describe("demo-ats pages", () => {
     expect(html).toContain("Confirmation ID: NR-abc12345");
     expect(html).toContain('data-confirmation-id="NR-abc12345"');
   });
+  it("consent page ships its two OPTIONAL consent boxes pre-ticked, and the required attestation unticked", () => {
+    const html = consentPage(job);
+    // The whole point of this fixture: the server decides these are ticked, so
+    // "the planner left it blank" is not the same as "the box is clear".
+    expect(html).toContain(
+      '<input type="checkbox" id="background_check_consent" name="background_check_consent" value="true" checked />',
+    );
+    expect(html).toContain(
+      '<input type="checkbox" id="talent_pool_opt_in" name="talent_pool_opt_in" value="true" checked />',
+    );
+    // The required attestation is NOT pre-ticked — a required empty answer
+    // already blocks the review screen, so it is not the dangerous case.
+    expect(html).toContain(
+      '<input type="checkbox" id="legal_attestation" name="legal_attestation" aria-required="true" required value="true" />',
+    );
+    expect(html).toContain('name="resume"');
+    expect(html).not.toContain('type="password"');
+  });
+
   it("signature page carries a typed-signature and date attestation, no checkbox", () => {
     const html = signaturePage(job);
     expect(html).toContain('data-source="lever"');

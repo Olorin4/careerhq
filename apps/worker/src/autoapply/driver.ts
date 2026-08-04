@@ -246,7 +246,19 @@ export async function fillAndSubmit(session: BrowserSession, args: FillAndSubmit
         // An upload needs no answer text: the planner's `value` is a document
         // id, and the bytes come from `files`.
         const filePath = files[fieldId];
-        if (value === "" && filePath === undefined) continue;
+        // An empty value means two different things depending on the control.
+        //
+        // For a text/select/file control it means "nothing was planned" — leave
+        // whatever the page has alone. For a TICKABLE control (checkbox/radio)
+        // it means the opposite: no consent was given. The review screen's
+        // consent row commits "" — never "false" — when the user unticks a
+        // legal attestation, so skipping here would leave a box the page
+        // shipped PRE-TICKED still ticked at submit time, and the receipt
+        // (`value: ""`) would say the opposite of what was actually sent.
+        // `applyValue` turns "" into an `uncheck()` for a checkbox and a no-op
+        // for a radio (a radio is cleared by ticking a sibling, never alone).
+        const isTickable = field.tag === "input" && (field.type === "checkbox" || field.type === "radio");
+        if (value === "" && filePath === undefined && !isTickable) continue;
         try {
           await applyValue(page, field, value, filePath, deps);
         } catch (cause) {

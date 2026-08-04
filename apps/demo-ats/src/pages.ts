@@ -249,6 +249,62 @@ export function signaturePage(job: DemoJob): string {
 }
 
 /**
+ * Pre-ticked-consent fixture: a Lever-style form whose optional consent boxes
+ * arrive from the server ALREADY CHECKED — the pattern real ATSs use for
+ * marketing opt-ins and background-check consent, and the one case where
+ * "the planner decided not to tick it" and "the box is untick*ed*" are not the
+ * same thing.
+ *
+ * It exists so the driver can be proven to UNTICK a box whose planned value is
+ * "" (no consent) rather than silently leaving the server's tick in place, and
+ * to leave a box whose planned value is "true" ticked. Unchecked checkboxes are
+ * simply absent from a form POST, so the submitted body is a direct, honest
+ * read of what the browser actually sent.
+ *
+ * `background_check_consent` is pre-ticked AND optional: required boxes are
+ * never the dangerous case (an empty answer blocks the review screen), whereas
+ * an optional pre-ticked one submits fine either way.
+ */
+export function consentPage(job: DemoJob): string {
+  const action = `/consent/apply/${escapeHtml(job.id)}`;
+  const body = `<h1>${escapeHtml(job.title)} at ${escapeHtml(job.company)}</h1>
+<form class="application-form" data-source="lever" action="${action}" method="post" enctype="multipart/form-data">
+  <div class="field">
+    <label for="name">Full Name</label>
+    <input type="text" id="name" name="name" aria-required="true" required />
+  </div>
+  <div class="field">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" aria-required="true" required />
+  </div>
+  <div class="field">
+    <label for="resume">Resume/CV</label>
+    <input type="file" id="resume" name="resume" aria-required="true" required />
+  </div>
+  <div class="field">
+    <label for="legal_attestation">
+      <input type="checkbox" id="legal_attestation" name="legal_attestation" aria-required="true" required value="true" />
+      I attest that the information provided in this application is true and complete.
+    </label>
+  </div>
+  <div class="field">
+    <label for="background_check_consent">
+      <input type="checkbox" id="background_check_consent" name="background_check_consent" value="true" checked />
+      I consent to Northwind Robotics carrying out a background check.
+    </label>
+  </div>
+  <div class="field">
+    <label for="talent_pool_opt_in">
+      <input type="checkbox" id="talent_pool_opt_in" name="talent_pool_opt_in" value="true" checked />
+      Keep my details on file for future openings.
+    </label>
+  </div>
+  <button type="submit" id="btn_submit">Submit Application</button>
+</form>`;
+  return layout(`${job.title} at ${job.company}`, body);
+}
+
+/**
  * Pause-and-return fixture: a CAPTCHA blocker that auto-apply cannot solve.
  */
 export function captchaPage(job: DemoJob): string {
