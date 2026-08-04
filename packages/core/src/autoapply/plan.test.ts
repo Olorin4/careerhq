@@ -393,6 +393,37 @@ describe("planAnswers — rule 1a: consent-only fields are never reused across a
     }
   });
 
+  // The attestation half of SENSITIVE_TERMS and CONSENT_ONLY_LABEL_RE must name
+  // the same wording, or a label that is an attestation for one ruleset is an
+  // ordinary reusable answer for the other: "Signature" and "legal name" were
+  // sensitive but NOT consent-only, so rule 1b's saved-answer branch replayed a
+  // previously approved typed signature onto a different application.
+  it.each([
+    "Signature",
+    "E-signature",
+    "Type your full legal name to acknowledge the terms",
+    "Do you agree to the terms and conditions?",
+    "Please acknowledge the code of conduct",
+  ])("refuses saved-answer reuse for the attestation wording %j", (label) => {
+    const result = planAnswers(
+      inputs({
+        form: form([
+          field({ id: "sig", kind: "text", required: true, label, canonicalField: "unknown", mappingConfidence: 0 }),
+        ]),
+        savedAnswers: [
+          { questionNorm: normalizeQuestion(label), answer: "Alex Rivera", sourceFactIds: [], staleForReuse: false },
+        ],
+      }),
+    );
+
+    expect(isConsentOnlyField({ canonicalField: "unknown", label })).toBe(true);
+    const answer = answerFor(result, "sig");
+    expect(answer.source).toBe("user");
+    expect(answer.source).not.toBe("saved_answer");
+    expect(answer.needsUser).toBe(true);
+    expect(answer.value).toBe("");
+  });
+
   it("isConsentOnlyField keys off the canonical field OR the label, and stays narrow", () => {
     // Either signal alone is enough …
     expect(isConsentOnlyField({ canonicalField: "legal_attestation", label: "" })).toBe(true);

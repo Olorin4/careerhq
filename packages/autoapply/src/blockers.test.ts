@@ -69,6 +69,44 @@ describe("detectBlockers", () => {
     expect(detectBlockers(page).map((b) => b.kind)).toContain("legal_attestation");
   });
 
+  /**
+   * The three attestation rulesets have to agree in the UNSAFE direction:
+   * anything SENSITIVE_TERMS calls an attestation and that arrives as a
+   * REQUIRED TYPED control must pause, or it falls to the planner's
+   * saved-answer branch and a previously approved typed signature / legal name
+   * gets replayed onto a different application. The demo fixture only blocked
+   * because its label happened to say "certify".
+   */
+  it.each([
+    ["Signature", "sig1"],
+    ["E-signature", "sig2"],
+    ["Type your full legal name to acknowledge the terms", "sig3"],
+    ["Please acknowledge the code of conduct below", "sig4"],
+    ["Your full legal name", "sig5"],
+  ])("blocks a required typed attestation labelled %j", (label, id) => {
+    const html = `<html><body><form>
+      <div class="field">
+        <label for="${id}">${label}</label>
+        <input type="text" id="${id}" name="${id}" required />
+      </div>
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://example.com/apply");
+    const blockers = detectBlockers(page);
+    expect(blockers.map((b) => b.kind)).toContain("legal_attestation");
+    expect(blockers.find((b) => b.kind === "legal_attestation")?.detail).toContain(`#${id}`);
+  });
+
+  it("still does not block those same words on a CHECKBOX — a tick is renderable", () => {
+    const html = `<html><body><form>
+      <div class="field"><label for="ack">
+        <input type="checkbox" id="ack" name="ack" required />
+        I acknowledge the code of conduct
+      </label></div>
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://example.com/apply");
+    expect(detectBlockers(page)).toEqual([]);
+  });
+
   it("does not block on an optional attestation checkbox", () => {
     const html = `<html><body><form>
       <div class="field"><label for="opt">

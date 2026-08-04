@@ -105,9 +105,16 @@ export const CONSENT_ONLY_FIELDS: ReadonlySet<CanonicalField> = new Set<Canonica
  * criminal-history/background-check disclosures. Notice period, salary, work
  * authorization and relocation are facts about the user that legitimately carry
  * across applications, and must keep reusing their saved answers.
+ *
+ * Within those two categories, though, it covers the SAME wording as the
+ * attestation half of SENSITIVE_TERMS ("agree to the terms", "legal name",
+ * "signature") and as `ATTESTATION_RE` in @careerhq/autoapply's blockers. Where
+ * they disagreed, a label was an attestation for one ruleset and an ordinary
+ * reusable answer for the other — and a typed signature or legal name approved
+ * on one application was replayed onto the next.
  */
 export const CONSENT_ONLY_LABEL_RE =
-  /certif|attest|acknowledg|under penalty|legally binding|crimin|felony|convict|background check/i;
+  /certif|attest|acknowledg|under penalty|legally binding|agree to the terms|legal name|signature|crimin|felony|convict|background check/i;
 
 /**
  * True when a field may never be satisfied by a saved answer from another

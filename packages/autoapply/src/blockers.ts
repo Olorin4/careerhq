@@ -5,7 +5,22 @@ const CAPTCHA_RE = /recaptcha|hcaptcha|turnstile|cf-challenge/i;
 const HUMAN_CHECK_RE = /verify you are human/i;
 const IDENTITY_RE = /verify your identity|government[- ]issued id/i;
 const ASSESSMENT_RE = /coding (challenge|assessment)|timed test|hackerrank|codility/i;
-const ATTESTATION_RE = /certify|attest|under penalty|legally binding/i;
+/**
+ * Kept in step with the attestation half of `SENSITIVE_TERMS` and with
+ * `CONSENT_ONLY_LABEL_RE` (@careerhq/core) — three rulesets that must agree, or
+ * a wording is an attestation for one and an ordinary reusable answer for
+ * another. `signature`, `legal name` and `acknowledg` were the gap: a required
+ * "Signature" / "E-signature" / "Type your full legal name to acknowledge the
+ * terms" input did NOT pause, and the demo fixture only blocked because its
+ * label happened to say "certify".
+ *
+ * This over-blocks by design. A bare required "Full legal name" identity field
+ * now pauses the page, which costs the user a few minutes in their own browser;
+ * the alternative is CareerHQ typing a legal signature on their behalf, or
+ * replaying one approved on a different application. Only the second is
+ * unrecoverable, so the false positive is the cheaper error.
+ */
+const ATTESTATION_RE = /certify|attest|acknowledg|under penalty|legally binding|signature|legal name/i;
 
 /**
  * Pause-and-return signals per spec §10.6. Order is not significant; the
