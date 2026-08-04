@@ -7,20 +7,23 @@ const IDENTITY_RE = /verify your identity|government[- ]issued id/i;
 const ASSESSMENT_RE = /coding (challenge|assessment)|timed test|hackerrank|codility/i;
 /**
  * Kept in step with the attestation half of `SENSITIVE_TERMS` and with
- * `CONSENT_ONLY_LABEL_RE` (@careerhq/core) — three rulesets that must agree, or
- * a wording is an attestation for one and an ordinary reusable answer for
- * another. `signature`, `legal name` and `acknowledg` were the gap: a required
- * "Signature" / "E-signature" / "Type your full legal name to acknowledge the
- * terms" input did NOT pause, and the demo fixture only blocked because its
- * label happened to say "certify".
+ * `CONSENT_ONLY_LABEL_RE` (@careerhq/core) — rulesets that must agree, or a
+ * wording is an attestation for one and an ordinary reusable answer for
+ * another. `signature` and `acknowledg` were the gap: a required "Signature" /
+ * "E-signature" / "Type your full legal name to acknowledge the terms" input
+ * did NOT pause, and the demo fixture only blocked because its label happened
+ * to say "certify".
  *
- * This over-blocks by design. A bare required "Full legal name" identity field
- * now pauses the page, which costs the user a few minutes in their own browser;
- * the alternative is CareerHQ typing a legal signature on their behalf, or
- * replaying one approved on a different application. Only the second is
- * unrecoverable, so the false positive is the cheaper error.
+ * `legal name` is the ONE term deliberately NOT mirrored here. On its own it is
+ * an identity field — real Greenhouse and Lever forms ask for a full legal name
+ * routinely — and pausing on it would abandon a whole application over a name
+ * box. It buys no coverage either: an attestation that wants a typed legal name
+ * always says why ("…to certify…", "…to acknowledge the terms"), and those
+ * verbs are what match. It stays in `CONSENT_ONLY_LABEL_RE`, which is the
+ * property that actually matters for it: a legal name approved on one
+ * application is still never replayed onto another.
  */
-const ATTESTATION_RE = /certify|attest|acknowledg|under penalty|legally binding|signature|legal name/i;
+const ATTESTATION_RE = /certify|attest|acknowledg|under penalty|legally binding|signature/i;
 
 /**
  * Pause-and-return signals per spec §10.6. Order is not significant; the

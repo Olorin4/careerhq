@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captchaPage, loginPage } from "@careerhq/demo-ats";
+import { captchaPage, loginPage, signaturePage } from "@careerhq/demo-ats";
 import { rawPageFromHtml } from "./testing/from-html.js";
 import { detectBlockers } from "./blockers.js";
 
@@ -82,7 +82,7 @@ describe("detectBlockers", () => {
     ["E-signature", "sig2"],
     ["Type your full legal name to acknowledge the terms", "sig3"],
     ["Please acknowledge the code of conduct below", "sig4"],
-    ["Your full legal name", "sig5"],
+    ["Type your full legal name to certify this application is true", "sig5"],
   ])("blocks a required typed attestation labelled %j", (label, id) => {
     const html = `<html><body><form>
       <div class="field">
@@ -94,6 +94,42 @@ describe("detectBlockers", () => {
     const blockers = detectBlockers(page);
     expect(blockers.map((b) => b.kind)).toContain("legal_attestation");
     expect(blockers.find((b) => b.kind === "legal_attestation")?.detail).toContain(`#${id}`);
+  });
+
+  /**
+   * "Legal name" on its own is an IDENTITY field, not an attestation — real
+   * Greenhouse and Lever forms ask for it routinely. Blocking it would abandon
+   * the whole application over a name box, and it buys no coverage: every
+   * attestation that asks for a typed legal name says why ("…to certify…",
+   * "…to acknowledge the terms"), and those verbs are what actually match.
+   *
+   * It stays in CONSENT_ONLY_LABEL_RE, though — see plan.test.ts. Refusing to
+   * replay a legal name saved on another application costs the user one field;
+   * refusing to submit costs them the application.
+   */
+  it.each([
+    ["Full legal name", "id1"],
+    ["Your legal name", "id2"],
+    ["Legal name (as it appears on your passport)", "id3"],
+  ])("does NOT block a bare identity field labelled %j", (label, id) => {
+    const html = `<html><body><form>
+      <div class="field">
+        <label for="${id}">${label}</label>
+        <input type="text" id="${id}" name="${id}" required />
+      </div>
+    </form></body></html>`;
+    const page = rawPageFromHtml(html, "https://example.com/apply");
+    expect(detectBlockers(page)).toEqual([]);
+  });
+
+  it("still blocks the demo-ats signature fixture, via `certify` rather than `legal name`", () => {
+    const page = rawPageFromHtml(signaturePage(job), "https://northwind.example/signature/jobs/x");
+    const blockers = detectBlockers(page);
+    expect(blockers.map((b) => b.kind)).toContain("legal_attestation");
+    // The typed-signature input is the one that pauses it, and it pauses on the
+    // word "certify" — the fixture's label is "Type your full legal name to
+    // certify this application is true and complete".
+    expect(blockers.find((b) => b.kind === "legal_attestation")?.detail).toContain("#signature_text");
   });
 
   it("still does not block those same words on a CHECKBOX — a tick is renderable", () => {

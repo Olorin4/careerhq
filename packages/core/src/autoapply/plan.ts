@@ -108,10 +108,16 @@ export const CONSENT_ONLY_FIELDS: ReadonlySet<CanonicalField> = new Set<Canonica
  *
  * Within those two categories, though, it covers the SAME wording as the
  * attestation half of SENSITIVE_TERMS ("agree to the terms", "legal name",
- * "signature") and as `ATTESTATION_RE` in @careerhq/autoapply's blockers. Where
- * they disagreed, a label was an attestation for one ruleset and an ordinary
- * reusable answer for the other — and a typed signature or legal name approved
- * on one application was replayed onto the next.
+ * "signature"). Where they disagreed, a label was an attestation for one
+ * ruleset and an ordinary reusable answer for the other — and a typed signature
+ * or legal name approved on one application was replayed onto the next.
+ *
+ * `ATTESTATION_RE` in @careerhq/autoapply's blockers matches this list except
+ * for "legal name", which it deliberately omits: a bare legal-name field is an
+ * identity field and must not pause the page. That makes THIS ruleset the only
+ * thing standing between it and cross-application reuse, so it must keep the
+ * term. Refusing to replay a legal name costs the user one field; refusing to
+ * submit would cost them the application.
  */
 export const CONSENT_ONLY_LABEL_RE =
   /certif|attest|acknowledg|under penalty|legally binding|agree to the terms|legal name|signature|crimin|felony|convict|background check/i;

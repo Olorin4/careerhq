@@ -404,6 +404,11 @@ describe("planAnswers — rule 1a: consent-only fields are never reused across a
     "Type your full legal name to acknowledge the terms",
     "Do you agree to the terms and conditions?",
     "Please acknowledge the code of conduct",
+    // A bare "legal name" field does NOT pause the page (blockers.ts drops the
+    // term deliberately — it is an identity field on real forms), so this
+    // ruleset is the ONLY thing standing between it and a legal name replayed
+    // from another application. It has to hold here.
+    "Full legal name",
   ])("refuses saved-answer reuse for the attestation wording %j", (label) => {
     const result = planAnswers(
       inputs({
