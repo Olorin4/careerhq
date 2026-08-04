@@ -6,7 +6,7 @@
 // a URL into a `RawFormPage`, and a `CanonicalForm` + `PlannedAnswer[]` back
 // into keystrokes, one submit click, and the evidence of what happened.
 import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
-import { rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
+import { fieldIdentityHash, rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
 import { chromium, errors, type Browser, type Page } from "playwright";
 import { acquireBrowserSlot, type BrowserSlot } from "./browser-limit.js";
 import { BUTTON_STEPS_SCRIPT, deriveTotalSteps, EXTRACT_SCRIPT, type ExtractedPage } from "./extract.js";
@@ -472,6 +472,99 @@ async function applyValue(page: Page, field: RawField, value: string, filePath: 
   await locator.fill(value, options);
 }
 
+/** One control this call will touch, and what it will put there. */
+interface PlannedFill {
+  field: RawField;
+  fieldId: string;
+  value: string;
+  /** Absolute path for a file input; undefined for everything else. */
+  filePath: string | undefined;
+}
+
+/**
+ * Exactly the controls `fillAndSubmit` will act on, in document order.
+ *
+ * Split out of the fill loop so the re-verification below and the typing below
+ * that decide on the SAME set: a check that judged fields the driver never
+ * touches would refuse legitimate pages, and one that missed a field the driver
+ * does touch would be no check at all.
+ */
+function plannedFills(
+  fields: RawField[],
+  answersByFieldId: Map<string, PlannedAnswer>,
+  files: Record<string, string>,
+): PlannedFill[] {
+  const fills: PlannedFill[] = [];
+  for (const field of fields) {
+    const fieldId = rawFieldId(field);
+    const value = answersByFieldId.get(fieldId)?.value ?? "";
+    // An upload needs no answer text: the planner's `value` is a document id,
+    // and the bytes come from `files`.
+    const filePath = files[fieldId];
+    // An empty value means two different things depending on the control.
+    //
+    // For a text/select/file control it means "nothing was planned" — leave
+    // whatever the page has alone. For a TICKABLE control (checkbox/radio) it
+    // means the opposite: no consent was given. The review screen's consent row
+    // commits "" — never "false" — when the user unticks a legal attestation,
+    // so skipping here would leave a box the page shipped PRE-TICKED still
+    // ticked at submit time, and the receipt (`value: ""`) would say the
+    // opposite of what was actually sent. `applyValue` turns "" into an
+    // `uncheck()` for a checkbox and a no-op for a radio (a radio is cleared by
+    // ticking a sibling, never alone).
+    const isTickable = field.tag === "input" && (field.type === "checkbox" || field.type === "radio");
+    if (value === "" && filePath === undefined && !isTickable) continue;
+    fills.push({ field, fieldId, value, filePath });
+  }
+  return fills;
+}
+
+/** Keeps a refusal readable when a page's "label" is really a wall of text. */
+function shortLabel(labelText: string): string {
+  const collapsed = labelText.replace(/\s+/g, " ").trim();
+  return collapsed.length > 160 ? `${collapsed.slice(0, 159)}…` : collapsed;
+}
+
+/**
+ * The answers were planned against the page as it was at REVIEW time; this is
+ * the page as it is NOW. Before a single keystroke, every control this call
+ * would touch must still be asking the question the user actually reviewed.
+ *
+ * Why the identity and not the field id: `rawFieldId` hashes the selector
+ * alone, so a page that keeps its markup and rewords its labels produces the
+ * very same ids — every planned answer would still "match" a field whose
+ * meaning had changed underneath it, and the driver would type it in.
+ *
+ * It matters most for a CONSENT TICK, whose entire meaning is the statement
+ * sitting beside it. A recorded consent that no longer describes what would be
+ * submitted is worse than no consent at all: the receipt would say the user
+ * agreed to something they were never shown.
+ *
+ * `kind: "fill"` is load-bearing, not cosmetic. It is in apps/web's
+ * PRE_CLICK_DRIVER_ERROR_KINDS, so the attempt comes out FAILED and retryable
+ * (re-run auto-apply, review the changed question, submit again) instead of
+ * parked in NEEDS_RECONCILE — and it is honest, because this throws before any
+ * control is touched and long before the submit button is: a browser that never
+ * clicked cannot have submitted.
+ *
+ * A field the snapshot has no identity for (captured before this existed, or a
+ * form built by hand) is passed over: absent is "nothing recorded to compare
+ * against", never "mismatch".
+ */
+function assertQuestionsUnchanged(fills: PlannedFill[], form: CanonicalForm): void {
+  const reviewed = new Map(form.fields.map((field) => [field.id, field.identityHash]));
+  for (const fill of fills) {
+    const expected = reviewed.get(fill.fieldId);
+    if (expected === undefined) continue;
+    if (fieldIdentityHash(fill.field) === expected) continue;
+    throw new DriverError(
+      `refusing to fill ${fill.field.selector} ("${shortLabel(fill.field.labelText)}"): `
+      + "the question under it changed since this form was reviewed",
+      "fill",
+    );
+  }
+}
+
 interface StepButtons {
   next: string | null;
   submit: string | null;
@@ -537,6 +630,10 @@ export async function fillAndSubmit(session: BrowserSession, args: FillAndSubmit
     // that produced `form` — never walk fewer steps than that parse saw.
     const totalSteps = Math.max(deriveTotalSteps(extracted.fields), form.totalSteps);
     const answersByFieldId = new Map(answers.map((answer) => [answer.fieldId, answer]));
+    const fills = plannedFills(extracted.fields, answersByFieldId, files);
+    // Before anything is typed, ticked or uploaded — and therefore before there
+    // is anything to undo.
+    assertQuestionsUnchanged(fills, form);
 
     let buttonSteps: number[];
     try {
@@ -549,30 +646,12 @@ export async function fillAndSubmit(session: BrowserSession, args: FillAndSubmit
     for (let step = 0; step < totalSteps; step += 1) {
       // Top-to-bottom in document order, so a field that reveals another (a
       // "other, please specify") is filled before what it reveals.
-      for (const field of extracted.fields) {
-        if (field.step !== step) continue;
-        const fieldId = rawFieldId(field);
-        const value = answersByFieldId.get(fieldId)?.value ?? "";
-        // An upload needs no answer text: the planner's `value` is a document
-        // id, and the bytes come from `files`.
-        const filePath = files[fieldId];
-        // An empty value means two different things depending on the control.
-        //
-        // For a text/select/file control it means "nothing was planned" — leave
-        // whatever the page has alone. For a TICKABLE control (checkbox/radio)
-        // it means the opposite: no consent was given. The review screen's
-        // consent row commits "" — never "false" — when the user unticks a
-        // legal attestation, so skipping here would leave a box the page
-        // shipped PRE-TICKED still ticked at submit time, and the receipt
-        // (`value: ""`) would say the opposite of what was actually sent.
-        // `applyValue` turns "" into an `uncheck()` for a checkbox and a no-op
-        // for a radio (a radio is cleared by ticking a sibling, never alone).
-        const isTickable = field.tag === "input" && (field.type === "checkbox" || field.type === "radio");
-        if (value === "" && filePath === undefined && !isTickable) continue;
+      for (const fill of fills) {
+        if (fill.field.step !== step) continue;
         try {
-          await applyValue(page, field, value, filePath, deps);
+          await applyValue(page, fill.field, fill.value, fill.filePath, deps);
         } catch (cause) {
-          throw driverError("fill", `could not fill ${field.selector}`, cause);
+          throw driverError("fill", `could not fill ${fill.field.selector}`, cause);
         }
       }
 

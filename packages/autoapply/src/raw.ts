@@ -39,3 +39,30 @@ export const PARSER_VERSION = "1";
 export function rawFieldId(field: RawField): string {
   return createHash("sha256").update(field.selector).digest("hex").slice(0, 16);
 }
+
+/**
+ * What the user actually reviewed: THIS control, asking THIS question.
+ *
+ * `rawFieldId` deliberately hashes the selector alone — it is the join key
+ * between a planned answer and a control, and it must survive a page that
+ * rewords its help text. That makes it the wrong thing to re-verify against at
+ * submit time: a page edited between review and submit can keep every selector
+ * and change every question, and each planned answer would still "match" the
+ * field it was planned for.
+ *
+ * So the identity carries the label too. It matters most for a CONSENT TICK,
+ * whose entire meaning is the statement sitting beside it: a recorded consent
+ * that no longer describes what would be submitted is worse than no consent at
+ * all. The driver compares this before it types anything (see
+ * `fillAndSubmit`), and refuses pre-click when it has moved.
+ *
+ * The label is whitespace-collapsed first: a reflow is not a reword, and the
+ * same sentence wrapped differently must not refuse a legitimate submission.
+ */
+export function fieldIdentityHash(field: Pick<RawField, "selector" | "labelText">): string {
+  const label = field.labelText.replace(/\s+/g, " ").trim();
+  // "\n" separates the two parts; the selector can contain one, so it is
+  // escaped rather than trusted to be separator-free.
+  const selector = field.selector.replace(/\n/g, "\\n");
+  return createHash("sha256").update(`${selector}\n${label}`).digest("hex").slice(0, 16);
+}

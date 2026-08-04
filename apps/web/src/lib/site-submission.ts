@@ -209,11 +209,25 @@ function errorMessage(err: unknown): string {
  *   - "navigation" — the page never opened, never extracted, or Chromium never
  *     launched at all (`openSession` reports every launch failure as this
  *     kind, timeouts included — a launch has no click to be ambiguous about).
- *   - "fill" — a field action failed; no button has been touched. This holds
- *     even when the underlying cause was a Playwright timeout: filling is an
- *     interaction with a form CONTROL (typing, ticking, unticking), and none
- *     of that can submit a form, so `driverErrorKind` deliberately does NOT
- *     collapse the fill phase onto "timeout" the way it collapses the others.
+ *   - "fill" — a field action failed, or the driver refused to start filling at
+ *     all; no button has been touched. This holds even when the underlying
+ *     cause was a Playwright timeout: filling is an interaction with a form
+ *     CONTROL (typing, ticking, unticking), and none of that can submit a form,
+ *     so `driverErrorKind` deliberately does NOT collapse the fill phase onto
+ *     "timeout" the way it collapses the others.
+ *
+ *     The refusal case is the live-page re-verification (P6 task 6): the
+ *     answers below were planned against the page as it was when the user
+ *     reviewed it, and the driver re-extracts the page and checks that every
+ *     control it is about to touch still asks the same question
+ *     (`fieldIdentityHash`) before it types anything. A consent tick's whole
+ *     meaning is the statement beside it, so a page edited between review and
+ *     confirm must not receive an answer planned for a different question.
+ *     Reported as "fill" because it is strictly stronger than one: nothing on
+ *     the page was touched at all, so the attempt is FAILED and retryable —
+ *     re-run auto-apply, review the question as it now reads, submit again —
+ *     never parked NEEDS_RECONCILE for a submission that provably never
+ *     happened.
  * Everything else stays ambiguous on purpose. "submit" is the click itself;
  * "advance" is the between-steps click, which was dispatched before its error
  * surfaced and may have been the real submit on an ATS whose next-labelled

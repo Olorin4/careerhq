@@ -1,5 +1,5 @@
 import { canonicalFormSchema, type CanonicalForm, type FieldKind } from "@careerhq/contracts";
-import { PARSER_VERSION, rawFieldId, type RawField, type RawFormPage } from "./raw.js";
+import { fieldIdentityHash, PARSER_VERSION, rawFieldId, type RawField, type RawFormPage } from "./raw.js";
 import { detectBlockers } from "./blockers.js";
 
 const INPUT_KIND_BY_TYPE: Partial<Record<string, FieldKind>> = {
@@ -51,6 +51,9 @@ export function parseGenericForm(
     .filter((field) => field.tag !== "button")
     .map((field) => ({
       id: rawFieldId(field),
+      // Captured here, at the moment the form the user will review is built,
+      // and re-checked by the driver against the live page before it types.
+      identityHash: fieldIdentityHash(field),
       kind: kindFor(field),
       label: field.labelText || field.placeholder || firstLine(field.nearbyText),
       required: field.required,

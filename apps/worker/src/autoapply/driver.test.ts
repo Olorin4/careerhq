@@ -9,8 +9,8 @@ import { chromium, errors } from "playwright";
 import { consentPage, greenhousePage, hiddenConsentPage, leverPage, type DemoJob } from "@careerhq/demo-ats";
 import { rawPageFromHtml } from "@careerhq/autoapply/testing";
 import { allowsCaptureTarget } from "@careerhq/autoapply/policy";
-import { detectBlockers, parseForm, rawFieldId, type RawFormPage } from "@careerhq/autoapply";
-import type { PlannedAnswer } from "@careerhq/contracts";
+import { detectBlockers, fieldIdentityHash, parseForm, rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
+import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
 import {
   BUTTON_STEPS_SCRIPT,
   deriveTotalSteps,
@@ -498,6 +498,140 @@ live("driver against demo-ats", () => {
     expect(kind).not.toBe("timeout");
     // And nothing reached the site.
     expect(await submissionsFor(jobId)).toEqual([]);
+  }, 60_000);
+
+  /**
+   * Live-page re-verification (carried F5).
+   *
+   * The driver fills from the form snapshot captured at REVIEW time, but it
+   * types into the page as it is NOW. Nothing used to check that the control
+   * under a given selector still asked the question the user actually read —
+   * and `rawFieldId` is a hash of the selector alone, so a page that reworded a
+   * label kept the very same field id and the planned answer landed in it
+   * regardless.
+   *
+   * Simulated from the snapshot's side (store an identity the live page no
+   * longer matches), which is the same comparison as the page having changed
+   * under an unchanged snapshot.
+   *
+   * Two assertions carry this test. `kind: "fill"` is what apps/web reads as
+   * provably pre-click, so the attempt is FAILED and retryable instead of
+   * parked NEEDS_RECONCILE; and the empty submissions list is the proof behind
+   * it — the refusal happened before any click, so the site has nothing.
+   */
+  it("refuses to fill a field whose question changed since review, and submits nothing", async () => {
+    const jobId = "consent-drift-1";
+    const url = `${DEMO_ATS_URL}/consent/jobs/${jobId}`;
+    const raw = await capturePage(session, url, deps);
+    const form = parseForm(raw);
+
+    const rawFor = (name: string): RawField => {
+      const field = raw.fields.find((f) => f.name === name);
+      if (!field) throw new Error(`no raw field named ${name}`);
+      return field;
+    };
+    const idFor = (name: string): string => rawFieldId(rawFor(name));
+
+    const consent = rawFor("legal_attestation");
+    // The identity the review screen WOULD have recorded had the page asked
+    // this instead — same control, different meaning.
+    const reworded = fieldIdentityHash({
+      selector: consent.selector,
+      labelText: "I consent to my personal data being sold to third parties",
+    });
+    expect(reworded).not.toBe(fieldIdentityHash(consent));
+    const tampered: CanonicalForm = {
+      ...form,
+      fields: form.fields.map((field) =>
+        field.id === rawFieldId(consent) ? { ...field, identityHash: reworded } : field,
+      ),
+    };
+
+    // A complete, otherwise-submittable plan: without the re-verification this
+    // exact call submits (the suite above proves it on the same page).
+    const answers: PlannedAnswer[] = ([
+      [idFor("name"), "Ada Lovelace"],
+      [idFor("email"), "ada@example.com"],
+      [idFor("resume"), "cv-variant-1"],
+      [idFor("legal_attestation"), "true"],
+      [idFor("background_check_consent"), ""],
+      [idFor("talent_pool_opt_in"), "true"],
+    ] as Array<[string, string]>).map(([fieldId, value]) => ({
+      fieldId,
+      value,
+      source: "user" as const,
+      sourceFactIds: [],
+      confidence: 1,
+      needsUser: false,
+      differsFromApproved: false,
+      note: "",
+    }));
+
+    const failure = await fillAndSubmit(session, {
+      url,
+      form: tampered,
+      answers,
+      files: { [idFor("resume")]: resumePath },
+      deps,
+    }).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(DriverError);
+    expect((failure as DriverError).kind).toBe("fill");
+    // Names the field, so the user can see WHICH question changed.
+    expect((failure as DriverError).message).toContain(consent.selector);
+    expect((failure as DriverError).message).toContain(consent.labelText);
+    // The whole point: a browser that never clicked cannot have submitted.
+    expect(await submissionsFor(jobId)).toEqual([]);
+  }, 60_000);
+
+  /**
+   * The other half of the contract: an untouched page is untouched. The forms
+   * above are parsed from the same capture they are submitted against, so this
+   * pins the case the mismatch check must NOT break — a legitimately unchanged
+   * page still fills and submits — on a page whose fields are all consent-ish.
+   */
+  it("still fills and submits when the live page matches the reviewed snapshot", async () => {
+    const jobId = "consent-nodrift-1";
+    const url = `${DEMO_ATS_URL}/consent/jobs/${jobId}`;
+    const raw = await capturePage(session, url, deps);
+    const form = parseForm(raw);
+    expect(form.fields.every((field) => typeof field.identityHash === "string")).toBe(true);
+
+    const idFor = (name: string): string => {
+      const field = raw.fields.find((f) => f.name === name);
+      if (!field) throw new Error(`no raw field named ${name}`);
+      return rawFieldId(field);
+    };
+
+    const answers: PlannedAnswer[] = ([
+      [idFor("name"), "Ada Lovelace"],
+      [idFor("email"), "ada@example.com"],
+      [idFor("resume"), "cv-variant-1"],
+      [idFor("legal_attestation"), "true"],
+      [idFor("background_check_consent"), ""],
+      [idFor("talent_pool_opt_in"), "true"],
+    ] as Array<[string, string]>).map(([fieldId, value]) => ({
+      fieldId,
+      value,
+      source: "user" as const,
+      sourceFactIds: [],
+      confidence: 1,
+      needsUser: false,
+      differsFromApproved: false,
+      note: "",
+    }));
+
+    const result = await fillAndSubmit(session, {
+      url,
+      form,
+      answers,
+      files: { [idFor("resume")]: resumePath },
+      deps,
+    });
+
+    expect(result.confirmationId).toMatch(/^NR-[0-9a-f]{8}$/);
+    const created = (await submissionsFor(jobId)).find((s) => s.id === result.confirmationId);
+    expect(created?.fields["legal_attestation"]).toBe("true");
   }, 60_000);
 });
 
