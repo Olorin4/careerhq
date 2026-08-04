@@ -1,12 +1,15 @@
 # Career HQ
 
+**Live demo: <https://careerhq.nickkalas.dev>** — no signup, fictional data, resets every six hours. What you can and cannot do there is spelled out in [Live demo](#live-demo).
+**Source: <https://github.com/Olorin4/careerhq>** · [`SECURITY.md`](SECURITY.md) · [MIT licensed](LICENSE)
+
 An AI-assisted, self-hosted job-search workflow platform. It helps a single owner discover suitable roles, prepare grounded application materials from a personal fact bank, submit them through supported channels under an explicit multi-layer safety protocol, and track outcomes on a Kanban-style tracker with a full event history.
 
 This is a portfolio project built to demonstrate full-stack product engineering end to end: a typed monorepo with enforced architectural boundaries, a Postgres-backed domain model with real state machines and database-level invariants, a deliberately conservative design for anything that mutates the outside world, and a CI pipeline that keeps all of it honest on every push. It is not a SaaS — it is a single-tenant app you run yourself, seeded with a fictional persona ("Alex Demo") so the tracker, fact bank, and event log are populated the moment it boots.
 
 ## Current status
 
-**P1 (Foundation, tracker, Fact Bank), P2 (discovery ingestion and scoring), P3 (grounded AI materials generation), P4 (the email channel), and P5 (assisted auto-apply) are complete.** Shipped so far:
+**P1 (Foundation, tracker, Fact Bank), P2 (discovery ingestion and scoring), P3 (grounded AI materials generation), P4 (the email channel), P5 (assisted auto-apply), and P6 (hosted demo and portfolio polish) are complete.** Only P7, the optional restricted-source connector, remains. Shipped so far:
 
 - Monorepo scaffold (pnpm workspaces + Turborepo), strict TypeScript, ESLint.
 - Compose stack (`postgres`, `mailpit`, `web`, `worker`) with a parameterized Postgres host port.
@@ -43,16 +46,62 @@ This is a portfolio project built to demonstrate full-stack product engineering 
 - **Blockers pause and return control, never bypass**: CAPTCHA, login wall, identity verification, coding assessment, a non-checkbox legal attestation (typed signature/date), or an upload control that accepts neither PDF nor DOC stops the attempt as `BLOCKED` with a typed reason and human-readable guidance. This is a pause, not a failure: the attempt is visible in the application's history and nothing was submitted.
 - **The same three-layer gate and receipt design as email, reused, not reinvented** (`apps/web/src/lib/site-submission.ts`): `SUBMISSIONS_LIVE_COMPANY_SITE` off by default, a sandbox workspace restricted to `SANDBOX_SITE_ALLOWED_HOST`, and a preview → payload-fingerprint pin → single-use confirmation token → retyped-host match before the one submit click. A pending receipt is written before the click; a confirmed receipt carries the confirmation id, final URL, and a saved confirmation-page screenshot; a submit that throws or returns no confirmation id becomes `NEEDS_RECONCILE`, never a false `FAILED`. Duplicate-requisition detection refuses a second prepare unless the user explicitly overrides, recorded in the event log.
 - **`apps/demo-ats`**: a small fictional-company careers site (Greenhouse-style multi-step form at `/greenhouse/jobs/eng-1`, Lever-style single-page form at `/lever/jobs/eng-2`, a Lever-style typed-signature form at `/signature/jobs/:id`) and the only auto-apply destination in CI or any local demo — `eng-1` carries a required legal attestation checkbox, which the user ticks on the review screen; `eng-2` is the happy path; `/signature/jobs/:id`'s typed signature/date fields are the demo's blocked case, since those cannot be rendered as a single honest tick. No new route was added to `apps/web` for this — auto-apply lives inside the existing `/applications/[id]` detail page, alongside the email panel.
+- **Demo safety as a runtime mode, not a fork** (P6): one `DEMO_MODE` env plus a `workspaces.kind = "sandbox"` row selects the demo workspace, disables credential setup **server-side** (the UI state is not the enforcement), arms a per-action rate limiter, renders the never-dismissible banner, and schedules a wipe-and-reseed of the sandbox workspace every six hours inside a single advisory-locked transaction. Nothing about the personal-mode code path changes. The reset queue is registered *only* in demo mode, and the worker `unschedule`s it when demo mode is off, so a one-off demo run cannot leave a data-deleting job firing forever.
+- **The demo cannot reach anything real**: `infra/docker-compose.demo.yml` pins both live-submission gates `false` **as literals** — no env file, shell variable or `docker compose` invocation can open them — deletes `OPENROUTER_API_KEY` outright (`!reset`, so it is *absent*, not empty), runs AI in replay against committed fixtures, and publishes only `web`, only on `127.0.0.1`. Postgres, Mailpit and `demo-ats` have no published ports at all.
+- **Bounded for a shared 3.7 GB VPS**: a hard `mem_limit` per service (2756 MB worst case), rotated logs, `shm_size` sized for Chromium's renderer, one headless browser per process with an honest "busy, try again" refusal that holds its slot across a whole confirm so a refusal cannot burn a confirmation token, and disk ceilings a reset gives back — 2 MB per CV and 64 MB/100 files for the demo's CV store, a shared 64 MB/200-file ceiling for auto-apply evidence screenshots reserved *before* the submit click.
+- **The driver refuses to fill a field whose question changed since review**: same id, same field-identity hash (selector *and* the question beside it), same field kind, checked from both the live page's side and the reviewed side, before a single keystroke. A mismatch throws pre-click, so the attempt is `FAILED` and retryable rather than parked — a browser that never clicked cannot have submitted.
+- **Portfolio surface**: [`SECURITY.md`](SECURITY.md), an MIT [`LICENSE`](LICENSE), [`docs/runbook-demo.md`](docs/runbook-demo.md) with real deploy/update/reset/backup/restore/rollback commands, an automated screenshot gallery and walkthrough recording, and a quickstart verified from a clean clone.
 - CI (GitHub Actions): lint, typecheck, dependency-cruiser import-boundary checks, and the test suite against a real Postgres service container, including a Mailpit round-trip e2e suite (`apps/web/src/lib/email-e2e.test.ts`) and a real-Chromium `demo-ats` round-trip e2e suite (`apps/web/src/lib/site-e2e.test.ts`, 8 cases: the full happy path, the checkbox-attestation consent-tick demotion, all five gate refusals, and both blocker kinds) that both skip cleanly with no `TEST_DATABASE_URL` or an unreachable dependency.
 
-Everything past this point — the hosted demo and the restricted-source connector — is **planned**, not built. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan (P6–P7) and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
+Everything past this point — the restricted-source connector (P7) — is **planned**, not built, and is deliberately excluded from the hosted demo. See [`docs/roadmap.md`](docs/roadmap.md) for the full phase-by-phase plan, including the work carried forward out of P6 with the reason each item was left, and [`career-hq-product-spec.md`](career-hq-product-spec.md) for the normative product spec.
+
+## Live demo
+
+<https://careerhq.nickkalas.dev> — no signup, nothing to install, and nothing real inside it.
+
+The persona is the same fictional "Alex Demo" the local seed uses. Every company, job, fact, CV and message is invented; no real person's data has ever been in that database.
+
+**What you can do there**
+
+- Browse and edit the whole app: the Kanban tracker with its guarded transitions, the append-only event timeline, the fact bank, the scored discovery inbox, the answer bank, the mail review queue.
+- Promote a discovered job onto the tracker, then generate a grounded cover letter and watch the provenance chips resolve each cited claim back to the fact it came from — including the deliberate `NEEDS_FACTS` refusal when nothing supports the claim.
+- Run auto-apply end to end against the bundled fictional ATS: capture, review every planned answer with its source and confidence, tick a legal-attestation checkbox yourself, preview, retype the target, confirm, and read the receipt.
+- Watch the safety machinery refuse things: a sensitive question hard-blocked before the writing model is called, a gate denial, a rate-limit refusal, a second concurrent browser request turned away.
+
+**What you cannot do there**
+
+- **Configure a real mailbox.** `/settings/email` renders an explanatory panel instead of the connection form, and both server actions refuse regardless — the UI is not the enforcement.
+- **Reach a real employer.** Auto-apply can only reach the bundled `demo-ats` service; email can only reach an internal Mailpit sink that accepts mail and never delivers it.
+- **Spend anyone's model tokens.** No provider key is deployed at all; AI runs from committed replay fixtures.
+- **Keep your work.** The workspace is wiped and reseeded **every six hours**. Anything you type is temporary by design.
+- **Reach anything but the web app.** Postgres, Mailpit and `demo-ats` publish no ports; only `web` is exposed, and only through the edge proxy.
+
+There is no login on the demo — it is a public exhibit of fictional data with every mutating channel shut, so a password would be a secret to protect that protects nothing. That is a property of *the demo*, not of CareerHQ: a personal install holding real data must have authentication put in front of it. See [`SECURITY.md`](SECURITY.md).
 
 ## Quickstart
 
-Standard path, from a clean clone and a fresh Postgres volume:
+### The whole thing in containers — no toolchain needed
+
+Docker is the only prerequisite. This runs the same stack the public demo runs, on your own machine:
 
 ```bash
-git clone <repo-url> && cd careerHQ-app
+git clone https://github.com/Olorin4/careerhq.git && cd careerhq
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.demo.yml \
+  --profile tools run --rm migrate                        # create the schema, once
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.demo.yml \
+  up -d --build                                           # http://127.0.0.1:3100
+```
+
+The first build pulls ~2.5 GB of Playwright base image (the app drives a real Chromium), so allow a few minutes. **There is no seed step**: the worker seeds the demo workspace itself at boot and again every six hours. Watch it happen with `docker compose -f infra/docker-compose.yml -f infra/docker-compose.demo.yml logs -f worker`.
+
+Everything that would let this reach the outside world is pinned off in the overlay, so a local run is as harmless as the hosted one. Stop it with `... down`, or `... down --volumes` to throw the data away too. Operational commands — forced reset, backup, restore, rollback — are in [`docs/runbook-demo.md`](docs/runbook-demo.md).
+
+### The development path
+
+Node ≥ 22 and pnpm 10. From a clean clone and a fresh Postgres volume:
+
+```bash
+git clone https://github.com/Olorin4/careerhq.git && cd careerhq
 docker compose -f infra/docker-compose.yml up -d postgres mailpit
 cp .env.example .env
 pnpm install
@@ -62,7 +111,9 @@ pnpm seed
 pnpm --filter @careerhq/web dev   # http://localhost:3000
 ```
 
-Mailpit's web UI is at `http://localhost:8025` (dev/demo SMTP sink — nothing is wired to send through it yet in P1).
+Mailpit's web UI is at `http://localhost:8025` — the dev/demo SMTP sink that stands in for a real mail provider from P4 onward.
+
+**If a port is already taken.** Postgres publishes `${CAREERHQ_PG_PORT:-5432}`, so set `CAREERHQ_PG_PORT=5433` (and match it in `.env`'s `DATABASE_URL`) if 5432 is busy. Mailpit's `1025`/`8025` and `demo-ats`'s `3001` are fixed: if you already run something on them — including another copy of this stack — stop that first, since Compose cannot start a second publisher of the same host port.
 
 `apps/worker` (P2 onward) needs `pnpm --filter @careerhq/worker dev` (or the Compose `worker` service) running for scheduled discovery ingestion; without it, `/jobs` stays empty until you trigger ingestion some other way (e.g. the smoke-test pattern in `apps/worker/src/jobs/ingest.test.ts`, calling `runIngestOnce` directly).
 
@@ -89,6 +140,16 @@ Mailpit's web UI is at `http://localhost:8025` (dev/demo SMTP sink — nothing i
 - `SANDBOX_SITE_ALLOWED_HOST` — the only site hostname a `sandbox`-kind workspace may auto-apply to. Defaults to `demo-ats` (the Compose service name); set to `localhost` when running a host `pnpm dev` process against the Compose `demo-ats`'s exposed port. **If you set it to `localhost`, set `SANDBOX_FORCE_SAFE=true` too.** `localhost` is a loopback name, and the capture policy's exemption that lets the allowed host be a loopback name applies only to sandbox-effective workspaces — a personal workspace gets no exemption, on purpose, because it has no allow-list pinning it to one host and would otherwise be able to open every port on the box.
 - `DEMO_ATS_URL` — the base URL of the fictional ATS (`apps/demo-ats`), the only auto-apply destination in CI or any local demo. Defaults to `http://demo-ats:3001` (the Compose service); set to `http://localhost:3001` when running `demo-ats` directly on the host.
 - `AUTOAPPLY_BROWSER_TIMEOUT_MS` — per-action budget for the Playwright driver (one navigation, one field action, the post-submit wait) — not the whole attempt. Defaults to `45000`.
+- `AUTOAPPLY_MAX_CONCURRENT_BROWSERS` — how many headless Chromium instances **one process** may hold open at once. Defaults to `1`. Read by both `web` and `worker`, and enforced per process, so a Compose stack running both can have two browsers alive on the box — size RAM for `web + worker × this number`. A refused acquirer is told "busy, try again" immediately rather than queued, so nothing hangs; the slot is held across a whole confirm, so a refusal can never burn a confirmation token.
+
+**Demo-mode env vars** (a personal, self-hosted install leaves all four alone):
+
+- `DEMO_MODE` — `false` by default. `true` resolves the **sandbox** workspace instead of the personal one, disables mailbox credential setup server-side, arms the rate limiter, renders the never-dismissible demo banner, and registers the reset job. Read by both `web` and `worker` so the two operate on the same workspace.
+- `DEMO_RESET_CRON` — how often the worker wipes and reseeds the demo workspace. Defaults to `0 */6 * * *` (every six hours). Worker-only. The `demo.reset` queue is created, scheduled and consumed **only** when `DEMO_MODE=true`, and the worker `unschedule`s it when demo mode is off — a schedule row outlives the process that created it, so a one-off demo run must not leave a data-deleting job firing forever. The worker also runs one reset at boot, because pg-boss does not fire a schedule on registration.
+- `DEMO_RATE_LIMIT_PER_MIN` — per-action, per-minute call budget for the web app. Defaults to `30`, and applies **only** in demo mode; a personal install is never throttled. It is per-process and per-action, not per-visitor — see [`SECURITY.md`](SECURITY.md).
+- `SANDBOX_FORCE_SAFE` — `false` by default, and **not** an alias for `DEMO_MODE`. It forces every submission through the sandbox host allow-list regardless of which workspace resolution actually returned: belt-and-braces against a workspace-resolution regression on the one deployment where strangers drive the app. Also required when you point `SANDBOX_SITE_ALLOWED_HOST` at `localhost` (see above).
+
+The hosted demo sets all of these as **literals** in `infra/docker-compose.demo.yml`, not as `${...}` interpolations, so nothing in an env file can change them. `infra/demo.env.example` documents what remains configurable there, which is only scheduling and timeouts.
 
 **One `.env`, at the repo root.** Nothing in this repo auto-loads it: `drizzle-kit`, the seed (`tsx`), `next dev` (which would only look inside `apps/web`), and the worker each load `<repo root>/.env` explicitly at startup. Variables already exported in your shell win over the file, which is Node's own `--env-file` rule. Copying `.env.example` is therefore enough — no `export DATABASE_URL=…` needed. In Docker, no `.env` exists and Compose supplies the environment instead.
 
@@ -111,9 +172,9 @@ DEMO_ATS_URL=http://localhost:3001
 
 then, from `apps/web`'s application detail page, point auto-apply at `http://localhost:3001/lever/jobs/eng-2` (the happy path), `http://localhost:3001/greenhouse/jobs/eng-1` (a required legal attestation checkbox — tick it yourself on the review screen), or `http://localhost:3001/signature/jobs/eng-1` (the blocked demo — a typed signature/date attestation), review, and confirm — the interactive flow drives its own headless Chromium session in-process (`apps/web/src/lib/site-driver.ts`), so no separate `apps/worker` process is needed for this recipe (`apps/worker` carries the same driver for the P6 background queue path, whose consumers are intentionally unregistered — see the architecture note below). That is also why `infra/Dockerfile.web` is built on the Playwright base image: a `web` container without Chromium refuses every confirm with `driver_unavailable`. Safety here comes the same way it does for email: the only reachable target is the fictional `demo-ats`, never a real employer. (Compose's own defaults — `demo-ats` as the hostname, `http://demo-ats:3001` as the URL — are for the `docker compose up` path, where `demo-ats` is a service name, not `localhost`.)
 
-**Whole stack in containers.** `docker compose -f infra/docker-compose.yml up -d --build` builds the `web` and `worker` images and runs them against the same Postgres. The images build the whole workspace (the pnpm lockfile has an importer per package, so a partial copy cannot satisfy `--frozen-lockfile`) and carry no `.env` — Compose supplies `DATABASE_URL` and `FILE_STORAGE_DIR`. Migrations and the seed are still run from the host, as above.
+**Whole stack in containers, personal mode.** `docker compose -f infra/docker-compose.yml up -d --build` builds the `web` and `worker` images and runs them against the same Postgres. The images build the whole workspace (the pnpm lockfile has an importer per package, so a partial copy cannot satisfy `--frozen-lockfile`) and carry no `.env` — Compose supplies `DATABASE_URL` and `FILE_STORAGE_DIR`. Migrations and the seed are still run from the host, as above. (The **demo** overlay is the self-contained path — it carries its own one-shot `migrate` service and seeds itself; see the quickstart.)
 
-**Port already in use?** If `5432` is taken on your host, set `CAREERHQ_PG_PORT` (e.g. `CAREERHQ_PG_PORT=5433`) before `docker compose up`, and update `DATABASE_URL` in `.env` to match. The compose file reads this variable to remap the Postgres host port; the container's internal port and `web`/`worker`'s in-network `DATABASE_URL` are unaffected.
+`CAREERHQ_PG_PORT` remaps only the Postgres *host* port; the container's internal port and `web`/`worker`'s in-network `DATABASE_URL` are unaffected.
 
 **Upgrading a pre-P2 database.** Migration `0001` adds `UNIQUE(workspace_id, name)` on `companies` — P1 allowed duplicates, so a database seeded before P2 may fail the migration on existing rows. Check and dedupe first:
 
@@ -168,13 +229,15 @@ flowchart LR
     restricted -->|"proxy pool only"| boards["Restricted boards\nLinkedIn, Indeed, Glassdoor,\nGoogle Jobs, ZipRecruiter"]
 ```
 
-As of P5, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, `demo-ats`, the file volume, the keyless job **feeds** (Remotive, RemoteOK, Arbeitnow, WWR, The Muse, and watchlisted Greenhouse/Lever/Ashby boards), **user SMTP/IMAP** (gated by `SUBMISSIONS_LIVE_EMAIL` and, for a sandbox workspace, `SANDBOX_SMTP_ALLOWED_HOST` — Mailpit stands in for it in dev/demo), **company career sites** (gated by `SUBMISSIONS_LIVE_COMPANY_SITE` and, for a sandbox workspace, `SANDBOX_SITE_ALLOWED_HOST` — the in-repo `demo-ats` stands in for it in dev/demo and CI), and, if `OPENROUTER_API_KEY` is set, **OpenRouter** from `web` (grounded materials/Q&A generation, reply classification's tie-break, screening-question drafting) and `worker` (re-rank, `classifyReply`) — the restricted connector remains architected for but not yet wired up. Company-site submission always runs through an isolated Playwright browser context, and `apps/worker/src/autoapply` is the only **code** that ever touches a live DOM (ADR-0007) — but as of P5 the **process** running it is `web`, not `worker`: the interactive prepare/preview/confirm flow calls that driver in-process through the `@careerhq/worker/autoapply` package export (`apps/web/src/lib/site-driver.ts`), which is why `infra/Dockerfile.web` shares the worker's Playwright base image rather than `node:22-alpine`. `worker` carries the same driver for the P6 background queue path; its `autoapply.capture`/`autoapply.submit` consumers are deliberately left unregistered in `apps/worker/src/main.ts` until the §11 gate runs inside the jobs themselves.
+As of P6, the live parts of this diagram are `web`, `worker`, `postgres`, `mailpit`, `demo-ats`, the file volume, the keyless job **feeds** (Remotive, RemoteOK, Arbeitnow, WWR, The Muse, and watchlisted Greenhouse/Lever/Ashby boards), **user SMTP/IMAP** (gated by `SUBMISSIONS_LIVE_EMAIL` and, for a sandbox workspace, `SANDBOX_SMTP_ALLOWED_HOST` — Mailpit stands in for it in dev/demo), **company career sites** (gated by `SUBMISSIONS_LIVE_COMPANY_SITE` and, for a sandbox workspace, `SANDBOX_SITE_ALLOWED_HOST` — the in-repo `demo-ats` stands in for it in dev/demo and CI), and, if `OPENROUTER_API_KEY` is set, **OpenRouter** from `web` (grounded materials/Q&A generation, reply classification's tie-break, screening-question drafting) and `worker` (re-rank, `classifyReply`) — the restricted connector remains architected for but not yet wired up. Company-site submission always runs through an isolated Playwright browser context, and `apps/worker/src/autoapply` is the only **code** that ever touches a live DOM (ADR-0007) — but as of P5 the **process** running it is `web`, not `worker`: the interactive prepare/preview/confirm flow calls that driver in-process through the `@careerhq/worker/autoapply` package export (`apps/web/src/lib/site-driver.ts`), which is why `infra/Dockerfile.web` shares the worker's Playwright base image rather than `node:22-alpine`. `worker` carries the same driver for a future background queue path; its `autoapply.capture`/`autoapply.submit` consumers are deliberately left unregistered in `apps/worker/src/main.ts` until the §11 gate runs inside the jobs themselves — and until the post-click `writeFile` retry hazard in `runSubmitJob` is closed, since a pg-boss retry there would be a second submission ([`docs/roadmap.md`](docs/roadmap.md#carried-beyond-p6)). On the hosted demo, the deployment diagram in [`docs/architecture.md`](docs/architecture.md#11-the-hosted-demo--the-same-images-one-overlay-one-edge) shows which of these arrows the demo overlay deletes: OpenRouter and both live gates are gone, and Mailpit and `demo-ats` are the only reachable destinations.
 
 ## Documentation
 
 - [`career-hq-product-spec.md`](career-hq-product-spec.md) — the normative product specification (v0.4).
 - [`docs/architecture.md`](docs/architecture.md) — system diagram, data model, monorepo layout, gated-submission sequence.
-- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P5 (done) through P7.
+- [`docs/roadmap.md`](docs/roadmap.md) — phase-by-phase delivery plan, P1–P6 (done) through P7, plus the work carried out of P6 with the reason each item was deferred.
+- [`SECURITY.md`](SECURITY.md) — what is protected and what is not, the deliberate exclusions, how to report a vulnerability, and the current known limitations stated plainly.
+- [`docs/runbook-demo.md`](docs/runbook-demo.md) — operating the hosted demo: deploy, update, logs, forced reset, backup, restore, rollback, and the post-deploy safety audit.
 - [`docs/adr/0001-postgres-and-pg-boss.md`](docs/adr/0001-postgres-and-pg-boss.md) — why Postgres + pg-boss over SQLite/Redis.
 - [`docs/adr/0002-gated-mutation-protocol.md`](docs/adr/0002-gated-mutation-protocol.md) — the three-layer gated-mutation design (state machine shipped in P1, enforced for real by the email channel in P4 and the company-site channel in P5).
 - [`docs/adr/0003-openrouter-sequential-fallback.md`](docs/adr/0003-openrouter-sequential-fallback.md) — the ported `chat-json` pattern and why fallback is sequential, not raced.
@@ -185,8 +248,23 @@ As of P5, the live parts of this diagram are `web`, `worker`, `postgres`, `mailp
 
 ## Screenshots
 
-Screenshots and a short demo video land with the P6 hosted-demo polish phase, once there is a public instance to record against.
+Captured by a Playwright script against the local demo stack at 1440×900 with the demo seed, so the gallery can be regenerated whenever the UI changes: `pnpm demo:media`.
+
+| | |
+|---|---|
+| [![Overview](docs/media/01-overview.png)](docs/media/01-overview.png) | **`/overview`** — the funnel across every state, the one computed next action, and follow-ups that are overdue. |
+| [![Applications board](docs/media/02-applications-board.png)](docs/media/02-applications-board.png) | **`/applications`** — the Kanban tracker; an illegal move shows the guard's own reason rather than silently failing. |
+| [![Event timeline](docs/media/03-application-timeline.png)](docs/media/03-application-timeline.png) | **An application's timeline** — append-only events with the trigger that caused each transition, not a mutable status field. |
+| [![Discovery inbox](docs/media/04-discovery-inbox.png)](docs/media/04-discovery-inbox.png) | **`/jobs`** — the scored discovery inbox with a keyword score breakdown expanded, so the ranking is inspectable rather than a number. |
+| [![Materials with provenance](docs/media/05-materials-provenance.png)](docs/media/05-materials-provenance.png) | **Materials panel** — an AI draft with provenance chips resolving each cited fact id back to its claim, and the "not yet approved" badge. |
+| [![NEEDS_FACTS](docs/media/06-needs-facts.png)](docs/media/06-needs-facts.png) | **`NEEDS_FACTS`** — generation refused because nothing in the fact bank grounds the claim. Nothing is persisted; the reasons are shown. |
+| [![Answer bank](docs/media/07-answer-bank.png)](docs/media/07-answer-bank.png) | **`/answers`** — approved, reusable answers with their source-fact count, approval date, and a `STALE` flag past the review date. |
+| [![Auto-apply review](docs/media/08-autoapply-review.png)](docs/media/08-autoapply-review.png) | **Auto-apply review** — every planned answer with its source and confidence, the never-pre-ticked consent checkbox, and a sensitive-field lock badge. |
+| [![Preview and confirm](docs/media/09-preview-confirm.png)](docs/media/09-preview-confirm.png) | **Preview → retype-target confirm** — the full payload, then the exact target typed back by hand before a single-use token is spent. |
+| [![Inbox suggestion](docs/media/10-inbox-suggestion.png)](docs/media/10-inbox-suggestion.png) | **`/inbox`** — an inbound reply with its suggested classification, confidence and quoted evidence, waiting for a human accept or reject. |
+
+**Walkthrough recording** — discovery → promote → grounded cover letter → auto-apply review → consent tick → preview → confirm → receipt: [`docs/media/walkthrough.mp4`](docs/media/walkthrough.mp4) (the capture script keeps the source [`walkthrough.webm`](docs/media/walkthrough.webm) when `ffmpeg` is not on `PATH`).
 
 ## License
 
-MIT. The `LICENSE` file itself is added at public release (P6), alongside the rest of the docs/portfolio polish — see [`docs/roadmap.md`](docs/roadmap.md#p6--hosted-demo-and-portfolio-polish).
+MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 Nick Kalas.

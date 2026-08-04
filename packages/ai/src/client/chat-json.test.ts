@@ -110,7 +110,7 @@ describe("chatJson", () => {
     const headers = capturedInit?.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer k");
     expect(headers["Content-Type"]).toBe("application/json");
-    expect(headers["HTTP-Referer"]).toBe("https://github.com/careerhq");
+    expect(headers["HTTP-Referer"]).toBe("https://careerhq.nickkalas.dev");
     expect(headers["X-Title"]).toBe("CareerHQ");
 
     const body = JSON.parse(capturedInit?.body as string) as {

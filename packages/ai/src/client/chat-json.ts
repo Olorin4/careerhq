@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { OPENROUTER_APP_REFERER, OPENROUTER_APP_TITLE } from "./app-identity.js";
 
 export const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -137,8 +138,8 @@ export async function chatJson<T>(req: ChatJsonRequest<T>): Promise<ChatJsonResu
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://github.com/careerhq",
-      "X-Title": "CareerHQ",
+      "HTTP-Referer": OPENROUTER_APP_REFERER,
+      "X-Title": OPENROUTER_APP_TITLE,
     };
 
     const response = await fetchImpl(url, {

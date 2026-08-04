@@ -7,10 +7,11 @@ export const metadata = {
   description: "Job application tracker and workspace",
 };
 
-// The placeholder used elsewhere in the repo (INGEST_USER_AGENT, the AI
-// client's HTTP-Referer) for "a link back to this project" — kept in sync
-// with those rather than inventing a second one.
-const REPO_URL = "https://github.com/careerhq";
+// The source repository. This is the one place in the repo that wants the repo:
+// `INGEST_USER_AGENT` and the AI client's `HTTP-Referer` both point at the
+// hosted demo instead, because a board operator or a model provider wanting to
+// know who is calling is better served by a running page than by a README.
+const REPO_URL = "https://github.com/Olorin4/careerhq";
 
 // The layout now reads loadConfig() (for demoMode) on every render. Several
 // leaf pages already force dynamic rendering because DATABASE_URL isn't

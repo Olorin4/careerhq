@@ -42,6 +42,51 @@ flowchart LR
 - `services/restricted-ingest` — optional Python service wrapping JobSpy for restricted-board discovery (LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter). Own container under a dedicated Compose profile, absent from the default stack and the demo. Narrow JSON contract (bounded search matrix in, normalized listings out); mandatory user-supplied proxy pool, per-board circuit breakers, bounded runs. The worker calls it only when the spec §5.3 consent gate is fully satisfied (profile deployed + env flag + recorded in-app consent). Discovery only — no credentials, no applying.
 - Postgres is the single store for structured data; large artifacts live on the file volume with hashes in the DB. pg-boss uses the same Postgres — no Redis, keeping the default stack at four services.
 
+### 1.1 The hosted demo — the same images, one overlay, one edge
+
+The public demo at `https://careerhq.nickkalas.dev` is not a fork or a second build. It is the *same* compose stack with `infra/docker-compose.demo.yml` layered on top, on a VPS the owner already uses for other services. What the overlay changes is which arrows in the diagram above still exist.
+
+```mermaid
+flowchart LR
+    visitor(["Anonymous visitor"])
+    cf["Cloudflare\nnickkalas.dev zone"]
+
+    subgraph box["Hetzner CX23 — shared with the owner's other services"]
+        edge["edge-nginx\nTLS on 80/443\nconf.d/careerhq.nickkalas.dev.conf"]
+        neighbours["kelevo-tms staging · outreach\niwd-backend · twilio-app"]
+        subgraph stack["compose project: careerhq (base + demo overlay)"]
+            dweb["web :3000\nDEMO_MODE=true\nmem_limit 900m"]
+            dworker["worker\ndemo.reset cron\nmem_limit 1200m"]
+            dpg[("postgres\nno published port")]
+            dmail["mailpit\nno published port"]
+            dats["demo-ats\nno published port"]
+            dvol[/"careerhq_files"/]
+            dmig["migrate\nprofile: tools, one-shot"]
+        end
+    end
+
+    visitor --> cf --> |"443"| edge
+    edge -->|"proxy_pass 127.0.0.1:3100"| dweb
+    edge -.-> neighbours
+    dweb <--> dpg
+    dworker <--> dpg
+    dweb --> dvol
+    dworker --> dvol
+    dweb -->|"only reachable SMTP"| dmail
+    dweb -->|"only reachable site"| dats
+    dmig -.->|"run --rm, once per deploy"| dpg
+    dweb -.-x|"no key deployed"| or2["OpenRouter"]
+    dweb -.-x|"gates false"| out["Real mailboxes · real employers"]
+```
+
+- **`web` is the only published port, and only on `127.0.0.1:3100`.** Postgres, Mailpit and `demo-ats` lose their published ports entirely (`ports: !reset []`), so they exist only as service names on the compose network. Mailpit's UI would otherwise be an open, unauthenticated mail viewer on a public IP.
+- **The dashed crossed arrows are the point.** `OPENROUTER_API_KEY` is *deleted* by the overlay rather than blanked, and `AI_MODE=replay` serves committed fixtures, so the demo cannot spend tokens or depend on a provider. Both live-submission gates are pinned `false` **as literals**, not interpolations — no env file, shell variable or `docker compose` invocation can open them.
+- **`migrate` is a profiled one-shot** (`--profile tools run --rm migrate`), the worker image with `db:migrate` as its command. Nothing else in the repo migrates the demo schema: the worker does not migrate at boot, and the box carries no Node toolchain. Its `restart: "no"` is deliberate — `unless-stopped` restarts a container that exited 0 as readily as one that crashed, and this one is *supposed* to exit 0.
+- **Hard `mem_limit` on every service**, because the demo is a guest on a 3.7 GB box: 900 + 1200 + 400 + 128 + 128 = 2756 MB worst case. Log rotation is capped for the same reason in the other dimension. A runaway Chromium is OOM-killed inside its own container instead of pushing a neighbour into swap.
+- **The edge is not ours.** `edge-nginx` already terminates TLS for the owner's other sites; CareerHQ contributes one vhost file (`infra/edge/careerhq.nickkalas.dev.conf`, committed here) that gets copied into the box's `conf.d`. `nginx -t` must pass before any reload — a broken reload takes the neighbours down too.
+
+Operational procedures — deploy, update, forced reset, backup, restore, rollback — are in [`runbook-demo.md`](runbook-demo.md).
+
 ## 2. Monorepo layout
 
 pnpm workspaces + Turborepo. Import boundaries enforced by dependency-cruiser in CI.
@@ -63,12 +108,16 @@ careerHQ-app/
 │   ├── autoapply/                # canonical form schema, ATS adapters, Playwright driver
 │   └── config/                   # zod-parsed env, safety-gate resolution, model tiers
 ├── infra/
-│   ├── docker-compose.yml        # web, worker, postgres, mailpit
-│   ├── docker-compose.demo.yml   # + demo-ats, sandbox env, reset schedule
-│   └── Dockerfile.{web,worker}
+│   ├── docker-compose.yml        # web, worker, postgres, mailpit, demo-ats
+│   ├── docker-compose.demo.yml   # demo env as literals, mem caps, one-shot migrate
+│   ├── demo.env.example          # the operator's env file — mostly a list of what is NOT in it
+│   ├── edge/                     # the committed vhost for careerhq.nickkalas.dev
+│   └── Dockerfile.{web,worker,demo-ats}
 ├── services/
 │   └── restricted-ingest/        # optional JobSpy connector; own profile, never in demo
-├── docs/{adr,architecture.md,roadmap.md}
+├── docs/{adr,architecture.md,roadmap.md,runbook-demo.md,media/}
+├── SECURITY.md                   # what is protected, what is not, and what is excluded on purpose
+├── LICENSE                       # MIT
 └── .github/workflows/ci.yml
 ```
 
@@ -195,7 +244,8 @@ Design notes:
 - `demo-reset` is registered only when `DEMO_MODE=true`, and the worker `unschedule`s it when demo mode is off — a schedule row outlives the process that created it, so a one-off demo run must not leave the job firing forever. The worker also runs one reset at boot: pg-boss does not fire a schedule on registration, so without it a freshly deployed demo box is empty until the next cron boundary.
 - The reset is a single transaction holding `pg_advisory_xact_lock(DEMO_SEED_LOCK_KEY)`. The demo workspace is a database-global singleton (`kind = 'sandbox' AND name = 'CareerHQ Demo'`) that `getActiveWorkspace` **bootstraps when missing**, so an un-transactional delete-then-rebuild let a single visitor request create a rival demo workspace, and two overlapping resets deleted rows each other was mid-write on.
 - The sandbox block is evaluated inside `evaluateSubmissionGates` (`packages/core/src/gates`), the single gate matrix both `apps/web/src/lib/email-submission.ts` and `apps/web/src/lib/site-submission.ts` call before their one mutation — a UI or route-handler bug cannot bypass it.
-- Demo mutations are rate-limited; credential setup is disabled for sandbox workspaces.
+- Demo mutations are rate-limited; credential setup is disabled for sandbox workspaces — server-side, in the action, not by hiding the form.
+- Backup is two artifacts, not one: `pg_dump` of the database *and* a tar of the `careerhq_files` volume the database's paths point into. A dump alone restores an app whose CVs and screenshots 404. Commands: [`runbook-demo.md`](runbook-demo.md) §5–6.
 
 ## 7. Security
 
@@ -203,6 +253,7 @@ Design notes:
 - Redaction middleware on logs and error responses (secrets, auth headers, message bodies).
 - All mutations are POST server actions (same-origin); confirm endpoint rate-limited; tokens stored hashed.
 - Personal deployments sit behind an owner login and reverse-proxy TLS; the demo exposes only the sandbox workspace.
+- The full statement of what is protected, what is explicitly *not*, which capabilities are excluded on purpose (no CAPTCHA solving, no restricted-board automation, no unattended applying), and the current known limitations is [`SECURITY.md`](../SECURITY.md). It is kept honest rather than reassuring: one claim in it was falsified by a redirect bypass during P6 and was corrected in place rather than softened.
 
 ## 8. Testing and CI
 

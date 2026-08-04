@@ -1,4 +1,10 @@
-export const INGEST_USER_AGENT = "CareerHQ/0.2 (+https://github.com/careerhq)";
+// Polite fetching, spec §5.1 / ADR-0006: every board operator we fetch from can
+// see who is asking and reach a page that says what this is. The URL is the
+// hosted demo, deliberately NOT the source repo — the point of a contact URL is
+// that a human on the other end can open it and understand the traffic, and a
+// running instance says that faster than a README. Bump the version with the
+// phase so a log line dates itself.
+export const INGEST_USER_AGENT = "CareerHQ/0.6 (+https://careerhq.nickkalas.dev)";
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 export class IngestFetchError extends Error {
