@@ -251,4 +251,14 @@ describe("loadConfig", () => {
   it("rejects a DEMO_ATS_URL that isn't a URL, naming the var in prose", () => {
     expect(() => loadConfig({ ...BASE, DEMO_ATS_URL: "demo-ats:3001" })).toThrow(/DEMO_ATS_URL/);
   });
+
+  // Demo mode (spec P6 §3): the switch that puts the app on the sandbox
+  // workspace, hides credential setup, and shows the banner. Off by default
+  // like every other gate — a plain checkout must never be a demo.
+  it("defaults demoMode to false", () => {
+    expect(loadConfig(BASE).demoMode).toBe(false);
+  });
+  it("enables demoMode for DEMO_MODE=true", () => {
+    expect(loadConfig({ ...BASE, DEMO_MODE: "true" }).demoMode).toBe(true);
+  });
 });

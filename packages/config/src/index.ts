@@ -104,6 +104,11 @@ const envSchema = z.object({
   SUBMISSIONS_LIVE_EMAIL: boolFromEnv,
   SUBMISSIONS_LIVE_COMPANY_SITE: boolFromEnv,
   SANDBOX_FORCE_SAFE: boolFromEnv,
+  // Puts the app on the sandbox workspace (spec P6 §3): web resolves
+  // "CareerHQ Demo" instead of the personal workspace, credential setup
+  // refuses server-side, and the layout shows the non-dismissible banner.
+  // Off by default, like every other gate in this file.
+  DEMO_MODE: boolFromEnv,
   // Compared against a connection's SMTP host by the sandbox gate. An empty
   // value (what Compose passes for an unset variable) must not become an empty
   // allow-list entry — it falls back to the default, like the model lists.
@@ -192,6 +197,8 @@ export interface AppConfig {
   submissionsLiveEmail: boolean;
   submissionsLiveCompanySite: boolean;
   sandboxForceSafe: boolean;
+  /** Puts the app on the sandbox workspace and disables credential setup; default false. */
+  demoMode: boolean;
   /** Never empty: the only SMTP host a sandbox workspace may submit to. */
   sandboxSmtpAllowedHost: string;
   /** Never empty: the only site hostname a sandbox workspace may auto-apply to. */
@@ -234,6 +241,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     submissionsLiveEmail: parsed.SUBMISSIONS_LIVE_EMAIL,
     submissionsLiveCompanySite: parsed.SUBMISSIONS_LIVE_COMPANY_SITE,
     sandboxForceSafe: parsed.SANDBOX_FORCE_SAFE,
+    demoMode: parsed.DEMO_MODE,
     sandboxSmtpAllowedHost: parsed.SANDBOX_SMTP_ALLOWED_HOST,
     sandboxSiteAllowedHost: parsed.SANDBOX_SITE_ALLOWED_HOST,
     followUpDays: parsed.FOLLOW_UP_DAYS,

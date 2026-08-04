@@ -11,7 +11,8 @@ import { ConnectionForm, ConnectionsTable } from "./connection-form.js";
 export const dynamic = "force-dynamic";
 
 export default async function EmailSettingsPage() {
-  const masterKey = loadConfig().masterKey;
+  const config = loadConfig();
+  const masterKey = config.masterKey;
 
   if (!masterKey) {
     return (
@@ -46,7 +47,13 @@ export default async function EmailSettingsPage() {
 
       <section className="settings-section">
         <h2>Add connection</h2>
-        <ConnectionForm />
+        {config.demoMode ? (
+          <p className="settings-empty email-demo-disabled">
+            Credential setup is disabled in the hosted demo — sending is disabled and nothing leaves this server.
+          </p>
+        ) : (
+          <ConnectionForm />
+        )}
       </section>
     </main>
   );

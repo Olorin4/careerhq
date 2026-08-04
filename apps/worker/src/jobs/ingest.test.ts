@@ -102,6 +102,7 @@ const baseConfig: AppConfig = {
   submissionsLiveEmail: false,
   submissionsLiveCompanySite: false,
   sandboxForceSafe: false,
+  demoMode: false,
   sandboxSmtpAllowedHost: "mailpit",
   sandboxSiteAllowedHost: "demo-ats",
   followUpDays: 7,

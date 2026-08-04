@@ -18,6 +18,9 @@ type ActionResult = { ok: true } | { ok: false; reason: string };
 
 const EMAIL_SETTINGS_PATH = "/settings/email";
 
+/** The refusal both demo-gated actions return — never thrown, so the caller sees `{ok:false}`, not a 500. */
+const DEMO_MODE_REFUSAL: ActionResult = { ok: false, reason: "disabled in the hosted demo" };
+
 /**
  * The page only renders the create form and Test/Disconnect controls when a
  * master key is configured, but a server action is reachable independently of
@@ -142,6 +145,12 @@ async function verifyAndRecordHealth(
 }
 
 export async function createConnectionAction(formData: FormData): Promise<ActionResult> {
+  // Server-side enforcement (spec P6 §3): the page's disabled panel is only
+  // presentation, so this action must refuse independently of it — a direct
+  // call (a stale client, a replayed request) must not create real
+  // credentials in the hosted demo.
+  if (loadConfig().demoMode) return DEMO_MODE_REFUSAL;
+
   const masterKeyB64 = requireMasterKey();
   const parsed = parseCreateConnectionForm(formData);
   if (!parsed.ok) return parsed;
@@ -169,6 +178,10 @@ export async function createConnectionAction(formData: FormData): Promise<Action
 const connectionIdSchema = z.object({ connectionId: z.string().uuid() });
 
 export async function testConnectionAction(raw: { connectionId: string }): Promise<ActionResult> {
+  // Same server-side gate as createConnectionAction: testing a connection
+  // opens a real SMTP transport, which the demo must never do.
+  if (loadConfig().demoMode) return DEMO_MODE_REFUSAL;
+
   const { connectionId } = connectionIdSchema.parse(raw);
   const masterKeyB64 = requireMasterKey();
 
