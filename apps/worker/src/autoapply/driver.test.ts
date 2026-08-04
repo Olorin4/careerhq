@@ -44,6 +44,10 @@ describe("EXTRACT_SCRIPT parity with rawPageFromHtml", () => {
   const cases: Array<{ name: string; html: string; url: string }> = [
     { name: "greenhouse (multi-step)", html: greenhousePage(JOB), url: "http://demo-ats:3001/greenhouse/jobs/eng-1" },
     { name: "lever (single page)", html: leverPage(JOB_2), url: "http://demo-ats:3001/lever/jobs/eng-2" },
+    // Pre-ticked checkboxes: `checked` is an attribute the extractor
+    // deliberately does not carry, so both implementations must agree on
+    // ignoring it rather than one of them quietly reading it.
+    { name: "consent (pre-ticked boxes)", html: consentPage(JOB), url: "http://demo-ats:3001/consent/jobs/eng-1" },
   ];
 
   for (const { name, html, url } of cases) {
