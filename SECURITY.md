@@ -1,0 +1,119 @@
+# Security
+
+CareerHQ acts on a job seeker's behalf: it stores personal facts, holds mailbox
+credentials, sends email, and drives a browser against third-party application
+forms. Every one of those is a way to do something irreversible to someone's
+real job search. This document describes what protects them, what does not, and
+what is deliberately left open.
+
+## Reporting a vulnerability
+
+Open a GitHub issue for anything non-sensitive. For something exploitable,
+contact the maintainer directly rather than filing publicly.
+
+## The credential master key
+
+`CAREERHQ_MASTER_KEY` is a base64-encoded 32-byte key used with libsodium's
+`crypto_secretbox` to seal SMTP/IMAP passwords at rest
+(`packages/db/src/crypto.ts`). Sealed blobs are `nonce || box`, stored in
+`credentials.ciphertext`.
+
+**One key per deployment.** CareerHQ has no user accounts — it is single-user
+and self-hosted — so the key is per *installation*, not per person. Generate
+your own and never share it between installs:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+The key is what stands between your mailbox password and anyone holding a copy
+of your database — not only a live one, but a `pg_dump`, an old backup, a copied
+volume, or a snapshot on a disk you have thrown away. A shared or default key
+would make every one of those artifacts readable by anyone with this repository.
+
+Properties the implementation guarantees:
+
+- **No default and no fallback.** Unset, `masterKey` is `null` and email
+  connections are disabled outright. Nothing degrades to plaintext.
+- **Length is validated twice, independently** — in `packages/config` against a
+  plain 32-byte check, and again in `packages/db/src/crypto.ts` against
+  libsodium's own `crypto_secretbox_KEYBYTES`, so the two cannot silently drift.
+- **Opening never returns garbage.** A wrong key, a truncated payload, or a
+  tampered ciphertext all raise `CryptoError`. Callers must not catch it and
+  continue.
+
+**Rotation is destructive.** `crypto_secretbox_open_easy` cannot distinguish a
+wrong-but-well-formed key from tampering, so changing `CAREERHQ_MASTER_KEY`
+makes every existing sealed credential permanently unopenable. To rotate, either
+re-enter each connection's password afterwards, or run a migration that opens
+every credential under the old key and re-seals it under the new one *before*
+retiring the old key. Do not change this value casually.
+
+### The hosted demo's key is public on purpose
+
+The hosted demo ships with a fixed key:
+
+```
+OzZdiB1qt0pWEwQJz3gUO/NfITgm/7QA76cur9qI6cc=
+```
+
+This is published deliberately and is safe **only** because of what it protects:
+a single fictional password for a Mailpit mailbox that cannot deliver to anyone,
+inside a sandbox workspace, on a deployment where sending is gated off by three
+independent mechanisms. It exists so the demo's email panel is explorable rather
+than blank, and so this repository's encryption path is exercised by the demo
+rather than stubbed out.
+
+**Never reuse this key.** It is not an example to copy, and it must not appear in
+any deployment that holds a real credential. Generate your own with the command
+above.
+
+## Acting on the outside world
+
+Three independent mechanisms gate anything that leaves the machine. They are
+deliberately redundant — each has caught a real bug during development.
+
+1. **Environment gates**, default off. `SUBMISSIONS_LIVE_EMAIL` and
+   `SUBMISSIONS_LIVE_SITE` must be explicitly enabled.
+2. **Sandbox adapter blocks.** A sandbox workspace can only reach the configured
+   safe destinations (Mailpit, the bundled fictional ATS). `SANDBOX_FORCE_SAFE`
+   forces this path regardless of the workspace's own kind, as a hard override.
+3. **Per-application confirmation.** A single-use, sha256-hashed token with a
+   10-minute TTL, requiring the exact target retyped and a byte-identical
+   payload fingerprint. A pending receipt is written transactionally *before*
+   the mutation; a confirmed receipt only after evidence. Ambiguous outcomes
+   become `NEEDS_RECONCILE` and are never retried automatically.
+
+Consent fields (legal attestations, criminal-history questions) are never
+answered by the model, never reused across applications, and never pre-ticked —
+only the user's own click sets `source: "user"` into the fingerprinted payload.
+
+## The hosted demo
+
+The public demo runs with `DEMO_MODE=true`, which resolves a sandbox workspace,
+refuses credential creation server-side, rate-limits mutating actions, and
+rebuilds itself from a fixed seed every six hours. Visitors cannot configure a
+real mailbox or reach a real employer.
+
+## Known limitations
+
+Stated plainly rather than omitted.
+
+- **DNS-name SSRF is not fully closed.** The auto-apply capture path refuses
+  non-`http(s)` URLs and literal-IP hosts in loopback, link-local, private and
+  unspecified ranges. The check is on the *literal* host, so a DNS name that
+  resolves to a private address still passes. The hosted demo is unaffected —
+  its sandbox host allow-list is a separate, earlier layer — but a personal
+  install running with `SANDBOX_FORCE_SAFE` off is exposed. Closing it properly
+  requires resolve-then-pin: resolve the name, reject the resolved address, and
+  connect to the pinned IP so it cannot be re-resolved in between.
+- **Live-page re-verification before typing is not implemented.** The driver
+  fills from the form snapshot captured at review time and re-extracts at submit
+  time, but does not verify that the field under a given selector still asks the
+  question the user reviewed. A page edited between review and submit could
+  receive an answer planned for a different field.
+- **Rate limiting is per-process and per-action, not per-visitor.** One
+  aggressive visitor consumes the shared budget for everyone.
+- **There is no authentication.** CareerHQ assumes a single trusted operator on
+  a private deployment. Do not expose an instance holding real data to the
+  internet without putting your own authentication in front of it.
