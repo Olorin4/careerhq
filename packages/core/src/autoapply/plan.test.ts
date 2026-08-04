@@ -337,6 +337,62 @@ describe("planAnswers — rule 1a: consent-only fields are never reused across a
     expect(answer.value).toBe("");
   });
 
+  // CONSENT_ONLY_LABEL_RE is NOT a subset of the sensitivity ruleset — "under
+  // penalty" and "legally binding" appear in neither SENSITIVE_TERMS nor the
+  // canonical-field set. While the consent check sat INSIDE the sensitivity
+  // check, such a field skipped rule 1 entirely and rule 4 handed it another
+  // application's saved answer: pre-filled, `needsUser: false`, not blocking
+  // preview — and the UI, which applies the consent predicate unconditionally,
+  // rendered that pre-filled value under "you must tick this yourself".
+  it("refuses saved-answer reuse for a consent-only label the sensitivity ruleset does not know", () => {
+    const label = "Please confirm under penalty of perjury that the above is accurate";
+    const result = planAnswers(
+      inputs({
+        form: form([
+          field({ id: "pen", kind: "text", required: true, label, canonicalField: "unknown", mappingConfidence: 0 }),
+        ]),
+        savedAnswers: [
+          { questionNorm: normalizeQuestion(label), answer: "I confirm", sourceFactIds: [], staleForReuse: false },
+        ],
+      }),
+    );
+
+    const answer = answerFor(result, "pen");
+    expect(answer.source).toBe("user");
+    expect(answer.source).not.toBe("saved_answer");
+    expect(answer.needsUser).toBe(true);
+    expect(answer.value).toBe("");
+  });
+
+  it("keeps the planner's consent predicate identical to the UI's, ruleset-independent", () => {
+    // The UI applies isConsentOnlyField unconditionally (site-panel.tsx). Any
+    // label it calls consent-only must plan as consent-only too, whether or not
+    // the sensitivity ruleset happens to agree — that agreement is what makes
+    // the consent row's copy true rather than aspirational.
+    for (const label of [
+      "Please confirm under penalty of perjury that the above is accurate",
+      "This is a legally binding declaration — do you agree?",
+      "Do you acknowledg[e] the policy above?",
+      "Have you been convict[ed] of an offence?",
+      "I certif[y] the information is accurate",
+    ]) {
+      const consentOnly = isConsentOnlyField({ canonicalField: "unknown", label });
+      const result = planAnswers(
+        inputs({
+          form: form([
+            field({ id: "f", kind: "text", required: true, label, canonicalField: "unknown", mappingConfidence: 0 }),
+          ]),
+          savedAnswers: [
+            { questionNorm: normalizeQuestion(label), answer: "previously given", sourceFactIds: [], staleForReuse: false },
+          ],
+        }),
+      );
+      expect(consentOnly).toBe(true);
+      expect(answerFor(result, "f").source).toBe("user");
+      expect(answerFor(result, "f").needsUser).toBe(true);
+    }
+  });
+
   it("isConsentOnlyField keys off the canonical field OR the label, and stays narrow", () => {
     // Either signal alone is enough …
     expect(isConsentOnlyField({ canonicalField: "legal_attestation", label: "" })).toBe(true);

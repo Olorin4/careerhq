@@ -92,11 +92,14 @@ export const CONSENT_ONLY_FIELDS: ReadonlySet<CanonicalField> = new Set<Canonica
  *
  * The canonical-field set alone is not enough. An ATS whose attestation or
  * criminal-history question no adapter hint recognizes arrives with
- * canonicalField "unknown"; `isSensitiveField` still catches it (the label
- * ruleset is an independent signal, by design), but it would then fall to rule
- * 1's saved-answer branch and be satisfied by consent given on a DIFFERENT
- * application — the exact reuse this rule exists to forbid, escaping through
- * the unmapped door.
+ * canonicalField "unknown", and would fall to rule 4's saved-answer branch to
+ * be satisfied by consent given on a DIFFERENT application — the exact reuse
+ * this rule exists to forbid, escaping through the unmapped door.
+ *
+ * This ruleset stands on its own and is NOT a subset of the sensitivity one:
+ * "under penalty" and "legally binding" are in neither SENSITIVE_TERMS nor the
+ * canonical-field set. `planField` therefore consults it BEFORE (not inside)
+ * the sensitivity check — see rule 1a.
  *
  * Deliberately narrower than the sensitivity ruleset: only attestations and
  * criminal-history/background-check disclosures. Notice period, salary, work
@@ -188,15 +191,22 @@ function planField(
   inputs: PlanInputs,
   saved: SavedAnswerLike | null,
 ): Draft {
-  // Rule 1 — sensitive: only the user (or their own previously saved answer) may answer.
-  // Never "ai", never a profile guess, regardless of mapping confidence.
-  //
-  // Consent-only fields go further and refuse the saved answer too: consent is
-  // given per application, so it can never be carried over from another one.
-  // Keyed off `isConsentOnlyField`, not the canonical-field set alone, so an
-  // unmapped attestation cannot slip past on its label.
+  // Rule 1a — consent-only: consent is given per application, so it can never
+  // be carried over from another one. Checked FIRST, and deliberately NOT
+  // nested inside the sensitivity check: `CONSENT_ONLY_LABEL_RE` is not a
+  // subset of the sensitivity ruleset ("under penalty", "legally binding" are
+  // in neither SENSITIVE_TERMS nor the canonical-field set), so nesting it left
+  // a field that is consent-only for the UI but not sensitive for the planner —
+  // it fell through to rule 4 and was satisfied by ANOTHER application's saved
+  // answer, then rendered pre-filled under the review screen's "you must tick
+  // this yourself" copy. Hoisting is strictly safer (it can only ever move a
+  // field from a reused answer to the user's own) and makes the planner's
+  // predicate identical to the UI's by construction rather than by coincidence.
+  if (isConsentOnlyField(field)) return userDraft(CONSENT_NOTE, false);
+
+  // Rule 1b — sensitive: only the user (or their own previously saved answer) may
+  // answer. Never "ai", never a profile guess, regardless of mapping confidence.
   if (isSensitiveField(field)) {
-    if (isConsentOnlyField(field)) return userDraft(CONSENT_NOTE, false);
     return saved ? savedAnswerDraft(saved) : userDraft(SENSITIVE_NOTE, false);
   }
 
