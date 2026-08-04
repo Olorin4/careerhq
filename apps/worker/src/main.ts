@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import PgBoss from "pg-boss";
 import { loadConfig } from "@careerhq/config";
 import { createDb } from "@careerhq/db";
-import { runCaptureJob, runSubmitJob, type CaptureJobData, type SubmitJobData } from "./jobs/autoapply.js";
 import { runEmailSyncOnce } from "./jobs/email-sync.js";
 import { runIngestOnce } from "./jobs/ingest.js";
 import { runRerankOnce } from "./jobs/rerank.js";
@@ -73,23 +72,25 @@ await boss.work(EMAIL_SYNC_QUEUE, async () => {
   console.log(`[worker] ${EMAIL_SYNC_QUEUE}`, summary);
 });
 
-// No `schedule` for either queue — unlike ingest/rerank/email-sync, these run
-// on demand, one job per attempt, enqueued by whatever in `apps/web` decides
-// an attempt is ready to be captured or submitted (spec §10).
-await boss.createQueue(AUTOAPPLY_CAPTURE_QUEUE);
-await boss.work<CaptureJobData>(AUTOAPPLY_CAPTURE_QUEUE, async (jobs) => {
-  for (const job of jobs) {
-    await runCaptureJob(db, config, job.data);
-    console.log(`[worker] ${AUTOAPPLY_CAPTURE_QUEUE} attempt=${job.data.attemptId}`);
-  }
-});
+// INTENTIONALLY NOT REGISTERED (spec §11).
+//
+// `runCaptureJob`/`runSubmitJob` (./jobs/autoapply.ts) and their tests stay in
+// the tree for P6's queue path, but neither `autoapply.capture` nor
+// `autoapply.submit` gets a `createQueue`/`work` pair here yet.
+//
+// `runSubmitJob` performs a real `fillAndSubmit` — an externally-mutating
+// channel — and spec §11 is normative that EVERY such channel passes the three
+// layers: the env gate, the sandbox host allow-list, and a single-use
+// confirmation token bound to the payload fingerprint. Today those three live
+// exclusively in `apps/web`'s `confirmAndSubmitSite`, on the assumption that
+// "the gate already ran before this job was enqueued" — and nothing in the repo
+// enqueues either queue, so registering a live consumer bought no capability
+// and left an ungated live-submit path reachable by anything that could write a
+// pg-boss row.
+//
+// Register them when the gate runs INSIDE the jobs (P6), not before.
+const UNREGISTERED_QUEUES = [AUTOAPPLY_CAPTURE_QUEUE, AUTOAPPLY_SUBMIT_QUEUE] as const;
 
-await boss.createQueue(AUTOAPPLY_SUBMIT_QUEUE);
-await boss.work<SubmitJobData>(AUTOAPPLY_SUBMIT_QUEUE, async (jobs) => {
-  for (const job of jobs) {
-    await runSubmitJob(db, config, job.data);
-    console.log(`[worker] ${AUTOAPPLY_SUBMIT_QUEUE} attempt=${job.data.attemptId}`);
-  }
-});
-
-console.log("[worker] started; queues registered");
+console.log(
+  `[worker] started; queues registered (not registered: ${UNREGISTERED_QUEUES.join(", ")} — ungated until P6)`,
+);
