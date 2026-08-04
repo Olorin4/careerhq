@@ -89,12 +89,31 @@ describe("demoRateLimit", () => {
 describe("cross-bundle sharing", () => {
   beforeEach(() => clearRateLimits());
 
-  it("keeps the counters on globalThis, not in module scope", () => {
-    const globals = globalThis as typeof globalThis & { [RATE_LIMIT_WINDOWS_KEY]?: Map<string, unknown> };
-    checkRateLimit("onGlobal", { limit: 5, now: 1000 });
-    expect(globals[RATE_LIMIT_WINDOWS_KEY]?.has("onGlobal")).toBe(true);
+  it("reads its counters FROM globalThis, so a write there changes what it decides", () => {
+    // The fix-wave review (A6) built the regression this used to miss: a
+    // module-level Map that is also mirrored onto `globalThis` satisfies "the
+    // slot is populated" while still handing each bundle its own budget. So
+    // the assertion is not that the slot exists — it is that the slot is the
+    // ONLY copy. Reaching in and deleting the window must change the very next
+    // decision; a module keeping its own copy would still refuse.
+    const globals = globalThis as typeof globalThis & {
+      [RATE_LIMIT_WINDOWS_KEY]?: Map<string, { startedAt: number; count: number }>;
+    };
+
+    // 1. It ADOPTS a store that is already there. This is the half the
+    //    mirrored-Map regression fails: a module that assigns its own Map into
+    //    the slot on every call throws this pre-seeded window away, and the
+    //    call below is allowed instead of refused.
+    globals[RATE_LIMIT_WINDOWS_KEY] = new Map([["spentByAnotherBundle", { startedAt: 1000, count: 9 }]]);
+    expect(checkRateLimit("spentByAnotherBundle", { limit: 1, now: 1000 }).ok).toBe(false);
+
+    // 2. And it does not keep a private copy alongside: reaching into the slot
+    //    and clearing the window must change the very next decision.
+    globals[RATE_LIMIT_WINDOWS_KEY]?.delete("spentByAnotherBundle");
+    expect(checkRateLimit("spentByAnotherBundle", { limit: 1, now: 1000 })).toEqual({ ok: true });
+
     clearRateLimits();
-    expect(globals[RATE_LIMIT_WINDOWS_KEY]?.has("onGlobal")).toBe(false);
+    expect(globals[RATE_LIMIT_WINDOWS_KEY]?.has("spentByAnotherBundle")).toBe(false);
   });
 
   it("counts a second module instance's calls against the first one's budget", async () => {

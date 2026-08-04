@@ -148,10 +148,11 @@ function config(over: Record<string, string> = {}): AppConfig {
     // scoped to sandbox-EFFECTIVE workspaces (fix-wave review A3 — honouring
     // it for a personal workspace made every local port reachable). So the
     // outside-compose local setup this suite models has to say so: this is the
-    // same flag the deployed demo sets, and `docs/demo.md` documents it as the
-    // required companion to `SANDBOX_SITE_ALLOWED_HOST=localhost`. Nothing
-    // about the flows below changes — the gate matrix's only sandbox-specific
-    // rule is `sandboxTargetAllowed`, which HOST satisfies by construction.
+    // same flag the deployed demo sets, and README's auto-apply env table
+    // documents it as the required companion to
+    // `SANDBOX_SITE_ALLOWED_HOST=localhost`. Nothing about the flows below
+    // changes — the gate matrix's only sandbox-specific rule is
+    // `sandboxTargetAllowed`, which HOST satisfies by construction.
     SANDBOX_FORCE_SAFE: "true",
     DEMO_ATS_URL,
     ...over,

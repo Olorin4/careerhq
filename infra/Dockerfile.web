@@ -11,11 +11,13 @@
 #
 # Everything Dockerfile.worker's header says about the tag applies here
 # verbatim: it MUST stay in lockstep with the `playwright` version pinned in
-# apps/worker/package.json (apps/web reaches the driver through
-# `@careerhq/worker/autoapply`, so that is the pin that matters), because the
-# npm package only launches the browser build it shipped with and the image
-# carries exactly that build under PLAYWRIGHT_BROWSERS_PATH=/ms-playwright.
-# Bump all three together — worker image, web image, npm pin.
+# apps/web/package.json AND apps/worker/package.json, because the npm package
+# only launches the browser build it shipped with and the image carries exactly
+# that build under PLAYWRIGHT_BROWSERS_PATH=/ms-playwright. apps/web reaches the
+# driver through `@careerhq/worker/autoapply`, but it is apps/web's OWN
+# dependency that makes `require("playwright")` resolve inside the externalised
+# Next bundle — that is the pin that matters for THIS image.
+# Bump all four together — worker image, web image, and both npm pins.
 FROM mcr.microsoft.com/playwright:v1.62.1-noble AS base
 RUN corepack enable
 WORKDIR /app

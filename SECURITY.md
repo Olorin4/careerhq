@@ -100,13 +100,32 @@ real mailbox or reach a real employer.
 Stated plainly rather than omitted.
 
 - **DNS-name SSRF is not fully closed.** The auto-apply capture path refuses
-  non-`http(s)` URLs and literal-IP hosts in loopback, link-local, private and
-  unspecified ranges. The check is on the *literal* host, so a DNS name that
-  resolves to a private address still passes. The hosted demo is unaffected —
-  its sandbox host allow-list is a separate, earlier layer — but a personal
-  install running with `SANDBOX_FORCE_SAFE` off is exposed. Closing it properly
-  requires resolve-then-pin: resolve the name, reject the resolved address, and
-  connect to the pinned IP so it cannot be re-resolved in between.
+  non-`http(s)` URLs and literal-IP hosts in the loopback, link-local, private,
+  unspecified, CGNAT, benchmarking and IPv6-translation ranges, and it applies
+  that policy to *every* navigation — the submitted URL and each redirect hop,
+  judged from the `Location` header before the hop is requested. The check is
+  on the *literal* host, so a DNS name that resolves to a private address still
+  passes; `SANDBOX_SITE_ALLOWED_HOST` limits which names a sandbox workspace
+  may use at all, but a personal install can be pointed at any name. Closing it
+  properly requires resolve-then-pin: resolve the name, reject the resolved
+  address, and connect to the pinned IP so it cannot be re-resolved in between.
+
+  An earlier version of this entry said the hosted demo was unaffected because
+  its host allow-list is a separate, earlier layer. That was **wrong**: until
+  the redirect fix, one `302` from the allow-listed host to `127.0.0.1` walked
+  straight through the allow-list, and it was proven doing so. The allow-list
+  narrows which *first* host may be visited; it never constrained where that
+  host could send the browser next. It does now, because the same policy is
+  re-applied at each hop rather than once at the door.
+
+  Two residual gaps in the same area, stated rather than implied:
+  the redirect chain is walked for `GET` navigations only — a non-`GET`
+  navigation (the submit POST) is policy-checked on its target and then
+  backstopped by a landed-URL assertion *after* the click, so an off-policy
+  redirect there is caught before any content is read but after the form was
+  sent; and a sandbox workspace pointed at `localhost` by
+  `SANDBOX_SITE_ALLOWED_HOST` may reach any *port* on that host, since the
+  allow-list names a host and not an origin.
 - **Live-page re-verification before typing is not implemented.** The driver
   fills from the form snapshot captured at review time and re-extracts at submit
   time, but does not verify that the field under a given selector still asks the
