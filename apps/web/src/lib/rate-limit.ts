@@ -104,11 +104,17 @@ export interface DemoRateLimitConfig {
 /**
  * Buckets whose call is not a cheap row write but a whole *process*: the two
  * that launch a headless Chromium in-process (`prepareSiteApplication` reads a
- * live page, `confirmAndSubmitSite` fills and submits one) and the one that
- * calls a model. `DEMO_RATE_LIMIT_PER_MIN`'s default of 30 is sized for
- * click-y row writes; thirty Chromium launches a minute on a 3.7 GB VPS that
- * also runs the owner's other production services is not a ceiling that
- * protects anything (P6 task-3 review, advisory D).
+ * live page, `confirmAndSubmitSite` fills and submits one), the one that calls
+ * a model, and `uploadCv` — the only action that writes a visitor's bytes to
+ * the host's filesystem. `DEMO_RATE_LIMIT_PER_MIN`'s default of 30 is sized
+ * for click-y row writes; thirty Chromium launches a minute on a 3.7 GB VPS
+ * that also runs the owner's other production services is not a ceiling that
+ * protects anything (P6 task-3 review, advisory D), and neither is thirty
+ * multi-megabyte writes a minute onto its shared disk (advisory B).
+ *
+ * The rate is only half of what `uploadCv` needs — a rate bounds how often,
+ * not how much — so it also carries a hard store ceiling; see
+ * `apps/web/src/lib/cv-storage.ts`.
  *
  * A cap rather than a replacement — `Math.min` below — so lowering
  * DEMO_RATE_LIMIT_PER_MIN still lowers these too, and an operator who wants
@@ -119,6 +125,7 @@ const HEAVY_BUCKETS: ReadonlySet<string> = new Set([
   "prepareSiteApplication",
   "confirmAndSubmitSite",
   "generateDocument",
+  "uploadCv",
 ]);
 
 /**

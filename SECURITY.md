@@ -95,6 +95,14 @@ refuses credential creation server-side, rate-limits mutating actions, and
 rebuilds itself from a fixed seed every six hours. Visitors cannot configure a
 real mailbox or reach a real employer.
 
+CV upload is the one action that turns an anonymous request into bytes on the
+host's disk, so it carries a ceiling as well as a rate: 2 MB per file and a
+64 MB / 100-file cap on the demo's whole CV store, with unreferenced files
+reclaimed on the next upload after a reset (`apps/web/src/lib/cv-storage.ts`).
+A rate alone would bound how often a visitor writes, not how much they
+accumulate. Neither bound applies outside demo mode — a self-hosted install
+owns its own disk.
+
 ## Known limitations
 
 Stated plainly rather than omitted.

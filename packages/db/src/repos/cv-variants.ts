@@ -22,3 +22,14 @@ export async function listCvVariants(db: Db, workspaceId: string): Promise<CvVar
     .where(eq(cvVariants.workspaceId, workspaceId))
     .orderBy(asc(cvVariants.createdAt));
 }
+
+/**
+ * Every stored CV path, across all workspaces — the live set for the demo's
+ * `cvs/` garbage collector (`apps/web/src/lib/cv-storage.ts`). Deliberately
+ * NOT workspace-scoped: the collector deletes whatever it does not see here,
+ * so scoping it to one workspace would delete another workspace's files.
+ */
+export async function listCvFilePaths(db: Db): Promise<string[]> {
+  const rows = await db.select({ filePath: cvVariants.filePath }).from(cvVariants);
+  return rows.map((row) => row.filePath);
+}

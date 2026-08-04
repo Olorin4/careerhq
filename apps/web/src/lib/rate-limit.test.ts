@@ -54,9 +54,9 @@ describe("demoRateLimit", () => {
     expect(demoRateLimit("one", config)).not.toBeNull();
   });
 
-  it("caps the browser- and model-launching buckets below a generous global limit", () => {
+  it("caps the browser-, model- and disk-spending buckets below a generous global limit", () => {
     const config = { demoMode: true, demoRateLimitPerMin: 30 };
-    for (const bucket of ["prepareSiteApplication", "confirmAndSubmitSite", "generateDocument"]) {
+    for (const bucket of ["prepareSiteApplication", "confirmAndSubmitSite", "generateDocument", "uploadCv"]) {
       for (let i = 0; i < 5; i += 1) expect(demoRateLimit(bucket, config)).toBeNull();
       expect(demoRateLimit(bucket, config)).toMatch(/too many requests/);
     }

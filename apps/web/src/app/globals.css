@@ -312,6 +312,11 @@ body {
   font-size: 0.85rem;
 }
 
+.cv-error {
+  color: #b00020;
+  font-size: 0.85rem;
+}
+
 .cv-table {
   width: 100%;
   border-collapse: collapse;
