@@ -27,8 +27,12 @@ export async function generateDocumentAction(
   // "generateDocument" is deliberately the SSE route's bucket too
   // (`app/api/generate/stream/route.ts`): they are two transports for one
   // user-visible click, so one budget covers both — driving the pair must not
-  // buy twice the generations. (A "use server" module may only export async
-  // functions, so the name is repeated here rather than shared as a const.)
+  // buy twice the generations. That only holds because rate-limit.ts keeps its
+  // counters on `globalThis`: this action and that route are compiled into
+  // different Next.js server bundles, and a module-level Map would give each
+  // its own counter (P6 task-3 review, B1). (A "use server" module may only
+  // export async functions, so the name is repeated here rather than shared as
+  // a const.)
   const limited = demoRateLimit("generateDocument");
   if (limited) return { status: "failed", error: limited };
   const db = getDb();
