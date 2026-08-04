@@ -8,6 +8,7 @@
 import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
 import { rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
 import { chromium, errors, type Browser, type Page } from "playwright";
+import { acquireBrowserSlot } from "./browser-limit.js";
 import { BUTTON_STEPS_SCRIPT, deriveTotalSteps, EXTRACT_SCRIPT, type ExtractedPage } from "./extract.js";
 
 export type DriverErrorKind = "navigation" | "timeout" | "fill" | "submit" | "advance";
@@ -94,11 +95,26 @@ function detailOf(cause: unknown): string {
   return cause instanceof Error ? (cause.message.split("\n")[0] ?? cause.message) : String(cause);
 }
 
+/**
+ * The one place a Chromium process is started, and therefore the one place the
+ * global concurrency limit is enforced (./browser-limit.ts). The slot is taken
+ * BEFORE the launch — the point is to not start the browser — and given back by
+ * the returned handle's `close()`, so a session's whole lifetime holds it.
+ *
+ * A refusal leaves this function as `BrowserBusyError`, deliberately NOT
+ * wrapped in a `DriverError`: "there was no room to start a browser" is a
+ * different thing from "the browser failed to start", and apps/web turns the
+ * two into different outcomes for the user. Both are provably pre-click.
+ */
 export async function openSession(): Promise<BrowserSession> {
+  const releaseSlot = acquireBrowserSlot();
   let browser: Browser;
   try {
     browser = await chromium.launch({ headless: true });
   } catch (cause) {
+    // The slot goes back before the throw: a browser that never started must
+    // not hold the process's only one for the rest of its life.
+    releaseSlot();
     // NOT via driverError: a launch has no click to be ambiguous about, so
     // even a launch TIMEOUT must stay provably pre-click ("navigation"), not
     // collapse onto "timeout" and park the attempt for a browser that never
@@ -107,7 +123,15 @@ export async function openSession(): Promise<BrowserSession> {
   }
   return {
     newPage: () => browser.newPage(),
-    close: () => browser.close(),
+    // `finally`, so a close that throws still frees the slot — otherwise one
+    // wedged Chromium would refuse every later visitor for the process's life.
+    close: async () => {
+      try {
+        await browser.close();
+      } finally {
+        releaseSlot();
+      }
+    },
   };
 }
 

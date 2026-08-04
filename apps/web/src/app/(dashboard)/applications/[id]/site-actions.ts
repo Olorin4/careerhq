@@ -38,7 +38,7 @@ function siteDepsWithDriver(): SiteDeps {
     submit: makeSiteSubmit(config),
     // Checked before the confirmation token is burned, so a process that cannot
     // launch Chromium says so instead of parking the attempt for a human.
-    probeDriver: makeDriverProbe(),
+    probeDriver: makeDriverProbe(config),
   };
 }
 

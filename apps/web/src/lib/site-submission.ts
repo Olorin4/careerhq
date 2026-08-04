@@ -228,6 +228,25 @@ function isPreClickDriverFailure(err: unknown): boolean {
 }
 
 /**
+ * `BrowserBusyError` from apps/worker/src/autoapply/browser-limit.ts — the
+ * global one-Chromium-at-a-time cap (spec P6 §3) refusing rather than queueing.
+ *
+ * Recognised by `name`, for the same reason and by the same convention as
+ * `isPreClickDriverFailure`: this orchestrator takes its driver by injection
+ * and never imports the browser module's graph.
+ *
+ * It is categorically different from every `DriverError`: no browser was
+ * started, so there is not merely no click — there is no page, no navigation
+ * and no process. Both places that classify it below lean on exactly that.
+ */
+function isBrowserBusyFailure(err: unknown): boolean {
+  return err instanceof Error && err.name === "BrowserBusyError";
+}
+
+/** What a visitor sees when the box's only browser is already in use. Their fault: no. Their move: wait. */
+const BROWSER_BUSY_REASON = "the auto-apply browser is busy with another application — try again in a moment";
+
+/**
  * A stable, human-readable attachment name derived from the variant label. It
  * is part of the fingerprinted payload, so it must be a pure function of stored
  * data — never a timestamp or a random id. (Same rule, same code shape, as the
@@ -1000,10 +1019,21 @@ export async function confirmAndSubmitSite(
   // refuses honestly and stays retryable, instead of throwing inside `submit`
   // and parking the attempt for a human to reconcile a click that never
   // happened.
+  //
+  // The probe also answers "is there ROOM for a browser?", because the slot is
+  // taken before the launch (spec P6 §3's global cap): a busy process refuses
+  // HERE, with the token still unburned, so a second demo visitor waits a
+  // moment instead of losing their confirmation to someone else's submission.
   if (deps.probeDriver) {
     try {
       await deps.probeDriver();
     } catch (err) {
+      // Busy is not broken, and saying "could not be started" for a browser
+      // that is working perfectly well would send the visitor looking for a
+      // problem that does not exist.
+      if (isBrowserBusyFailure(err)) {
+        return { status: "blocked", code: "driver_unavailable", reason: BROWSER_BUSY_REASON };
+      }
       return {
         status: "blocked",
         code: "driver_unavailable",
@@ -1035,6 +1065,16 @@ export async function confirmAndSubmitSite(
     // uncertainty AFTER it is worth a human's time. `DriverError.kind` already
     // knows — navigating, extracting or filling all happen before the submit
     // button is touched.
+    // The probe above takes the concurrency slot and gives it straight back, so
+    // another caller can still win it in the gap before `submit`'s own
+    // `openSession`. That refusal lands after `beginSubmission` — but a browser
+    // that was never started cannot have clicked anything, so it is a plain
+    // FAILED, not a human sent to reconcile a submission that never began.
+    if (isBrowserBusyFailure(err)) {
+      const reason = `${BROWSER_BUSY_REASON} (nothing was submitted)`;
+      await failSubmissionSafely(deps, attempt.id, reason);
+      return { status: "failed", reason };
+    }
     if (isPreClickDriverFailure(err)) {
       const reason = `the form could not be filled in, so nothing was submitted: ${redactError(err, [])}`;
       await failSubmissionSafely(deps, attempt.id, reason);

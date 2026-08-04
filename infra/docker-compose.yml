@@ -60,6 +60,10 @@ services:
       # which is why Dockerfile.web is built on the Playwright base image.
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
       AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
+      # How many headless Chromium instances this container may hold open at
+      # once (spec P6 §3). Per PROCESS, so `web` and `worker` each get this
+      # many — see the note on the worker's copy below.
+      AUTOAPPLY_MAX_CONCURRENT_BROWSERS: ${AUTOAPPLY_MAX_CONCURRENT_BROWSERS:-1}
       # Deliberately absent from `web`, and audited as such: FOLLOW_UP_DAYS,
       # INGEST_CRON, EMAIL_SYNC_CRON and DEMO_RESET_CRON are read only by the
       # worker's jobs and schedules.
@@ -116,6 +120,13 @@ services:
       # yet (see apps/worker/src/main.ts).
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
       AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
+      # Same cap, and set here too because the limit is enforced per process:
+      # `web` and `worker` are separate containers with separate counters, so
+      # the BOX can see one browser per service, not one browser total. A
+      # host-wide cap would need a lock outside both processes (a Postgres
+      # advisory lock is the obvious candidate — both already connect); until
+      # then the RAM budget must assume `web` + `worker` × this number.
+      AUTOAPPLY_MAX_CONCURRENT_BROWSERS: ${AUTOAPPLY_MAX_CONCURRENT_BROWSERS:-1}
     volumes: [files:/app/var/files]
     depends_on:
       postgres: { condition: service_healthy }

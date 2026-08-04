@@ -55,6 +55,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     aiMode: "live",
     masterKey: null,
     autoapplyBrowserTimeoutMs: 1_000,
+    autoapplyMaxConcurrentBrowsers: 1,
     demoAtsUrl: "http://demo-ats:3001",
     ...overrides,
   };

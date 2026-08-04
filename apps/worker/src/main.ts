@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 import PgBoss from "pg-boss";
 import { loadConfig } from "@careerhq/config";
 import { createDb } from "@careerhq/db";
+// Imported from the module itself rather than ./autoapply/index.js: that
+// barrel re-exports the driver, whose graph pulls in playwright, and the worker
+// process should not load a browser library just to learn a number.
+import { configureBrowserLimit } from "./autoapply/browser-limit.js";
 import { runDemoResetOnce } from "./jobs/demo-reset.js";
 import { runEmailSyncOnce } from "./jobs/email-sync.js";
 import { runIngestOnce } from "./jobs/ingest.js";
@@ -18,6 +22,12 @@ const envFile = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../.
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 const config = loadConfig();
+// Applied at wiring time, before any queue exists, so every browser this
+// process ever launches is counted against the same cap (spec P6 §3). Set here
+// even though the autoapply consumers below are deliberately unregistered: the
+// day one of them is registered, the limit must already be true, not a thing
+// someone remembers to add.
+configureBrowserLimit(config.autoapplyMaxConcurrentBrowsers);
 const boss = new PgBoss(config.databaseUrl);
 const db = createDb(config.databaseUrl);
 

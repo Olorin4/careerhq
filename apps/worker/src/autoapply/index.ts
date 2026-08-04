@@ -7,6 +7,15 @@
 // crosses the app boundary. `.dependency-cruiser.cjs`'s
 // `no-relative-cross-app-*` rules enforce that the relative form is
 // unavailable, so this is the only door.
+//
+// `./browser-limit.js` rides along because the global one-browser-at-a-time cap
+// (spec P6 §3) is only global if every process that launches a browser applies
+// the same configured number — and apps/web launches its own.
+export {
+  BrowserBusyError,
+  configureBrowserLimit,
+  withBrowserSlot,
+} from "./browser-limit.js";
 export {
   capturePage,
   DriverError,

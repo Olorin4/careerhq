@@ -135,6 +135,18 @@ class FakeDriverError extends Error {
   }
 }
 
+/**
+ * A `BrowserBusyError` exactly as `apps/worker/src/autoapply/browser-limit.ts`
+ * constructs one. Same reasoning as `FakeDriverError` above: `name` is the
+ * whole contract, and reproducing it keeps this suite browser-free.
+ */
+class FakeBrowserBusyError extends Error {
+  constructor() {
+    super("the auto-apply browser is busy with another application — try again in a moment");
+    this.name = "BrowserBusyError";
+  }
+}
+
 function stubSubmit(calls: SubmitCall[], behaviour: SubmitBehaviour = { kind: "ok" }) {
   return async (args: {
     url: string; answers: PlannedAnswer[]; files: Record<string, string>;
@@ -963,6 +975,67 @@ d("confirmAndSubmitSite", () => {
     );
     expect(retried.status).toBe("submitted");
     expect(calls).toHaveLength(1);
+  });
+
+  // Spec P6 §3: Chromium runs one at a time, so a second visitor confirming
+  // while the box's only browser is in use must be REFUSED, not queued and not
+  // charged for it. Same H1(b) property as the no-Chromium case above: the
+  // refusal happens before `beginSubmission`, so the token survives.
+  it("refuses before the token burns when the browser is busy → driver_unavailable", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Busy Browser Co");
+
+    const probeDriver = async (): Promise<void> => {
+      throw new FakeBrowserBusyError();
+    };
+    const outcome = await confirmAndSubmitSite(deps({ probeDriver, submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(outcome).toMatchObject({ status: "blocked", code: "driver_unavailable" });
+    if (outcome.status !== "blocked") return;
+    // Busy is not broken: the visitor is told to try again, not that Chromium
+    // is missing from the image.
+    expect(outcome.reason).toMatch(/busy/i);
+    expect(outcome.reason).toMatch(/try again/i);
+    expect(outcome.reason).not.toMatch(/could not be started/i);
+
+    expect(calls).toHaveLength(0);
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect(attempt?.pendingReceipt).toBeNull();
+    expect((await getActiveConfirmation(db, prepared.attemptId))?.consumedAt ?? null).toBeNull();
+
+    // The same token still works once the browser is free again — a busy demo
+    // must not cost the visitor their confirmation.
+    const retried = await confirmAndSubmitSite(
+      deps({ probeDriver: async () => undefined, submit: stubSubmit(calls) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(retried.status).toBe("submitted");
+    expect(calls).toHaveLength(1);
+  });
+
+  // Defence in depth for the narrow race the probe cannot close: the probe
+  // takes the slot and gives it straight back, so another caller can win it
+  // between the probe and `submit`'s own `openSession`. That throw arrives
+  // AFTER beginSubmission, but a browser that was never started cannot have
+  // clicked anything — so it is a plain FAILED, never a NEEDS_RECONCILE that
+  // tells a human to go check whether an application landed.
+  it("fails (never parks) a submit refused for a busy browser — no browser started, so no click", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Raced Browser Co");
+
+    const outcome = await confirmAndSubmitSite(
+      deps({ submit: stubSubmit(calls, { kind: "throws", error: new FakeBrowserBusyError() }) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(outcome.status).toBe("failed");
+    if (outcome.status !== "failed") return;
+    expect(outcome.reason).toMatch(/busy/i);
+
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("FAILED");
+    expect(attempt?.failureReason).toMatch(/busy/i);
   });
 
   it("parks an attempt whose submit threw — the click may have landed, so never FAILED", async () => {

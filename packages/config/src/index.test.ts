@@ -285,4 +285,22 @@ describe("loadConfig", () => {
   it("passes through a custom DEMO_RESET_CRON", () => {
     expect(loadConfig({ ...BASE, DEMO_RESET_CRON: "0 */2 * * *" }).demoResetCron).toBe("0 */2 * * *");
   });
+
+  // Spec P6 §3: "Chromium runs one at a time, globally". Unlike the demo-only
+  // knobs above this one is NOT gated on demoMode — a browser is the most
+  // expensive thing the app does in any deployment — so the default has to be
+  // the safe number, and zero (which would mean "no browser ever") as well as
+  // a negative must fail loudly at startup.
+  it("defaults autoapplyMaxConcurrentBrowsers to 1", () => {
+    expect(loadConfig(BASE).autoapplyMaxConcurrentBrowsers).toBe(1);
+  });
+  it("takes an explicit AUTOAPPLY_MAX_CONCURRENT_BROWSERS", () => {
+    expect(loadConfig({ ...BASE, AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "3" }).autoapplyMaxConcurrentBrowsers).toBe(3);
+  });
+  it("rejects a non-positive AUTOAPPLY_MAX_CONCURRENT_BROWSERS", () => {
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "0" }))
+      .toThrow(/AUTOAPPLY_MAX_CONCURRENT_BROWSERS/);
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "-2" }))
+      .toThrow(/AUTOAPPLY_MAX_CONCURRENT_BROWSERS/);
+  });
 });

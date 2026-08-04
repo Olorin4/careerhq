@@ -118,6 +118,7 @@ const baseConfig: AppConfig = {
   aiMode: "live",
   masterKey: null,
   autoapplyBrowserTimeoutMs: 45_000,
+  autoapplyMaxConcurrentBrowsers: 1,
   demoAtsUrl: "http://demo-ats:3001",
 };
 

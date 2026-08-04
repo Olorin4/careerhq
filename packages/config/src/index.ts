@@ -166,6 +166,12 @@ const envSchema = z.object({
   // field action in the Playwright driver, not the whole attempt — a real ATS
   // page with a slow embed regularly needs more than a default 30s.
   AUTOAPPLY_BROWSER_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
+  // How many headless Chromium instances one process may have open at once
+  // (apps/worker/src/autoapply/browser-limit.ts). Spec P6 §3's "Chromium runs
+  // one at a time, globally": a browser is the most expensive thing this app
+  // does, and the demo shares a 3.7 GB box with the owner's other services.
+  // Read by BOTH web and worker — each launches browsers of its own.
+  AUTOAPPLY_MAX_CONCURRENT_BROWSERS: z.coerce.number().int().positive().default(1),
   // The fictional ATS (apps/demo-ats): the only site auto-apply demos target.
   // Compose's service name is the default; a local run points at localhost.
   DEMO_ATS_URL: z
@@ -237,6 +243,8 @@ export interface AppConfig {
   masterKey: string | null;
   /** Per-action budget for the Playwright auto-apply driver; default 45s. */
   autoapplyBrowserTimeoutMs: number;
+  /** Headless browsers one process may hold open at once; default 1, never 0. */
+  autoapplyMaxConcurrentBrowsers: number;
   /** Never empty and never trailing-slashed: base URL of the demo ATS. */
   demoAtsUrl: string;
 }
@@ -271,6 +279,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     aiReplayDir: parsed.AI_REPLAY_DIR,
     masterKey: optionalString(parsed.CAREERHQ_MASTER_KEY),
     autoapplyBrowserTimeoutMs: parsed.AUTOAPPLY_BROWSER_TIMEOUT_MS,
+    autoapplyMaxConcurrentBrowsers: parsed.AUTOAPPLY_MAX_CONCURRENT_BROWSERS,
     demoAtsUrl: parsed.DEMO_ATS_URL,
   };
 }
