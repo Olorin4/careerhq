@@ -4,7 +4,7 @@ import { z } from "zod";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
 import { demoRateLimit } from "../../../../lib/rate-limit.js";
-import { makeDriverProbe, makeSiteCapture, makeSiteSubmit } from "../../../../lib/site-driver.js";
+import { makeSiteCapture, withSiteBrowserReservation } from "../../../../lib/site-driver.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import {
   confirmAndSubmitSite, prepareSiteApplication, previewSiteSubmission, updatePlannedAnswer,
@@ -28,18 +28,30 @@ function applicationPath(applicationId: string): string {
   return `/applications/${applicationId}`;
 }
 
-/** `capture`/`submit` are only ever needed for prepare and confirm — the two steps that touch a live page. */
-function siteDepsWithDriver(): SiteDeps {
+/**
+ * `capture`/`submit` are only ever needed for prepare and confirm — the two
+ * steps that touch a live page.
+ *
+ * Scoped rather than assembled, because the browser slot's lifetime is the
+ * REQUEST's, not any one session's: `probeDriver` takes the process's single
+ * slot and holds it through `beginSubmission` and `submit`, so a second visitor
+ * is refused while the first's confirmation token is still unburned (P6 task-5
+ * review, BLOCKING 1). `withSiteBrowserReservation` owns the `finally` that
+ * gives it back — on a throw, and on every early return the orchestrator makes
+ * between probe and submit — so no action here has one to get wrong. The
+ * prepare path never probes and therefore releases nothing.
+ */
+async function withSiteDeps<T>(use: (deps: SiteDeps) => Promise<T>): Promise<T> {
   const config = loadConfig();
-  return {
+  return withSiteBrowserReservation(config, (reserved) => use({
     db: getDb(),
     config,
     capture: makeSiteCapture(config),
-    submit: makeSiteSubmit(config),
-    // Checked before the confirmation token is burned, so a process that cannot
-    // launch Chromium says so instead of parking the attempt for a human.
-    probeDriver: makeDriverProbe(config),
-  };
+    // `submit`, and the `probeDriver` checked before the confirmation token is
+    // burned so a process that cannot launch Chromium — or has no room for one
+    // — says so instead of parking the attempt for a human.
+    ...reserved,
+  }));
 }
 
 const prepareInputSchema = z.object({
@@ -50,16 +62,17 @@ const prepareInputSchema = z.object({
 
 export async function prepareSiteApplicationAction(raw: unknown): Promise<PrepareOutcome> {
   const { applicationId, url, overrideDuplicate } = prepareInputSchema.parse(raw);
-  // Ahead of `siteDepsWithDriver`, so a throttled prepare never launches Chromium.
+  // Ahead of `withSiteDeps`, so a throttled prepare never launches Chromium.
   const limited = demoRateLimit("prepareSiteApplication");
   if (limited) return { status: "failed", reason: limited };
-  const deps = siteDepsWithDriver();
-  const ws = await getActiveWorkspace(deps.db);
-  const outcome = await prepareSiteApplication(deps, {
-    workspaceId: ws.id, applicationId, url, overrideDuplicate,
+  return withSiteDeps(async (deps) => {
+    const ws = await getActiveWorkspace(deps.db);
+    const outcome = await prepareSiteApplication(deps, {
+      workspaceId: ws.id, applicationId, url, overrideDuplicate,
+    });
+    revalidatePath(applicationPath(applicationId));
+    return outcome;
   });
-  revalidatePath(applicationPath(applicationId));
-  return outcome;
 }
 
 const updateAnswerInputSchema = z.object({
@@ -110,11 +123,15 @@ export async function confirmAndSubmitSiteAction(raw: unknown): Promise<SiteConf
   // before `beginSubmission` and before the driver is ever asked for a browser.
   const limited = demoRateLimit("confirmAndSubmitSite");
   if (limited) return { status: "blocked", code: "rate_limited", reason: limited };
-  const deps = siteDepsWithDriver();
-  const ws = await getActiveWorkspace(deps.db);
-  const outcome = await confirmAndSubmitSite(deps, {
-    workspaceId: ws.id, attemptId, presentedToken, retypedTarget,
+  // The browser slot is held from `probeDriver` until this call returns —
+  // across `beginSubmission` and `submit` — so a racing visitor is refused
+  // BEFORE the token is burned rather than after it.
+  return withSiteDeps(async (deps) => {
+    const ws = await getActiveWorkspace(deps.db);
+    const outcome = await confirmAndSubmitSite(deps, {
+      workspaceId: ws.id, attemptId, presentedToken, retypedTarget,
+    });
+    revalidatePath(applicationPath(applicationId));
+    return outcome;
   });
-  revalidatePath(applicationPath(applicationId));
-  return outcome;
 }

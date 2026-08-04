@@ -88,6 +88,16 @@ export function configureBrowserLimit(maxConcurrent: number): void {
 }
 
 /**
+ * A held slot. Calling it gives the slot back, once — it is also the PROOF that
+ * its holder has one, which is how a slot outlives the call that took it:
+ * `openSession({ slot })` drives a browser on a slot its caller acquired, and
+ * leaves giving it back to that caller (apps/web's `siteBrowserReservation`
+ * holds one across a whole confirm, so a busy refusal cannot land after the
+ * confirmation token is burned).
+ */
+export type BrowserSlot = () => void;
+
+/**
  * Takes a slot or throws. Returns the release, which is idempotent — a session
  * closed twice (or closed inside a `finally` that also ran on the error path)
  * must not hand out a browser it never held.
@@ -96,7 +106,7 @@ export function configureBrowserLimit(maxConcurrent: number): void {
  * SESSION's lifetime is not a function scope: `openSession` takes the slot and
  * the returned handle's `close()` gives it back, whenever the caller gets there.
  */
-export function acquireBrowserSlot(): () => void {
+export function acquireBrowserSlot(): BrowserSlot {
   const state = slots();
   if (state.inUse >= state.max) {
     throw new BrowserBusyError(
@@ -108,7 +118,12 @@ export function acquireBrowserSlot(): () => void {
   return () => {
     if (released) return;
     released = true;
-    state.inUse -= 1;
+    // Clamped, not just decremented: `resetBrowserLimit()` zeroes the counter
+    // in place, so a release handed out before a reset would otherwise take it
+    // NEGATIVE — and a negative count silently allows two concurrent browsers
+    // for the rest of the process's life. The invariant is unconditional here
+    // rather than conventional at the call sites.
+    state.inUse = Math.max(0, state.inUse - 1);
   };
 }
 

@@ -80,6 +80,21 @@ describe("acquireBrowserSlot", () => {
     expect(() => acquireBrowserSlot()).toThrow(BrowserBusyError);
     second();
   });
+
+  // `resetBrowserLimit` zeroes the counter in place, but a release handed out
+  // BEFORE the reset still points at the same object. Unclamped, that release
+  // took the count to -1 and every later acquire succeeded — two concurrent
+  // browsers on a box sized for one, silently, for the rest of the process.
+  it("never drives the counter negative when a held slot outlives a reset", () => {
+    configureBrowserLimit(1);
+    const stale = acquireBrowserSlot();
+    resetBrowserLimit();
+    stale();
+    expect(browserSlotsInUse()).toBe(0);
+    const held = acquireBrowserSlot();
+    expect(() => acquireBrowserSlot()).toThrow(BrowserBusyError);
+    held();
+  });
 });
 
 describe("cross-bundle state", () => {

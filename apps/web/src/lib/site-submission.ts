@@ -79,8 +79,12 @@ export interface SiteDeps {
    * claiming "the click may have landed" when no browser ever started.
    *
    * Optional: an unset probe means "do not check", which is what every test
-   * with a stubbed `submit` wants. The real one is `makeDriverProbe` in
-   * `./site-driver.ts`.
+   * with a stubbed `submit` wants. The real one is `siteBrowserReservation`'s
+   * `probeDriver` in `./site-driver.ts`, which also HOLDS the process's browser
+   * slot from here until the action that called it releases it — so the busy
+   * refusal below is the only one a confirm can get, and it lands with the
+   * token still unburned. This module neither knows nor needs to know that: it
+   * sees a function that resolves or throws.
    */
   probeDriver?: () => Promise<void>;
   /** Injected in tests; defaults to the real fast-tier field interpreter. */
@@ -251,8 +255,31 @@ function isBrowserBusyFailure(err: unknown): boolean {
   return err instanceof Error && err.name === "BrowserBusyError";
 }
 
-/** What a visitor sees when the box's only browser is already in use. Their fault: no. Their move: wait. */
+/**
+ * What a visitor sees when the box's only browser is already in use and NOTHING
+ * has been spent yet. Their fault: no. Their move: wait — and "try again in a
+ * moment" is true here precisely because this refusal happens before
+ * `beginSubmission`: the attempt is still PENDING_CONFIRMATION and the same
+ * token still works.
+ */
 const BROWSER_BUSY_REASON = "the auto-apply browser is busy with another application — try again in a moment";
+
+/**
+ * The same refusal AFTER the token is burned — where "try again in a moment" is
+ * a lie, and was one (P6 task-5 review, BLOCKING 1): the attempt is terminal
+ * FAILED, its token reads `token_consumed`, and `previewSiteSubmission` refuses
+ * a FAILED attempt, so there is no "again" to try. The real recovery is a fresh
+ * auto-apply run from the job URL — a new capture, a new plan, a new token — so
+ * that is what this says.
+ *
+ * The reservation in `./site-driver.ts` means the interactive path can no
+ * longer get here (the slot is held across `beginSubmission`), but a caller
+ * that wires `submit` without `probeDriver` still can, and a message that is
+ * only true by wiring is not true.
+ */
+const BROWSER_BUSY_ABANDONED_REASON =
+  "the auto-apply browser was busy, so nothing was submitted — this attempt is closed and its "
+  + "confirmation is spent; start auto-apply again from the job URL to try once more";
 
 /**
  * A stable, human-readable attachment name derived from the variant label. It
@@ -1100,15 +1127,18 @@ export async function confirmAndSubmitSite(
     // uncertainty AFTER it is worth a human's time. `DriverError.kind` already
     // knows — navigating, extracting or filling all happen before the submit
     // button is touched.
-    // The probe above takes the concurrency slot and gives it straight back, so
-    // another caller can still win it in the gap before `submit`'s own
-    // `openSession`. That refusal lands after `beginSubmission` — but a browser
-    // that was never started cannot have clicked anything, so it is a plain
+    // A busy refusal out of `submit` itself. The real confirm path cannot get
+    // here any more — `siteBrowserReservation`'s probe HOLDS the slot across
+    // `beginSubmission`, so the loser of a race is refused above with its token
+    // intact — but a `submit` wired without a `probeDriver` still can, and a
+    // browser that was never started cannot have clicked anything: a plain
     // FAILED, not a human sent to reconcile a submission that never began.
+    //
+    // The reason must not say "try again in a moment": the token is spent and
+    // the attempt is terminal, so the only honest instruction is to start over.
     if (isBrowserBusyFailure(err)) {
-      const reason = `${BROWSER_BUSY_REASON} (nothing was submitted)`;
-      await failSubmissionSafely(deps, attempt.id, reason);
-      return { status: "failed", reason };
+      await failSubmissionSafely(deps, attempt.id, BROWSER_BUSY_ABANDONED_REASON);
+      return { status: "failed", reason: BROWSER_BUSY_ABANDONED_REASON };
     }
     if (isPreClickDriverFailure(err)) {
       const reason = `the form could not be filled in, so nothing was submitted: ${redactError(err, [])}`;

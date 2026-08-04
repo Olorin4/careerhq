@@ -3,7 +3,26 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+/**
+ * This suite is browser-free by design — every `SiteDeps.submit` below is a
+ * stub, and the driver failures it classifies are reproduced structurally
+ * (`FakeDriverError`, `FakeBrowserBusyError`). The ONE exception is the
+ * concurrency race at the bottom of the file, which drives the real
+ * `withSiteBrowserReservation` because the property under test IS the browser
+ * slot's lifetime. Mocking `playwright` — not the slot counter, which stays
+ * real — keeps that honest without starting Chromium.
+ */
+vi.mock("playwright", () => ({
+  chromium: {
+    launch: vi.fn(async () => ({
+      newPage: () => Promise.reject(new Error("no page in this test")),
+      close: async () => undefined,
+    })),
+  },
+  errors: { TimeoutError: class extends Error {} },
+}));
 import { loadConfig, type AppConfig } from "@careerhq/config";
 import type { GenerationResult, InterpretFieldResult, PlannedAnswer } from "@careerhq/contracts";
 import { rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
@@ -17,6 +36,7 @@ import {
   confirmAndSubmitSite, prepareSiteApplication, previewSiteSubmission, updatePlannedAnswer,
   type PrepareOutcome, type SiteDeps, type SiteSubmitResult,
 } from "./site-submission";
+import { withSiteBrowserReservation } from "./site-driver.js";
 
 const url = process.env.TEST_DATABASE_URL;
 const d = describe.skipIf(!url);
@@ -1116,12 +1136,16 @@ d("confirmAndSubmitSite", () => {
     expect(calls).toHaveLength(1);
   });
 
-  // Defence in depth for the narrow race the probe cannot close: the probe
-  // takes the slot and gives it straight back, so another caller can win it
-  // between the probe and `submit`'s own `openSession`. That throw arrives
-  // AFTER beginSubmission, but a browser that was never started cannot have
-  // clicked anything — so it is a plain FAILED, never a NEEDS_RECONCILE that
-  // tells a human to go check whether an application landed.
+  // Defence in depth for a `submit` wired without a probe (the interactive path
+  // holds its slot across `beginSubmission`, so it cannot get here). The throw
+  // arrives AFTER beginSubmission, but a browser that was never started cannot
+  // have clicked anything — so it is a plain FAILED, never a NEEDS_RECONCILE
+  // that tells a human to go check whether an application landed.
+  //
+  // And the reason must be TRUE. It used to end "try again in a moment", which
+  // is the one thing the visitor cannot do: the token is spent
+  // (`token_consumed`) and a FAILED attempt cannot be re-previewed, so their
+  // only route is a fresh auto-apply run (P6 task-5 review, BLOCKING 1(1)).
   it("fails (never parks) a submit refused for a busy browser — no browser started, so no click", async () => {
     const calls: SubmitCall[] = [];
     const prepared = await previewed("Raced Browser Co");
@@ -1133,10 +1157,22 @@ d("confirmAndSubmitSite", () => {
     expect(outcome.status).toBe("failed");
     if (outcome.status !== "failed") return;
     expect(outcome.reason).toMatch(/busy/i);
+    expect(outcome.reason).toMatch(/nothing was submitted/i);
+    // The retry it points at must be the one that exists.
+    expect(outcome.reason).not.toMatch(/try again in a moment/i);
+    expect(outcome.reason).toMatch(/start auto-apply again/i);
 
     const attempt = await getAttempt(db, prepared.attemptId);
     expect(attempt?.status).toBe("FAILED");
     expect(attempt?.failureReason).toMatch(/busy/i);
+    // Which is exactly why the message must not promise a retry: the token is
+    // gone and the attempt can no longer be previewed.
+    const retried = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(retried).toMatchObject({ status: "blocked", code: "token_consumed" });
+    expect(await previewSiteSubmission(deps(), { workspaceId, attemptId: prepared.attemptId }))
+      .toMatchObject({ status: "blocked" });
   });
 
   it("parks an attempt whose submit threw — the click may have landed, so never FAILED", async () => {
@@ -1258,5 +1294,89 @@ d("confirmAndSubmitSite", () => {
     });
     expect(outcome.status).toBe("blocked");
     expect((await getAttempt(db, prepared.attemptId))?.status).toBe("PENDING_CONFIRMATION");
+  });
+});
+
+/**
+ * The property a real P5 bug established and P6's browser cap nearly took back:
+ * A REFUSAL MUST NEVER BURN A CONFIRMATION TOKEN (H1(b)).
+ *
+ * This is the only place in this file that touches the production driver
+ * adapter, because the thing under test is exactly the seam between them: the
+ * orchestrator's `probeDriver`/`submit` and the browser slot behind both. The
+ * slot counter is the real global one; `playwright` is mocked at the top of the
+ * file, so no Chromium starts.
+ *
+ * Before the fix (reproduced deterministically, P6 task-5 review): the probe
+ * took the slot and gave it straight back, the racing visitor won it in the
+ * `beginSubmission` window, and the loser's refusal landed AFTER the token was
+ * burned — attempt FAILED, token `token_consumed`, and a FAILED attempt cannot
+ * be re-previewed, so the only recovery was a whole new prepare.
+ */
+d("two concurrent confirms, through the real browser reservation", () => {
+  it("refuses the loser BEFORE beginSubmission, and its token still submits afterwards", async () => {
+    const cfg = config();
+    const winner = await previewed("Race Winner Co");
+    const loser = await previewed("Race Loser Co");
+
+    let loserIsDone!: () => void;
+    const loserDone = new Promise<void>((resolve) => { loserIsDone = resolve; });
+    let winnerHasProbed!: () => void;
+    const winnerProbed = new Promise<void>((resolve) => { winnerHasProbed = resolve; });
+
+    const winnerCalls: SubmitCall[] = [];
+    const loserCalls: SubmitCall[] = [];
+
+    // The winner: a real reservation. The loser is released the instant the
+    // winner's PROBE returns and held until after the loser's whole confirm, so
+    // the loser lands inside the exact window the bug lived in — between the
+    // probe and `submit`, whose real-world width is `beginSubmission`.
+    const winnerRun = withSiteBrowserReservation(cfg, (reserved) => confirmAndSubmitSite(
+      deps({
+        probeDriver: async () => {
+          await reserved.probeDriver();
+          winnerHasProbed();
+        },
+        submit: async (args) => {
+          await loserDone;
+          return stubSubmit(winnerCalls)(args);
+        },
+      }),
+      { workspaceId, attemptId: winner.attemptId, presentedToken: winner.token, retypedTarget: APPLY_HOST },
+    ));
+
+    await winnerProbed;
+
+    const loserOutcome = await withSiteBrowserReservation(cfg, (reserved) => confirmAndSubmitSite(
+      deps({ probeDriver: reserved.probeDriver, submit: stubSubmit(loserCalls) }),
+      { workspaceId, attemptId: loser.attemptId, presentedToken: loser.token, retypedTarget: APPLY_HOST },
+    ));
+
+    loserIsDone();
+    expect((await winnerRun).status).toBe("submitted");
+
+    // Refused, not queued, and not charged: blocked (never failed), before
+    // `beginSubmission`, so nothing was typed and nothing was burned.
+    expect(loserOutcome).toMatchObject({ status: "blocked", code: "driver_unavailable" });
+    if (loserOutcome.status !== "blocked") return;
+    expect(loserOutcome.reason).toMatch(/busy/i);
+    expect(loserCalls).toHaveLength(0);
+
+    const attempt = await getAttempt(db, loser.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    expect(attempt?.pendingReceipt).toBeNull();
+    const confirmation = await getActiveConfirmation(db, loser.attemptId);
+    expect(confirmation?.consumedAt ?? null).toBeNull();
+
+    // The headline: the SAME token, on a later attempt, still submits. Before
+    // the fix this came back `{"status":"blocked","code":"token_consumed"}` and
+    // the attempt could not even be re-previewed.
+    const retried = await withSiteBrowserReservation(cfg, (reserved) => confirmAndSubmitSite(
+      deps({ probeDriver: reserved.probeDriver, submit: stubSubmit(loserCalls) }),
+      { workspaceId, attemptId: loser.attemptId, presentedToken: loser.token, retypedTarget: APPLY_HOST },
+    ));
+    expect(retried.status).toBe("submitted");
+    expect(loserCalls).toHaveLength(1);
+    expect((await getAttempt(db, loser.attemptId))?.status).toBe("SUBMITTED");
   });
 });

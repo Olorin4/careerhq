@@ -8,7 +8,7 @@
 import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
 import { rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
 import { chromium, errors, type Browser, type Page } from "playwright";
-import { acquireBrowserSlot } from "./browser-limit.js";
+import { acquireBrowserSlot, type BrowserSlot } from "./browser-limit.js";
 import { BUTTON_STEPS_SCRIPT, deriveTotalSteps, EXTRACT_SCRIPT, type ExtractedPage } from "./extract.js";
 
 export type DriverErrorKind = "navigation" | "timeout" | "fill" | "submit" | "advance";
@@ -106,26 +106,77 @@ function detailOf(cause: unknown): string {
   return cause instanceof Error ? (cause.message.split("\n")[0] ?? cause.message) : String(cause);
 }
 
+export interface OpenSessionOptions {
+  /**
+   * A slot the caller ALREADY holds. Given one, `openSession` acquires nothing
+   * and `close()` releases nothing — the holder decides when the slot goes
+   * back, which is the whole point: apps/web takes one slot for a whole confirm
+   * so a busy refusal cannot arrive after the confirmation token is burned.
+   * Without it, the session owns its slot for exactly its own lifetime.
+   */
+  slot?: BrowserSlot;
+}
+
+/**
+ * How long `close()` waits for Chromium to actually go away before it gives the
+ * slot back anyway. Every other driver call has a budget
+ * (`AUTOAPPLY_BROWSER_TIMEOUT_MS`); `browser.close()` is unbounded in
+ * Playwright, and on the demo box a wedged or OOM-throttled Chromium whose
+ * close never settles would hold the process's only slot forever — from the
+ * visitor's side, indistinguishable from auto-apply being broken until the
+ * container restarts. Leaking the process is the lesser failure, and it is
+ * bounded by the container; leaking the slot is not.
+ *
+ * Not configurable on purpose: it is a backstop for a hang, not a tuning knob,
+ * and a value long enough to be wrong is a value nobody should be able to set.
+ */
+export const BROWSER_CLOSE_BUDGET_MS = 10_000;
+
+/** Resolves when the browser is closed, or when the budget runs out — whichever is first. */
+async function closeWithinBudget(browser: Browser): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, BROWSER_CLOSE_BUDGET_MS);
+    // Never keep the process (or a vitest worker) alive for this timer.
+    timer.unref?.();
+  });
+  try {
+    // A close that REJECTS still rejects here — the caller hears about it; only
+    // a close that never settles is abandoned.
+    await Promise.race([browser.close(), budget]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * The one place a Chromium process is started, and therefore the one place the
  * global concurrency limit is enforced (./browser-limit.ts). The slot is taken
  * BEFORE the launch — the point is to not start the browser — and given back by
  * the returned handle's `close()`, so a session's whole lifetime holds it.
  *
+ * Unless the caller brings its own (`opts.slot`), in which case this function
+ * neither takes nor gives back a slot: the caller's reservation is wider than
+ * any one session. `close()` still closes the browser either way.
+ *
  * A refusal leaves this function as `BrowserBusyError`, deliberately NOT
  * wrapped in a `DriverError`: "there was no room to start a browser" is a
  * different thing from "the browser failed to start", and apps/web turns the
  * two into different outcomes for the user. Both are provably pre-click.
  */
-export async function openSession(): Promise<BrowserSession> {
-  const releaseSlot = acquireBrowserSlot();
+export async function openSession(opts: OpenSessionOptions = {}): Promise<BrowserSession> {
+  const caller = opts.slot;
+  // No-op when the caller holds the slot: releasing someone else's reservation
+  // is exactly the bug this parameter exists to prevent.
+  const releaseSlot = caller ?? acquireBrowserSlot();
+  const releaseOwnSlot = caller ? (): void => undefined : releaseSlot;
   let browser: Browser;
   try {
     browser = await chromium.launch({ headless: true });
   } catch (cause) {
     // The slot goes back before the throw: a browser that never started must
     // not hold the process's only one for the rest of its life.
-    releaseSlot();
+    releaseOwnSlot();
     // NOT via driverError: a launch has no click to be ambiguous about, so
     // even a launch TIMEOUT must stay provably pre-click ("navigation"), not
     // collapse onto "timeout" and park the attempt for a browser that never
@@ -138,9 +189,9 @@ export async function openSession(): Promise<BrowserSession> {
     // wedged Chromium would refuse every later visitor for the process's life.
     close: async () => {
       try {
-        await browser.close();
+        await closeWithinBudget(browser);
       } finally {
-        releaseSlot();
+        releaseOwnSlot();
       }
     },
   };
