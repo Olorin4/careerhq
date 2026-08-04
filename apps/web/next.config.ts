@@ -19,6 +19,30 @@ const nextConfig: NextConfig = {
     extensionAlias: {
       ".js": [".ts", ".tsx", ".js"],
     },
+    serverActions: {
+      // The application's own CV size caps must be the ones that decide.
+      //
+      // Next 15 rejects any server-action request body over 1 MB by default,
+      // with a 413 raised BEFORE the action function runs — so `uploadCvAction`
+      // never saw it, `demoRateLimit` and `reserveCvUpload` were never reached,
+      // and neither `DEMO_MAX_CV_BYTES` (2 MB) nor `MAX_CV_BYTES` (5 MB) could
+      // ever fire. A visitor uploading a routine 1.5 MB designed CV got the
+      // whole page replaced by "Application error: a server-side exception has
+      // occurred", which is exactly the overlay the `useActionState` rewrite
+      // exists to eliminate, and SECURITY.md published a 2 MB bound that no
+      // code enforced.
+      //
+      // 6 MB, deliberately ABOVE `MAX_CV_BYTES` (5 MB) plus multipart overhead,
+      // so every refusal is one this app can phrase: the demo cap refuses at
+      // 2 MB and the global cap at 5 MB, both as a sentence rendered in the
+      // form. Raising either cap means raising this first — the framework bound
+      // has to stay the outer one, or the inner ones go quiet again.
+      //
+      // It applies to every server action, not just this one, so it is also the
+      // bound on the free-text row writes; those are all small, and the rate
+      // limiter is what governs them.
+      bodySizeLimit: "6mb",
+    },
   },
   // `site-driver.ts`'s server actions reach `@careerhq/worker/autoapply`,
   // which pulls in `playwright`/`playwright-core` — a Node-only package Next's

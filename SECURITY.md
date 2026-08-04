@@ -100,8 +100,17 @@ host's disk, so it carries a ceiling as well as a rate: 2 MB per file and a
 64 MB / 100-file cap on the demo's whole CV store, with unreferenced files
 reclaimed on the next upload after a reset (`apps/web/src/lib/cv-storage.ts`).
 A rate alone would bound how often a visitor writes, not how much they
-accumulate. Neither bound applies outside demo mode — a self-hosted install
-owns its own disk.
+accumulate. Outside demo mode only the 5 MB per-file cap applies — a
+self-hosted install owns its own disk.
+
+For those numbers to be the ones that decide, they have to sit *inside* the
+framework's own request bound: Next rejects a server-action body over
+`experimental.serverActions.bodySizeLimit` before any of this code runs, and
+its default of 1 MB silently pre-empted both caps. That limit is set to 6 MB in
+`apps/web/next.config.ts`, above the 5 MB per-file cap plus multipart overhead,
+so an oversized CV comes back as a sentence in the upload form rather than as
+an HTTP 413 and a blank error page. Raising a per-file cap means raising that
+first.
 
 Auto-apply evidence screenshots are the other disk write a visitor can reach,
 from both the web app (`site-screenshots/`) and the worker's queue variant

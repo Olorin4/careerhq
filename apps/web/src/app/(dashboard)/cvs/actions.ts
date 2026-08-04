@@ -41,9 +41,18 @@ function refuse(reason: string, formData: FormData): CvUploadState {
  *   - a demo-only size and store ceiling (`reserveCvUpload`), because a rate
  *     bounds how often a visitor writes, not how much they accumulate.
  *
- * Both are checked before `arrayBuffer()`, so a refused upload never even
- * pulls the file into memory, let alone onto the disk. Outside demo mode both
- * are inert and the behaviour is the original 5 MB check and nothing else.
+ * Both are checked before `arrayBuffer()`, so a refused upload never reaches
+ * the disk and never writes a row. It is NOT true that a refused upload never
+ * reaches memory: by the time this function body runs, Next has already parsed
+ * the whole multipart request and `formData.get("file")` is an in-memory
+ * `File`. Reading `file.size` first avoids the disk write and a SECOND
+ * in-memory copy (`Buffer.from(await file.arrayBuffer())`) — what bounds the
+ * first copy is the framework's own request bound,
+ * `experimental.serverActions.bodySizeLimit` in `apps/web/next.config.ts`,
+ * which is deliberately set ABOVE these caps so that the refusal a visitor
+ * sees is this one, in the form, rather than a 413 that never reaches here.
+ * Outside demo mode both are inert and the behaviour is the original 5 MB
+ * check and nothing else.
  */
 export async function uploadCvAction(_previous: CvUploadState, formData: FormData): Promise<CvUploadState> {
   const meta = metaSchema.safeParse({ label: formData.get("label"), format: formData.get("format") });

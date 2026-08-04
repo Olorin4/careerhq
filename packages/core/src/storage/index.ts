@@ -86,6 +86,41 @@ export async function pruneAndMeasure(
   return perDir.reduce(plus, NOTHING);
 }
 
+/**
+ * How many directory entries this pass has in flight at once.
+ *
+ * `Promise.all(names.map(…))` would issue one `stat` — and possibly one
+ * `unlink` — per entry with no limit. The ceilings above bound the steady
+ * state, but the FIRST pass after a ceiling is introduced lands on a directory
+ * that has been accumulating unreclaimed since P1, and that is precisely the
+ * pass which has to succeed for the ceiling to be given back rather than become
+ * a one-way door. A few thousand simultaneous file handles on a 3.7 GB box is
+ * how it fails instead. 32 is comfortably inside any default descriptor limit
+ * and still an order of magnitude faster than going one at a time.
+ */
+const PRUNE_CONCURRENCY = 32;
+
+async function measureOrPrune(
+  dir: string,
+  name: string,
+  keep: ReadonlySet<string>,
+  now: number,
+): Promise<StoreUsage> {
+  const filePath = path.resolve(dir, name);
+  let info;
+  try {
+    info = await stat(filePath);
+  } catch {
+    return NOTHING;
+  }
+  if (!info.isFile()) return NOTHING;
+  if (!keep.has(filePath) && now - info.mtimeMs > ORPHAN_GRACE_MS) {
+    await unlink(filePath).catch(() => undefined);
+    return NOTHING;
+  }
+  return { files: 1, bytes: info.size };
+}
+
 async function pruneOneDir(dir: string, keep: ReadonlySet<string>, now: number): Promise<StoreUsage> {
   let names: string[];
   try {
@@ -95,23 +130,14 @@ async function pruneOneDir(dir: string, keep: ReadonlySet<string>, now: number):
     throw err;
   }
 
-  const measured = await Promise.all(names.map(async (name): Promise<StoreUsage> => {
-    const filePath = path.resolve(dir, name);
-    let info;
-    try {
-      info = await stat(filePath);
-    } catch {
-      return NOTHING;
-    }
-    if (!info.isFile()) return NOTHING;
-    if (!keep.has(filePath) && now - info.mtimeMs > ORPHAN_GRACE_MS) {
-      await unlink(filePath).catch(() => undefined);
-      return NOTHING;
-    }
-    return { files: 1, bytes: info.size };
-  }));
-
-  return measured.reduce(plus, NOTHING);
+  let total = NOTHING;
+  for (let start = 0; start < names.length; start += PRUNE_CONCURRENCY) {
+    const batch = await Promise.all(
+      names.slice(start, start + PRUNE_CONCURRENCY).map((name) => measureOrPrune(dir, name, keep, now)),
+    );
+    total = batch.reduce(plus, total);
+  }
+  return total;
 }
 
 // ---------------------------------------------------------------------------

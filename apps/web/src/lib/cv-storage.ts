@@ -63,7 +63,11 @@ const STORE_FULL_REASON =
 export interface CvUploadRequest {
   /** The `cvs/` directory the file would be written into. */
   dir: string;
-  /** `File.size` — checked before the bytes are ever pulled into memory. */
+  /**
+   * `File.size` — read from the parsed upload, so this costs nothing beyond
+   * what the framework already did, and it is checked before the bytes are
+   * copied into a Buffer and written to disk.
+   */
   incomingBytes: number;
   /**
    * Every `cv_variants.file_path` the database knows about. Anything in `dir`
