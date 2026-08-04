@@ -31,7 +31,7 @@ import {
 } from "@careerhq/db";
 import { redactError } from "@careerhq/email";
 import { stripHtml } from "@careerhq/ingest";
-import { effectiveWorkspaceKind, refuseCaptureTarget } from "./capture-target.js";
+import { effectiveWorkspaceKind, refuseCaptureTarget } from "@careerhq/autoapply/policy";
 
 /** What the driver hands back after the one submit click (worker `fillAndSubmit`, adapted). */
 export interface SiteSubmitResult {

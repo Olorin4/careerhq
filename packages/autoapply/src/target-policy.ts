@@ -1,11 +1,23 @@
 import type { WorkspaceKind } from "@careerhq/contracts";
-import type { AppConfig } from "@careerhq/config";
 import { safeExternalHref } from "./safe-url.js";
 
+// Layer 1 is re-exported rather than hidden: `@careerhq/autoapply/policy` is
+// the whole URL-safety surface, and apps/web's UI needs the href sanitiser on
+// its own to decide what may become an anchor.
+export { safeExternalHref } from "./safe-url.js";
+
 /**
- * Who the auto-apply browser is allowed to visit.
+ * Who the auto-apply browser is allowed to visit — THE policy, and the only
+ * copy of it. Both entry points that can point Chromium at a caller-supplied
+ * URL call these functions: apps/web's `prepareSiteApplication` /
+ * `confirmAndSubmitSite`, and apps/worker's `runCaptureJob` / `runSubmitJob`.
+ * It lives here rather than in apps/web because dependency-cruiser forbids the
+ * worker importing from an app, which is exactly how the worker's queue path
+ * ended up with no host gate at all (P6 fix-wave review, A2). `policy.test.ts`
+ * fails if a second definition of any of these rules reappears anywhere.
  *
- * This module is pure — no db, no fs, no browser — so the rules can be
+ * This module is pure — no db, no fs, no browser, and no `@careerhq/config`
+ * (it takes the two fields it needs structurally) — so the rules can be
  * table-tested exhaustively. It exists because `prepareSiteApplication` drives
  * a real headless Chromium at a caller-supplied URL: the P6 review proved an
  * anonymous demo visitor could make the server fetch `file:///etc/passwd`
@@ -18,13 +30,21 @@ import { safeExternalHref } from "./safe-url.js";
  *      own adversarial suite), so nothing else has to know about `file:`,
  *      `javascript:`, `data:`, `blob:` or protocol-relative forms;
  *   2. internal network — literal loopback / link-local / private / unspecified
- *      addresses are refused in EVERY mode, demo or not, because a personal
- *      install driving a browser at 169.254.169.254 is a bug in every
- *      deployment, not just the public one;
+ *      addresses are refused in EVERY workspace kind, demo or not, because a
+ *      personal install driving a browser at 169.254.169.254 is a bug in every
+ *      deployment, not just the public one. The one exemption (the configured
+ *      sandbox host, which is `localhost` outside compose) applies only to
+ *      sandbox-effective workspaces — see `refuseCaptureTarget`;
  *   3. sandbox allow-list — when the effective workspace kind is sandbox, the
  *      one configured host and nothing else. This is an *additional, earlier*
  *      layer; the confirm-time gate in `evaluateSubmissionGates` is unchanged
  *      and still the authority at submit time.
+ *
+ * A URL is judged the same way at EVERY navigation, not just the first one:
+ * `apps/worker/src/autoapply/driver.ts` evaluates `allowsCaptureTarget` against
+ * every hop of a redirect chain before the hop is requested. A single 302 from
+ * an allow-listed host to `127.0.0.1` used to defeat all three layers at once
+ * (P6 fix-wave review, BLOCKING).
  */
 
 /** RFC 6761: `localhost` and anything under `.localhost` always mean this machine. */
@@ -46,17 +66,27 @@ function ipv4Octets(hostname: string): number[] | null {
  * GCP, Azure and DigitalOcean alike) and `0.0.0.0/8` (unspecified / "this
  * network", which routes to loopback on Linux).
  *
+ * Plus three ranges the fix-wave review measured as reachable (A1):
+ *   - `100.64.0.0/10` — RFC 6598 carrier-grade NAT. The one with real-world
+ *     weight: EKS/Fargate pod networking and Tailscale both live here, so on a
+ *     real cluster this range reaches neighbours, not the internet.
+ *   - `198.18.0.0/15` — RFC 2544 benchmarking.
+ *   - `192.0.0.0/24` — RFC 6890 IETF protocol assignments.
+ *
  * Obfuscated spellings — `http://2130706433/`, `http://0x7f000001/`,
  * `http://0177.0.0.1/`, `http://127.1/` — need no special handling: the WHATWG
  * URL parser has already canonicalised every one of them to a dotted quad by
- * the time we see `hostname`. `capture-target.test.ts` pins that.
+ * the time we see `hostname`. `target-policy.test.ts` pins that.
  */
 function isInternalIpv4(octets: number[]): boolean {
-  const [a, b] = octets as [number, number, number, number];
+  const [a, b, c] = octets as [number, number, number, number];
   if (a === 127 || a === 10 || a === 0) return true;
   if (a === 169 && b === 254) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 192 && b === 0 && c === 0) return true;
   return false;
 }
 
@@ -97,20 +127,38 @@ function ipv6Hextets(hostname: string): number[] | null {
   return hextets.length === 8 ? hextets : null;
 }
 
-/** `::1`, `::`, `fc00::/7` (unique-local) and `fe80::/10` (link-local), plus IPv4-mapped/compatible forms of any blocked v4 range. */
+/**
+ * `::1`, `::`, `fc00::/7` (unique-local) and `fe80::/10` (link-local), plus
+ * IPv4-mapped/compatible/translated forms of any blocked v4 range, plus the
+ * IPv4/IPv6 *translation* prefixes.
+ *
+ * The two translation prefixes are refused WHOLESALE rather than by judging
+ * the IPv4 address embedded in them, unlike the `::ffff:` forms below. That
+ * asymmetry is deliberate: `::ffff:8.8.8.8` is merely another spelling of a
+ * public IPv4 this table already has an opinion about, whereas an address in
+ * `64:ff9b::/32` (RFC 6052 NAT64, well-known and local-use prefixes both) or
+ * `2002::/16` (RFC 3056 6to4) only means anything to a translator on the local
+ * network — it is never a legitimate ATS target, and letting one through to be
+ * re-judged on its embedded quad is a parser surface with no upside.
+ */
 function isInternalIpv6(hextets: number[]): boolean {
   const first = hextets[0]!;
   if (hextets.every((h) => h === 0)) return true;
   if (hextets.slice(0, 7).every((h) => h === 0) && hextets[7] === 1) return true;
   if ((first & 0xfe00) === 0xfc00) return true;
   if ((first & 0xffc0) === 0xfe80) return true;
+  if (first === 0x2002) return true;
+  if (first === 0x0064 && hextets[1] === 0xff9b) return true;
 
   // `::ffff:a9fe:a9fe` and `::7f00:1` are 169.254.169.254 and 127.0.0.1 wearing
   // a different hat; the URL parser produces exactly these from
-  // `[::ffff:169.254.169.254]` and `[::127.0.0.1]`.
-  const leadingZeros = hextets.slice(0, 5).every((h) => h === 0);
-  const mapped = leadingZeros && (hextets[5] === 0xffff || hextets[5] === 0);
-  if (!mapped) return false;
+  // `[::ffff:169.254.169.254]` and `[::127.0.0.1]`. `::ffff:0:a9fe:a9fe` is the
+  // IPv4-translated form (`::ffff:0:0/96`) of the same address — one hextet
+  // longer, and the shape the review found reachable.
+  const leadingZeros = hextets.slice(0, 4).every((h) => h === 0);
+  const mapped = leadingZeros && (hextets[4] === 0 && (hextets[5] === 0xffff || hextets[5] === 0));
+  const translated = leadingZeros && hextets[4] === 0xffff && hextets[5] === 0;
+  if (!mapped && !translated) return false;
   const high = hextets[6]!;
   const low = hextets[7]!;
   return isInternalIpv4([high >> 8, high & 0xff, low >> 8, low & 0xff]);
@@ -150,8 +198,21 @@ export function isInternalHostname(raw: string): boolean {
  * of what workspace resolution returned; it is deliberately independent of
  * `DEMO_MODE` (see `packages/config`).
  */
-export function effectiveWorkspaceKind(config: AppConfig, workspaceKind: WorkspaceKind): WorkspaceKind {
+export function effectiveWorkspaceKind(
+  config: { sandboxForceSafe: boolean },
+  workspaceKind: WorkspaceKind,
+): WorkspaceKind {
   return config.sandboxForceSafe ? "sandbox" : workspaceKind;
+}
+
+/**
+ * The two facts every layer here is decided from. `workspaceKind` must ALWAYS
+ * be the output of `effectiveWorkspaceKind`, never `workspace.kind` raw — that
+ * is what makes `SANDBOX_FORCE_SAFE` a real switch rather than a suggestion.
+ */
+export interface CaptureTargetPolicy {
+  workspaceKind: WorkspaceKind;
+  sandboxSiteAllowedHost: string;
 }
 
 /**
@@ -160,10 +221,7 @@ export function effectiveWorkspaceKind(config: AppConfig, workspaceKind: Workspa
  * callers keep their existing failure shape, and never echoes anything about
  * whether the target was reachable (that distinction was itself a leak).
  */
-export function refuseCaptureTarget(
-  rawUrl: string,
-  policy: { workspaceKind: WorkspaceKind; sandboxSiteAllowedHost: string },
-): string | null {
+export function refuseCaptureTarget(rawUrl: string, policy: CaptureTargetPolicy): string | null {
   if (safeExternalHref(rawUrl) === null) {
     return "the application URL must be an http(s) address";
   }
@@ -180,7 +238,15 @@ export function refuseCaptureTarget(
   // but `localhost` when the stack runs outside compose, so the private-range
   // table would otherwise make the demo itself unreachable. Layer 3 below
   // still pins it to exactly that host in a sandbox workspace.
-  if (hostname !== policy.sandboxSiteAllowedHost && isInternalHostname(hostname)) {
+  //
+  // Scoped to sandbox-EFFECTIVE workspaces (fix-wave review A3): honouring it
+  // everywhere meant that with the documented outside-compose setting
+  // (`SANDBOX_SITE_ALLOWED_HOST=localhost`) a PERSONAL workspace could drive
+  // the browser at `http://localhost:<any port>/` — every service on the box.
+  // A personal workspace has no allow-list to be made unreachable by the
+  // private-range table, so it needs no exemption from it.
+  const exempt = policy.workspaceKind === "sandbox" && hostname === policy.sandboxSiteAllowedHost;
+  if (!exempt && isInternalHostname(hostname)) {
     return "that address is on an internal network and cannot be opened";
   }
 
@@ -189,4 +255,17 @@ export function refuseCaptureTarget(
   }
 
   return null;
+}
+
+/**
+ * `refuseCaptureTarget` as a predicate, for the driver's per-navigation guard.
+ *
+ * The driver has no notion of workspaces and no user to show a reason to — it
+ * only needs to know whether Chromium may be pointed at a URL, and it must ask
+ * that question once per redirect hop rather than once per capture. Kept as a
+ * one-line adapter over the same function so the two can never diverge: there
+ * is no second table, no second parser, no "close enough" copy of the rules.
+ */
+export function allowsCaptureTarget(rawUrl: string, policy: CaptureTargetPolicy): boolean {
+  return refuseCaptureTarget(rawUrl, policy) === null;
 }

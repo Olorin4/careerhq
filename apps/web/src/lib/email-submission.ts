@@ -22,7 +22,7 @@ import {
 import {
   makeSmtpTransport, redactError, sendApplicationEmail, type SmtpTransportLike,
 } from "@careerhq/email";
-import { effectiveWorkspaceKind } from "./capture-target.js";
+import { effectiveWorkspaceKind } from "@careerhq/autoapply/policy";
 
 /**
  * `makeSmtpTransport` widened to its structural contract: tests inject a
@@ -298,7 +298,7 @@ export async function confirmAndSend(
     // workspace this really is) doesn't also disable the sandbox host
     // allow-list. Deliberately not derived from/coupled to DEMO_MODE; it is
     // its own hard-safety switch. One shared derivation (`effectiveWorkspaceKind`)
-    // across both channels and both phases — see apps/web/src/lib/capture-target.ts.
+    // across both channels and both phases — see @careerhq/autoapply/policy.
     workspaceKind: effectiveWorkspaceKind(config, workspace.kind),
     // Only consulted for sandbox workspaces; a sandbox may reach exactly one host.
     sandboxTargetAllowed: smtp.host === config.sandboxSmtpAllowedHost,

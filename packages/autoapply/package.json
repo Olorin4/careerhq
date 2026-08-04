@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./testing": { "types": "./dist/testing/from-html.d.ts", "default": "./dist/testing/from-html.js" }
+    "./testing": { "types": "./dist/testing/from-html.d.ts", "default": "./dist/testing/from-html.js" },
+    "./policy": { "types": "./dist/target-policy.d.ts", "default": "./dist/target-policy.js" }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
