@@ -7,7 +7,7 @@ import {
   canonicalFormSchema, plannedAnswerSchema,
   type AnswerSource, type BlockerKind, type CanonicalForm, type CanonicalFormField, type PlannedAnswer,
 } from "@careerhq/contracts";
-import { isSensitiveField, requiresUserBeforeSubmit } from "@careerhq/core";
+import { isConsentOnlyField, isSensitiveField, requiresUserBeforeSubmit } from "@careerhq/core";
 import type { ApplicationAttempt, CvVariant, FormSnapshot, SiteAttemptDraft } from "@careerhq/db";
 import type { PrepareOutcome, SiteConfirmOutcome, SitePreviewOutcome } from "../../../../lib/site-submission.js";
 import { resolveReconcileAction } from "./email-actions.js";
@@ -464,6 +464,16 @@ function FieldRow({
   onCommit: (fieldId: string, value: string) => void;
   disabled: boolean;
 }) {
+  // A consent-only field (legal_attestation / criminal_history, by canonical field OR by
+  // label — see isConsentOnlyField) is never satisfied by a saved answer from another
+  // application, so it always needs a *fresh* tick from this user, on this application.
+  // It gets its own row shape — full statement text, explicit consent copy, a control that
+  // is provably never pre-ticked — rather than reusing the generic sensitive-lock row, which
+  // would bury the statement being agreed to in a truncatable label column.
+  if (isConsentOnlyField(field)) {
+    return <ConsentFieldRow field={field} answer={answer} cvVariants={cvVariants} onCommit={onCommit} disabled={disabled} />;
+  }
+
   const sensitive = isSensitiveField(field);
   const rowClass = answer.needsUser ? "site-field-row site-field-needs-you" : "site-field-row";
 
@@ -499,6 +509,86 @@ function FieldRow({
       </td>
     </tr>
   );
+}
+
+const CONSENT_COPY = "You must tick this yourself — CareerHQ never agrees to legal statements on your behalf.";
+
+/**
+ * The consent row: a legal attestation or criminal-history disclosure, keyed off
+ * `isConsentOnlyField` (not `isSensitiveField`'s generic lock icon). The statement's full
+ * label text is shown in full above the control — it is what the user is agreeing to, so it
+ * is never truncated — followed by the consent copy and then the control itself.
+ */
+function ConsentFieldRow({
+  field, answer, cvVariants, onCommit, disabled,
+}: {
+  field: CanonicalFormField;
+  answer: PlannedAnswer;
+  cvVariants: CvVariant[];
+  onCommit: (fieldId: string, value: string) => void;
+  disabled: boolean;
+}) {
+  const rowClass = answer.needsUser
+    ? "site-field-row site-field-consent site-field-needs-you"
+    : "site-field-row site-field-consent";
+
+  return (
+    <tr className={rowClass}>
+      <td className="site-field-consent-cell" colSpan={4}>
+        <p className="site-field-consent-statement">
+          {field.label || field.id}
+          {field.required && <span className="site-field-required" title="Required">*</span>}
+        </p>
+        <p className="site-field-consent-copy">{CONSENT_COPY}</p>
+        <ConsentControl field={field} answer={answer} cvVariants={cvVariants} onCommit={onCommit} disabled={disabled} />
+        <div className="site-field-meta">
+          <span className={`badge site-badge-source-${answer.source}`}>{SOURCE_LABELS[answer.source]}</span>
+          <span className="site-field-confidence">{Math.round(answer.confidence * 100)}%</span>
+          {answer.needsUser && <span className="badge site-badge-needs-you">Needs your answer</span>}
+          {answer.differsFromApproved && (
+            <span className="badge site-badge-differs">Differs from approved</span>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * The consent control proper.
+ *
+ * `checkbox`: an explicit tick, rendered purely from the planned answer's own value — "true"
+ * means ticked, anything else (including "" on first render, even when the source page's HTML
+ * had the box pre-checked; the planner never carries that value through, see plan.ts's
+ * `userDraft`) means unticked. Ticking commits "true"; unticking commits "" — never "false" —
+ * so an untouched field and a deliberately-unticked field are indistinguishable in the
+ * fingerprinted payload, both readable as "no consent given".
+ *
+ * Non-checkbox consent fields (criminal_history selects/text) keep the ordinary FieldInput.
+ */
+function ConsentControl({
+  field, answer, cvVariants, onCommit, disabled,
+}: {
+  field: CanonicalFormField;
+  answer: PlannedAnswer;
+  cvVariants: CvVariant[];
+  onCommit: (fieldId: string, value: string) => void;
+  disabled: boolean;
+}) {
+  if (field.kind === "checkbox") {
+    return (
+      <label className="site-consent-checkbox">
+        <input
+          type="checkbox"
+          checked={answer.value === "true"}
+          onChange={(e) => onCommit(field.id, e.target.checked ? "true" : "")}
+          disabled={disabled}
+        />
+        I agree to this statement
+      </label>
+    );
+  }
+  return <FieldInput field={field} answer={answer} cvVariants={cvVariants} onCommit={onCommit} disabled={disabled} />;
 }
 
 function FieldInput({

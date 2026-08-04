@@ -182,7 +182,7 @@ const BLOCKER_GUIDANCE: Record<BlockerKind, string> = {
   identity_verification: "This page asks for identity or government-ID verification — only you can complete that, in your browser.",
   assessment: "This application includes a coding assessment or timed test — start it in your browser when you have the time for it.",
   unsupported_file_control: "This page's upload control only accepts file types CareerHQ cannot attach — upload your CV in your browser.",
-  legal_attestation: "This page requires a legally binding attestation, which only you may tick — complete this one in your browser.",
+  legal_attestation: "This page asks for a typed signature or a signature date, which CareerHQ cannot fill — complete this one in your browser.",
   parse_failure: "CareerHQ could not read a fillable application form on this page — check the link points at the form itself, or apply in your browser.",
 };
 

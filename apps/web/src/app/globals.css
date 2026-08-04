@@ -1340,6 +1340,35 @@ body {
   background: #fffaf0;
 }
 
+.site-field-consent {
+  background: #f4f1ff;
+  border-left: 4px solid #6b5ce7;
+}
+
+.site-field-consent-cell {
+  padding: 0.75rem 1rem;
+}
+
+.site-field-consent-statement {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+}
+
+.site-field-consent-copy {
+  margin: 0 0 0.6rem;
+  color: #4b3f99;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.site-consent-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
 .site-badge-needs-you {
   background: #f5a623;
   color: #fff;
