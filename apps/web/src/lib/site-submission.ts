@@ -12,7 +12,7 @@ import {
 import { detectBlockers, parseForm, type RawFormPage } from "@careerhq/autoapply";
 import { generateGrounded, interpretField, type GenerateInput } from "@careerhq/ai";
 import {
-  canTransition, isSensitiveField, MIN_FILL_CONFIDENCE, planAnswers,
+  canTransition, isConsentOnlyField, isSensitiveField, MIN_FILL_CONFIDENCE, planAnswers,
   requiresUserBeforeSubmit, selectFactsForGeneration, SENSITIVE_CANONICAL_FIELDS, validateGeneration,
   type FactForSelection, type PlanInputs, type ProfileValues, type SavedAnswerLike,
 } from "@careerhq/core";
@@ -364,9 +364,10 @@ async function loadPlanInputs(deps: SiteDeps, args: {
  *
  * Two hard rules, both enforced here rather than trusted from upstream:
  *   1. Only the planner's `unresolved` list is eligible, and only its free-text
- *      members. Sensitive fields never appear in `unresolved` by construction —
- *      `isSensitiveField` is re-checked anyway — and hidden inputs, checkboxes
- *      and selects are controls, not prose, so no model is asked about them.
+ *      members. Sensitive and consent-only fields never appear in `unresolved`
+ *      by construction — `isSensitiveField` and `isConsentOnlyField` are both
+ *      re-checked anyway — and hidden inputs, checkboxes and selects are
+ *      controls, not prose, so no model is asked about them.
  *   2. An interpretation may only ever ADD a block: a model that maps a field
  *      onto a sensitive category makes that field the user's, and never a
  *      candidate for drafting.
@@ -384,8 +385,16 @@ async function refineWithAi(deps: SiteDeps, ctx: {
   const interpret = deps.interpret ?? interpretField;
   const generate = deps.generate ?? generateGrounded;
 
+  // Both refusals are checked independently, because neither ruleset contains
+  // the other: "Please describe any convictions" is consent-only by label but
+  // matches no SENSITIVE_TERM (`\bconvicted\b` does not match "convictions"),
+  // and plenty of sensitive questions are not consent-only. A model may never
+  // be the source of a consent answer, whatever the planner decided upstream.
   const draftable = (field: CanonicalFormField | undefined): field is CanonicalFormField =>
-    field !== undefined && FREE_TEXT_KINDS.has(field.kind) && !isSensitiveField(field);
+    field !== undefined
+    && FREE_TEXT_KINDS.has(field.kind)
+    && !isSensitiveField(field)
+    && !isConsentOnlyField(field);
 
   const fieldsById = new Map(ctx.form.fields.map((field) => [field.id, field]));
 

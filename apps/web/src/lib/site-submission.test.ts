@@ -439,6 +439,77 @@ d("prepareSiteApplication", () => {
     expect(byId.get(fieldId("other_notes"))?.source).not.toBe("ai");
   });
 
+  /**
+   * A consent-only-by-LABEL question that the sensitivity ruleset does not
+   * know: "Please describe any convictions" matches CONSENT_ONLY_LABEL_RE's
+   * `convict` but not SENSITIVE_TERMS' `\bconvicted\b`. Nothing about it may
+   * reach a model — not the interpreter, not the writer — and it must never
+   * come back with `source: "ai"`. Both the planner's rule 1a and this
+   * module's own `draftable` guard have to hold for that, and they are checked
+   * independently on purpose.
+   */
+  it("never asks a model about a consent-only-by-label field, and never drafts one", async () => {
+    const interpreted: string[] = [];
+    const generated: string[] = [];
+
+    const consentFields: RawField[] = [
+      rawField({ name: "email", type: "email", labelText: "Email", required: true }),
+      rawField({ name: "resume", type: "file", accept: ".pdf,.docx", labelText: "Resume", required: true }),
+      rawField({
+        name: "convictions", tag: "textarea", type: "",
+        labelText: "Please describe any convictions", required: true,
+      }),
+      // A genuine screening question, so this test cannot pass vacuously: the
+      // AI pass must actually have run and drafted something.
+      rawField({
+        name: "why_northwind", tag: "textarea", type: "",
+        labelText: "Why do you want to work at Northwind?", required: true,
+      }),
+    ];
+
+    const interpret = async (input: InterpretFieldInput): Promise<FallbackResult<InterpretFieldResult>> => {
+      interpreted.push(input.label);
+      return {
+        ok: true, value: { canonicalField: "screening_question", confidence: 0.95 },
+        model: "stub-fast", latencyMs: 1, status: 200, error: null, attempts: [],
+      };
+    };
+    const generate = async (input: GenerateInput): Promise<FallbackResult<GenerationResult>> => {
+      generated.push(input.question ?? "");
+      return {
+        ok: true,
+        value: {
+          answer: "Nothing to declare.",
+          factIds: input.facts.map((f) => f.id), confidence: 0.95, unsupportedClaims: [],
+        },
+        model: "stub-writer", latencyMs: 1, status: 200, error: null, attempts: [],
+      };
+    };
+
+    const prepared = await prepare("Consent Label Co", aiDeps({
+      capture: async (pageUrl: string) => greenhousePage(pageUrl, { fields: consentFields }),
+      interpret: interpret as SiteDeps["interpret"],
+      generate: generate as SiteDeps["generate"],
+    }));
+
+    // The AI pass really ran — the ordinary screening question was drafted …
+    expect(generated).toEqual(["Why do you want to work at Northwind?"]);
+    // … and nothing about the consent question was ever put to a model.
+    expect([...interpreted, ...generated].join(" | ")).not.toMatch(/conviction/i);
+
+    const idOf = (name: string): string => rawFieldId(consentFields.find((f) => f.name === name)!);
+    const byId = new Map(
+      ((await getLatestSnapshot(db, prepared.attemptId))!.plannedAnswers as PlannedAnswer[])
+        .map((a) => [a.fieldId, a]),
+    );
+    expect(byId.get(idOf("convictions"))).toMatchObject({ source: "user", needsUser: true, value: "" });
+    expect(byId.get(idOf("convictions"))?.source).not.toBe("ai");
+    expect(prepared.blocking).toContain(idOf("convictions"));
+    // The control field did get an AI draft, so "no model was asked" above is
+    // a statement about this field, not about the pass as a whole.
+    expect(byId.get(idOf("why_northwind"))?.source).toBe("ai");
+  });
+
   it("marks an AI draft as such and clears it for review", async () => {
     const generate = async (input: GenerateInput): Promise<FallbackResult<GenerationResult>> => ({
       ok: true,

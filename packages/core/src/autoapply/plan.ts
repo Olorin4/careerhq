@@ -292,8 +292,8 @@ export function planAnswers(inputs: PlanInputs): PlanResult {
 /**
  * Field ids that must be settled by the user before the form may be submitted:
  * a required field with a missing/empty answer, any field still flagged `needsUser`,
- * or a sensitive field carrying an "ai" answer — the last being a belt-and-braces
- * invariant `planAnswers` can never produce.
+ * or a sensitive OR consent-only field carrying an "ai" answer — the last being a
+ * belt-and-braces invariant `planAnswers` can never produce.
  *
  * Hidden inputs are exempt, and deliberately so. `planField` has no deterministic
  * source for them so rule 5 hands them back `needsUser: true`, and the review
@@ -326,7 +326,10 @@ export function requiresUserBeforeSubmit(
       blocking.push(field.id);
       continue;
     }
-    if (answer.source === "ai" && isSensitiveField(field)) {
+    // Both predicates, independently: the consent ruleset is not a subset of
+    // the sensitivity one, and a model may never be the source of a consent
+    // answer — that is the whole promise the consent row makes.
+    if (answer.source === "ai" && (isSensitiveField(field) || isConsentOnlyField(field))) {
       blocking.push(field.id);
     }
   }

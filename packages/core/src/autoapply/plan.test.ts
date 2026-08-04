@@ -691,6 +691,31 @@ describe("requiresUserBeforeSubmit", () => {
     expect(requiresUserBeforeSubmit(smuggled, target)).toEqual(["f_salary"]);
   });
 
+  // The sensitivity ruleset does not know "under penalty" or "convict…", so the
+  // ai-guard keyed only off `isSensitiveField` let an "ai" answer through on a
+  // field the review screen presents as consent — the one source that must
+  // never satisfy a consent question, since the whole promise is that only the
+  // user agrees. The guard is belt-and-braces (planAnswers cannot produce this)
+  // and must cover both predicates independently.
+  it("blocks a CONSENT-ONLY field that somehow carries an ai answer, even when the sensitivity ruleset does not flag it", () => {
+    const target = form([
+      field({ id: "f_pen", kind: "text", label: "Please confirm under penalty of perjury that the above is accurate" }),
+      field({ id: "f_conv", kind: "textarea", label: "Please describe any convictions" }),
+    ]);
+    const smuggled = ["f_pen", "f_conv"].map((fieldId) => ({
+      fieldId,
+      value: "drafted by a model",
+      source: "ai" as const,
+      sourceFactIds: [],
+      confidence: 0.99,
+      needsUser: false,
+      differsFromApproved: false,
+      note: "",
+    }));
+
+    expect(requiresUserBeforeSubmit(smuggled, target)).toEqual(["f_pen", "f_conv"]);
+  });
+
   it("blocks a required field that has no planned answer at all", () => {
     const target = form([field({ id: "f_email", kind: "email", label: "Email", required: true })]);
 
