@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { FactCategory, Sensitivity } from "@careerhq/contracts";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import { candidateFacts } from "../schema/index.js";
 import type { CandidateFact } from "../index.js";
 
@@ -8,10 +8,19 @@ export interface FactInput {
   workspaceId: string; category: FactCategory; claim: string;
   detail?: string; evidenceUrl?: string; sensitivity?: Sensitivity;
   reviewBy: Date;
+  /**
+   * Overrides the generated primary key. Exists for one caller — the demo seed,
+   * whose facts must keep the same ids across every six-hourly rebuild because
+   * those ids are baked into the AI replay fixtures' cache keys (see
+   * `packages/db/src/demo-seed.ts`). Nothing user-facing should ever set it:
+   * a duplicate id is a primary-key violation, not a silent overwrite.
+   */
+  id?: string;
 }
 
-export async function createFact(db: Db, input: FactInput): Promise<CandidateFact> {
+export async function createFact(db: DbOrTx, input: FactInput): Promise<CandidateFact> {
   const [fact] = await db.insert(candidateFacts).values({
+    ...(input.id !== undefined ? { id: input.id } : {}),
     workspaceId: input.workspaceId,
     category: input.category,
     claim: input.claim,
@@ -25,6 +34,7 @@ export async function createFact(db: Db, input: FactInput): Promise<CandidateFac
 
 export async function updateFact(
   db: Db,
+  workspaceId: string,
   id: string,
   patch: Partial<Omit<FactInput, "workspaceId">>,
 ): Promise<CandidateFact | null> {
@@ -35,19 +45,25 @@ export async function updateFact(
     ...(patch.evidenceUrl !== undefined ? { evidenceUrl: patch.evidenceUrl } : {}),
     ...(patch.sensitivity !== undefined ? { sensitivity: patch.sensitivity } : {}),
     ...(patch.reviewBy !== undefined ? { reviewBy: patch.reviewBy } : {}),
-  }).where(eq(candidateFacts.id, id)).returning();
+  }).where(and(eq(candidateFacts.id, id), eq(candidateFacts.workspaceId, workspaceId))).returning();
   return updated ?? null;
 }
 
-export async function archiveFact(db: Db, id: string): Promise<void> {
-  await db.update(candidateFacts).set({ archivedAt: sql`now()` }).where(eq(candidateFacts.id, id));
+export async function archiveFact(db: Db, workspaceId: string, id: string): Promise<void> {
+  await db.update(candidateFacts).set({ archivedAt: sql`clock_timestamp()` })
+    .where(and(eq(candidateFacts.id, id), eq(candidateFacts.workspaceId, workspaceId)));
 }
 
-export async function reverifyFact(db: Db, id: string, reviewBy: Date): Promise<CandidateFact | null> {
+export async function reverifyFact(
+  db: Db,
+  workspaceId: string,
+  id: string,
+  reviewBy: Date,
+): Promise<CandidateFact | null> {
   const [updated] = await db.update(candidateFacts).set({
-    verifiedAt: sql`now()`,
+    verifiedAt: sql`clock_timestamp()`,
     reviewBy,
-  }).where(eq(candidateFacts.id, id)).returning();
+  }).where(and(eq(candidateFacts.id, id), eq(candidateFacts.workspaceId, workspaceId))).returning();
   return updated ?? null;
 }
 
@@ -61,7 +77,12 @@ export async function listFacts(
     : and(eq(candidateFacts.workspaceId, workspaceId), isNull(candidateFacts.archivedAt));
   return db.select().from(candidateFacts)
     .where(conditions)
-    .orderBy(asc(candidateFacts.category), asc(candidateFacts.createdAt));
+    // `id` last so the order is total. Facts seeded in one batch can share a
+    // created_at, and this list is rendered in the UI *and* laid out verbatim
+    // in the generation prompt (`[<fact id>] <claim>`) — an order Postgres is
+    // free to vary is an inbox that reshuffles between renders and a prompt
+    // whose replay-fixture hash changes between runs.
+    .orderBy(asc(candidateFacts.category), asc(candidateFacts.createdAt), asc(candidateFacts.id));
 }
 
 export function isFactStale(fact: Pick<CandidateFact, "reviewBy">, now?: Date): boolean {

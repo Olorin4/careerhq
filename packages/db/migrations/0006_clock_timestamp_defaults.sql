@@ -1,0 +1,20 @@
+ALTER TABLE "application_answers" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "application_attempts" ALTER COLUMN "started_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "application_events" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "applications" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "applications" ALTER COLUMN "updated_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "attempt_confirmations" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "candidate_facts" ALTER COLUMN "verified_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "candidate_facts" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "credentials" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "cv_variants" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "email_connections" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "email_messages" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "form_snapshots" ALTER COLUMN "captured_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "generated_documents" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "ingest_runs" ALTER COLUMN "started_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "jobs" ALTER COLUMN "first_seen_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "jobs" ALTER COLUMN "last_seen_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "scoring_profiles" ALTER COLUMN "updated_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "watchlist_companies" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();--> statement-breakpoint
+ALTER TABLE "workspaces" ALTER COLUMN "created_at" SET DEFAULT clock_timestamp();

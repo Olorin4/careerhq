@@ -19,6 +19,28 @@ body {
   line-height: 1.5;
 }
 
+.demo-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 1rem;
+  background: #4b3f99;
+  color: #fff;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.demo-banner a {
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .app-nav {
   display: flex;
   gap: 1.5rem;
@@ -287,6 +309,11 @@ body {
 
 .cv-empty {
   color: #999;
+  font-size: 0.85rem;
+}
+
+.cv-error {
+  color: #b00020;
   font-size: 0.85rem;
 }
 
@@ -840,6 +867,13 @@ body {
 .badge-ok {
   background: #1a7f37;
   color: #fff;
+}
+
+.email-demo-disabled {
+  padding: 0.75rem 1rem;
+  background: #f4f1ff;
+  border-left: 3px solid #6b5ce7;
+  color: #4b3f99;
 }
 
 .email-keygen-command {

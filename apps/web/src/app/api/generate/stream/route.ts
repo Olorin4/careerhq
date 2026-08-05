@@ -2,6 +2,7 @@ import { z } from "zod";
 import { documentKindSchema } from "@careerhq/contracts";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { demoRateLimit } from "../../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import type { GenerationArgs, GenerationDeps } from "../../../../lib/generation.js";
 import { createSseWriter } from "./sse-writer.js";
@@ -30,6 +31,21 @@ export async function POST(req: Request): Promise<Response> {
   if (!parsed.success) {
     return Response.json({ error: "invalid_body", issues: parsed.error.issues }, { status: 400 });
   }
+
+  // Checked before the prelude reads anything and before a model is ever
+  // called. The bucket is `generateDocumentAction`'s: the two are transports
+  // for one click and share one budget, so a visitor cannot get twice the
+  // generations by driving both. The sharing is real only because
+  // rate-limit.ts holds its counters on `globalThis` — this route and that
+  // action are separate Next.js server bundles, and the module-level Map this
+  // replaced gave each of them a private counter, so the panel's own
+  // stream→action fallback below bought two generations per slot (P6 task-3
+  // review, B1).
+  const limited = demoRateLimit("generateDocument");
+  // No Retry-After header: the panel treats any non-OK response as "stream
+  // unavailable" and immediately retries through the action, whose refusal
+  // carries the real, still-counting-down number of seconds.
+  if (limited) return Response.json({ error: "rate_limited", reason: limited }, { status: 429 });
 
   const db = getDb();
   const config = loadConfig();

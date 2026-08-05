@@ -20,17 +20,23 @@ import {
   CONFIRMATION_TTL_MS, evaluateSubmissionGates, generateConfirmationToken, hashConfirmationToken,
   payloadFingerprint, type GateCheckInput,
 } from "@careerhq/core/gates";
+import { reserveEvidenceScreenshot } from "@careerhq/core/storage";
 import {
+  abandonSubmission,
   applicationEvents as applicationEventsTable, beginSubmission, completeSubmission,
   createSiteAttempt, cvVariants as cvVariantsTable, failSubmission, findRequisitionAttempt,
   formSnapshots as formSnapshotsTable,
   getApplicationDetail, getAttempt, getLatestConfirmation, getLatestSnapshot, hasBlockingAttempt, isFactStale,
-  listAnswers, listCvVariants, listFacts, listReusableAnswers, markAttemptBlocked, markAttemptReady,
+  listAnswers, listCvVariants, listEvidenceScreenshotPaths, listFacts, listReusableAnswers,
+  markAttemptBlocked, markAttemptReady,
   markNeedsReconcile, recordPreview, saveFormSnapshot, updateSnapshotAnswers, workspaces as workspacesTable,
   type ApplicationAttempt, type CandidateFact, type CvVariant, type Db, type FormSnapshot,
 } from "@careerhq/db";
 import { redactError } from "@careerhq/email";
 import { stripHtml } from "@careerhq/ingest";
+import {
+  effectiveWorkspaceKind, refuseCaptureTarget, type CaptureTargetPolicy,
+} from "@careerhq/autoapply/policy";
 
 /** What the driver hands back after the one submit click (worker `fillAndSubmit`, adapted). */
 export interface SiteSubmitResult {
@@ -48,6 +54,12 @@ export interface SiteSubmitArgs {
   answers: PlannedAnswer[];
   /** fieldId → absolute path of the file to upload. */
   files: Record<string, string>;
+  /**
+   * Who this workspace may be driven at, carried down to the driver so every
+   * navigation the submit performs — including any redirect the site answers
+   * with — is judged by the same rules that let the attempt exist at all.
+   */
+  policy: CaptureTargetPolicy;
 }
 
 export interface SiteDeps {
@@ -58,7 +70,7 @@ export interface SiteDeps {
    * from the worker, which this process cannot do — an unset `capture` means
    * auto-apply is simply unavailable here, never that a page was empty.
    */
-  capture?: (url: string) => Promise<RawFormPage>;
+  capture?: (url: string, policy: CaptureTargetPolicy) => Promise<RawFormPage>;
   /** Fills the form and clicks Submit exactly once. Injected for the same reason. */
   submit?: (args: SiteSubmitArgs) => Promise<SiteSubmitResult>;
   /**
@@ -70,8 +82,12 @@ export interface SiteDeps {
    * claiming "the click may have landed" when no browser ever started.
    *
    * Optional: an unset probe means "do not check", which is what every test
-   * with a stubbed `submit` wants. The real one is `makeDriverProbe` in
-   * `./site-driver.ts`.
+   * with a stubbed `submit` wants. The real one is `siteBrowserReservation`'s
+   * `probeDriver` in `./site-driver.ts`, which also HOLDS the process's browser
+   * slot from here until the action that called it releases it — so the busy
+   * refusal below is the only one a confirm can get, and it lands with the
+   * token still unburned. This module neither knows nor needs to know that: it
+   * sees a function that resolves or throws.
    */
   probeDriver?: () => Promise<void>;
   /** Injected in tests; defaults to the real fast-tier field interpreter. */
@@ -196,17 +212,48 @@ function errorMessage(err: unknown): string {
  *   - "navigation" — the page never opened, never extracted, or Chromium never
  *     launched at all (`openSession` reports every launch failure as this
  *     kind, timeouts included — a launch has no click to be ambiguous about).
- *   - "fill" — a field action failed; no button has been touched. This holds
- *     even when the underlying cause was a Playwright timeout: filling is an
- *     interaction with a form CONTROL (typing, ticking, unticking), and none
- *     of that can submit a form, so `driverErrorKind` deliberately does NOT
- *     collapse the fill phase onto "timeout" the way it collapses the others.
+ *   - "fill" — a field action failed, or the driver refused to start filling at
+ *     all; no button has been touched. This holds even when the underlying
+ *     cause was a Playwright timeout: filling is an interaction with a form
+ *     CONTROL (typing, ticking, unticking), and none of that can submit a form,
+ *     so `driverErrorKind` deliberately does NOT collapse the fill phase onto
+ *     "timeout" the way it collapses the others.
+ *
+ *     The refusal case is the live-page re-verification (P6 task 6, widened by
+ *     the t6 review): the answers below were planned against the page as it was
+ *     when the user reviewed it, and the driver re-extracts the page and checks
+ *     — before it types anything — that every field the user made a decision
+ *     about is still there, still asks the same question (`fieldIdentityHash`)
+ *     and is still the same kind of control. A consent tick's whole meaning is
+ *     the statement beside it, so a page edited between review and confirm must
+ *     not receive an answer planned for a different question; and a consent box
+ *     that is REMOVED, MOVED or turned into a hidden input must not let the
+ *     rest of the form through, because the receipt written below would then
+ *     record a decision the employer never received (or the opposite one).
+ *     Reported as "fill" because it is strictly stronger than one: nothing on
+ *     the page was touched at all.
+ *
+ * What membership of this set BUYS is the whole point of it (P6 final review,
+ * BLOCKING 1): a refusal here does not merely avoid NEEDS_RECONCILE, it costs
+ * the visitor nothing at all. `confirmAndSubmitSite` hands the confirmation
+ * back unspent and rewinds the attempt to PENDING_CONFIRMATION
+ * (`abandonSubmission`), so the same token confirms again once the cause is
+ * gone — which is what "a browser that never clicked cannot have submitted"
+ * has to mean if it means anything. It used to mean a terminal FAILED attempt
+ * with a burned token and no way to re-preview, i.e. exactly the state
+ * {@link BROWSER_BUSY_ABANDONED_REASON} was written to describe, reached from
+ * two refusals that were added after that lesson was learned.
+ *
  * Everything else stays ambiguous on purpose. "submit" is the click itself;
  * "advance" is the between-steps click, which was dispatched before its error
  * surfaced and may have been the real submit on an ATS whose next-labelled
  * button the step heuristics misplaced; "timeout" is what a CLICK-phase
  * timeout collapses to, and a click that timed out may still have landed —
- * which is exactly why it must not be widened into this set.
+ * which is exactly why it must not be widened into this set. The cost of
+ * getting that wrong is now higher in one direction and unchanged in the
+ * other: a kind wrongly ADDED here makes a possible submission retryable, and
+ * a double application is the worst outcome this system has. Add nothing to
+ * this set that the driver does not raise before the click.
  */
 const PRE_CLICK_DRIVER_ERROR_KINDS: ReadonlySet<string> = new Set(["navigation", "fill"]);
 
@@ -225,6 +272,70 @@ function isPreClickDriverFailure(err: unknown): boolean {
   const kind: unknown = (err as Error & { kind?: unknown }).kind;
   return typeof kind === "string" && PRE_CLICK_DRIVER_ERROR_KINDS.has(kind);
 }
+
+/**
+ * `BrowserBusyError` from apps/worker/src/autoapply/browser-limit.ts — the
+ * global one-Chromium-at-a-time cap (spec P6 §3) refusing rather than queueing.
+ *
+ * Recognised by `name`, for the same reason and by the same convention as
+ * `isPreClickDriverFailure`: this orchestrator takes its driver by injection
+ * and never imports the browser module's graph.
+ *
+ * It is categorically different from every `DriverError`: no browser was
+ * started, so there is not merely no click — there is no page, no navigation
+ * and no process. Both places that classify it below lean on exactly that.
+ */
+function isBrowserBusyFailure(err: unknown): boolean {
+  return err instanceof Error && err.name === "BrowserBusyError";
+}
+
+/**
+ * What a visitor sees when the box's only browser is already in use and NOTHING
+ * has been spent yet. Their fault: no. Their move: wait — and "try again in a
+ * moment" is true here precisely because this refusal happens before
+ * `beginSubmission`: the attempt is still PENDING_CONFIRMATION and the same
+ * token still works.
+ */
+const BROWSER_BUSY_REASON = "the auto-apply browser is busy with another application — try again in a moment";
+
+/**
+ * The same refusal AFTER the token is burned — where "try again in a moment" is
+ * a lie, and was one (P6 task-5 review, BLOCKING 1): the attempt is terminal
+ * FAILED, its token reads `token_consumed`, and `previewSiteSubmission` refuses
+ * a FAILED attempt, so there is no "again" to try. The real recovery is a fresh
+ * auto-apply run from the job URL — a new capture, a new plan, a new token — so
+ * that is what this says.
+ *
+ * The reservation in `./site-driver.ts` means the interactive path can no
+ * longer get here (the slot is held across `beginSubmission`), but a caller
+ * that wires `submit` without `probeDriver` still can, and a message that is
+ * only true by wiring is not true.
+ */
+const BROWSER_BUSY_ABANDONED_REASON =
+  "the auto-apply browser was busy, so nothing was submitted — this attempt is closed and its "
+  + "confirmation is spent; start auto-apply again from the job URL to try once more";
+
+/**
+ * What a pre-click driver refusal adds to the driver's own sentence. It is a
+ * statement of fact about what just happened to the visitor's confirmation, and
+ * it is only true because `abandonSubmission` succeeded — see the branch that
+ * uses it. "review it again" rather than "just retry": the two refusals that
+ * reach here (a question whose text changed, a redirect off the allowed host)
+ * are both the page disagreeing with what was reviewed, so confirming again
+ * unchanged will simply refuse again.
+ */
+const PRE_CLICK_RETRY_HINT =
+  " — your confirmation has not been used, so review the page again and confirm when it is what you expect";
+
+/**
+ * The same refusal when the give-back fails, which leaves the visitor where
+ * they used to be for every one of these: nothing submitted, but the attempt
+ * closed and the confirmation gone. Same instruction as
+ * {@link BROWSER_BUSY_ABANDONED_REASON} for the same reason — a fresh
+ * auto-apply run is the only route left, so say so instead of implying a retry.
+ */
+const PRE_CLICK_ABANDONED_SUFFIX =
+  " — this attempt is closed and its confirmation is spent; start auto-apply again from the job URL";
 
 /**
  * A stable, human-readable attachment name derived from the variant label. It
@@ -513,9 +624,33 @@ export async function prepareSiteApplication(
     return { status: "failed", reason: "the auto-apply browser is not available in this process" };
   }
 
+  // Reading a page is not a mutation, but it IS a navigation the server
+  // performs on a caller's behalf, so the target is gated here and not only at
+  // confirm time (P6 task-2 review, BLOCKING 2): protocol, internal-network
+  // ranges, and — when the effective workspace kind is sandbox — the one
+  // configured host. `effectiveWorkspaceKind` is the same derivation
+  // `confirmAndSubmitSite` uses below, so the two layers cannot disagree about
+  // which workspace this is. The confirm-time gate is unchanged and still the
+  // authority at submit time; this is an additional, earlier layer.
+  const [workspace] = await db.select().from(workspacesTable)
+    .where(eq(workspacesTable.id, args.workspaceId));
+  if (!workspace) {
+    return { status: "failed", reason: "this workspace no longer exists" };
+  }
+  const policy: CaptureTargetPolicy = {
+    workspaceKind: effectiveWorkspaceKind(deps.config, workspace.kind),
+    sandboxSiteAllowedHost: deps.config.sandboxSiteAllowedHost,
+  };
+  const refusal = refuseCaptureTarget(args.url, policy);
+  if (refusal) return { status: "failed", reason: refusal };
+
   let page: RawFormPage;
   try {
-    page = await capture(args.url);
+    // The policy goes WITH the URL, not just ahead of it. `page.goto` follows
+    // redirects, so checking only `args.url` left a 302 from an allow-listed
+    // host to `127.0.0.1` captured and returned (P6 fix-wave review,
+    // BLOCKING). The driver now re-asks this same policy at every hop.
+    page = await capture(args.url, policy);
   } catch (err) {
     return { status: "failed", reason: `the application page could not be read: ${errorMessage(err)}` };
   }
@@ -878,6 +1013,13 @@ export async function previewSiteSubmission(
  * have landed. An exception, or a confirmation page with no confirmation id,
  * parks the attempt in NEEDS_RECONCILE for a human — recording a false
  * "submitted" or a false "failed" are both worse than asking.
+ *
+ * The one exception is the refusal the driver raises BEFORE the click
+ * (`PRE_CLICK_DRIVER_ERROR_KINDS`). `beginSubmission` has already run by then,
+ * so that refusal cannot be handled by ordering alone: it is undone instead —
+ * `abandonSubmission` un-consumes the confirmation and rewinds the attempt to
+ * PENDING_CONFIRMATION, and the outcome is `blocked`, like every other refusal
+ * that costs the visitor nothing. Ambiguity is never undone, only parked.
  */
 export async function confirmAndSubmitSite(
   deps: SiteDeps,
@@ -899,6 +1041,12 @@ export async function confirmAndSubmitSite(
     return { status: "blocked", code: "workspace_not_found", reason: "this workspace no longer exists" };
   }
 
+  // The same policy object prepare used, rebuilt from the same derivation.
+  const policy: CaptureTargetPolicy = {
+    workspaceKind: effectiveWorkspaceKind(config, workspace.kind),
+    sandboxSiteAllowedHost: config.sandboxSiteAllowedHost,
+  };
+
   // The latest confirmation whatever its state — a consumed or expired row must
   // reach the matrix as itself, not as "no token at all".
   const confirmation = await getLatestConfirmation(db, attempt.id);
@@ -906,7 +1054,14 @@ export async function confirmAndSubmitSite(
 
   const gateInput: GateCheckInput = {
     envGateOpen: config.submissionsLiveCompanySite,
-    workspaceKind: workspace.kind,
+    // Belt-and-braces (spec P6 §3): SANDBOX_FORCE_SAFE forces every workspace
+    // through the sandbox path independently of workspace.kind — a second,
+    // independent layer so a regression in workspace resolution (which
+    // workspace this really is) doesn't also disable the sandbox host
+    // allow-list. Deliberately not derived from/coupled to DEMO_MODE; it is
+    // its own hard-safety switch. Shared with the prepare-time layer through
+    // `effectiveWorkspaceKind` so the two can never derive it differently.
+    workspaceKind: policy.workspaceKind,
     // Only consulted for sandbox workspaces; a sandbox may reach exactly one host.
     sandboxTargetAllowed: payload.host === config.sandboxSiteAllowedHost,
     tokenRecord: confirmation
@@ -957,6 +1112,22 @@ export async function confirmAndSubmitSite(
     };
   }
 
+  // `payload.url` is `form.url`, which is where the CAPTURE landed — so before
+  // the redirect fix it could itself be a redirect target, and this is the
+  // check that makes "form.url is never off-policy" true at submit time rather
+  // than merely likely. It is the full policy, not just `sandboxTargetAllowed`
+  // above: a personal workspace has no host check in the gate matrix at all,
+  // so without this one `confirmAndSubmitSite` would type the user's CV and
+  // answers into an internal host and upload the files there.
+  //
+  // Placed here for the reason everything else in this run-up is placed here:
+  // it is BEFORE `beginSubmission`, so a refusal leaves the attempt
+  // PENDING_CONFIRMATION with its token unburned and the user simply retries.
+  const targetRefusal = refuseCaptureTarget(payload.url, policy);
+  if (targetRefusal) {
+    return { status: "blocked", code: "target_refused", reason: targetRefusal };
+  }
+
   // The last thing that can fail harmlessly: no driver, no submission — and the
   // attempt is still PENDING_CONFIRMATION when we say so.
   const submit = deps.submit;
@@ -967,16 +1138,53 @@ export async function confirmAndSubmitSite(
       reason: "the auto-apply browser is not available in this process",
     };
   }
+  // Room on disk for the one thing this submission is guaranteed to produce:
+  // the confirmation screenshot `submit` writes under `FILE_STORAGE_DIR`
+  // (`site-driver.ts`'s `runSiteSubmit`, and the worker's queue variant into
+  // its own directory — one store, two writers).
+  //
+  // It is HERE, and not at the write, because the write happens AFTER the
+  // submit click: by then the application is in, and refusing would either
+  // lose a real submission or leave an attempt whose receipt names evidence
+  // that was never stored. Before the token, before the browser, before
+  // anything is typed — the attempt stays PENDING_CONFIRMATION with its token
+  // intact, and the same `blocked` shape every other harmless failure uses
+  // carries the reason.
+  //
+  // Demo-only, and inert otherwise: a self-hosted install's screenshots are
+  // the records of real applications it made, and nothing quotas or reclaims
+  // those. The database read that feeds the collector is only paid for when
+  // the collector will actually run.
+  const evidenceRefusal = await reserveEvidenceScreenshot({
+    fileStorageDir: config.fileStorageDir,
+    referencedPaths: config.demoMode ? await listEvidenceScreenshotPaths(db) : [],
+    demoMode: config.demoMode,
+  });
+  if (evidenceRefusal) {
+    return { status: "blocked", code: "evidence_store_full", reason: evidenceRefusal };
+  }
+
   // A wired-up `submit` is not the same as a browser that can start. The probe
   // is a real launch/close round trip, and it runs HERE — before the token is
   // burned and before anything is typed — so an image or host without Chromium
   // refuses honestly and stays retryable, instead of throwing inside `submit`
   // and parking the attempt for a human to reconcile a click that never
   // happened.
+  //
+  // The probe also answers "is there ROOM for a browser?", because the slot is
+  // taken before the launch (spec P6 §3's global cap): a busy process refuses
+  // HERE, with the token still unburned, so a second demo visitor waits a
+  // moment instead of losing their confirmation to someone else's submission.
   if (deps.probeDriver) {
     try {
       await deps.probeDriver();
     } catch (err) {
+      // Busy is not broken, and saying "could not be started" for a browser
+      // that is working perfectly well would send the visitor looking for a
+      // problem that does not exist.
+      if (isBrowserBusyFailure(err)) {
+        return { status: "blocked", code: "driver_unavailable", reason: BROWSER_BUSY_REASON };
+      }
       return {
         status: "blocked",
         code: "driver_unavailable",
@@ -1000,7 +1208,7 @@ export async function confirmAndSubmitSite(
 
   let result: SiteSubmitResult;
   try {
-    result = await submit({ url: payload.url, form, answers, files });
+    result = await submit({ url: payload.url, form, answers, files, policy });
   } catch (err) {
     // The driver clicks Submit inside this call, so which side of that click
     // the throw came from decides the attempt's fate (spec §11): a failure
@@ -1008,8 +1216,40 @@ export async function confirmAndSubmitSite(
     // uncertainty AFTER it is worth a human's time. `DriverError.kind` already
     // knows — navigating, extracting or filling all happen before the submit
     // button is touched.
+    // A busy refusal out of `submit` itself. The real confirm path cannot get
+    // here any more — `siteBrowserReservation`'s probe HOLDS the slot across
+    // `beginSubmission`, so the loser of a race is refused above with its token
+    // intact — but a `submit` wired without a `probeDriver` still can, and a
+    // browser that was never started cannot have clicked anything: a plain
+    // FAILED, not a human sent to reconcile a submission that never began.
+    //
+    // The reason must not say "try again in a moment": the token is spent and
+    // the attempt is terminal, so the only honest instruction is to start over.
+    if (isBrowserBusyFailure(err)) {
+      await failSubmissionSafely(deps, attempt.id, BROWSER_BUSY_ABANDONED_REASON);
+      return { status: "failed", reason: BROWSER_BUSY_ABANDONED_REASON };
+    }
+    // Provably pre-click: the driver refused while navigating or before it
+    // typed a character, so no button was pressed and nothing left the browser.
+    // The attempt is put back exactly where `beginSubmission` found it —
+    // PENDING_CONFIRMATION, token unspent — and the refusal is reported in the
+    // same `blocked` shape as every other harmless one, so the confirm screen
+    // keeps the preview and the SAME token confirms again once the cause is
+    // gone. Nothing was spent, so nothing is owed.
     if (isPreClickDriverFailure(err)) {
-      const reason = `the form could not be filled in, so nothing was submitted: ${redactError(err, [])}`;
+      const detail = `the form could not be filled in, so nothing was submitted: ${redactError(err, [])}`;
+      const returned = await abandonSubmission(db, {
+        attemptId: attempt.id, confirmationId: confirmation.id,
+      });
+      if (returned.ok) {
+        return { status: "blocked", code: "driver_refused", reason: `${detail}${PRE_CLICK_RETRY_HINT}` };
+      }
+      // The give-back itself was refused (the attempt moved underneath us, the
+      // row is gone). Fall back to the old, weaker outcome rather than leaving
+      // the attempt SUBMITTING: still true — nothing was submitted — and still
+      // never NEEDS_RECONCILE, but terminal, so it says so.
+      console.error(`[site-submission] attempt ${attempt.id} could not be rewound: ${returned.reason}`);
+      const reason = `${detail}${PRE_CLICK_ABANDONED_SUFFIX}`;
       await failSubmissionSafely(deps, attempt.id, reason);
       return { status: "failed", reason };
     }

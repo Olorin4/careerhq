@@ -42,7 +42,7 @@ d("answers repo", () => {
     const a = await createAnswer(db, {
       applicationId, questionRaw: "Notice period?", answer: "Two weeks", origin: "user",
     });
-    await approveAnswer(db, a.id, { reusable: true, reviewBy: new Date(Date.now() - 86400_000) });
+    await approveAnswer(db, workspaceId, a.id, { reusable: true, reviewBy: new Date(Date.now() - 86400_000) });
     const bank = await listReusableAnswers(db, workspaceId);
     const row = bank.find((r) => r.id === a.id);
     expect(row?.staleForReuse).toBe(true);
@@ -52,7 +52,7 @@ d("answers repo", () => {
     const a = await createAnswer(db, {
       applicationId, questionRaw: "Are you willing to relocate?", answer: "Yes", origin: "user",
     });
-    const approved = await approveAnswer(db, a.id, { reusable: true });
+    const approved = await approveAnswer(db, workspaceId, a.id, { reusable: true });
     expect(approved?.reviewBy).toBeInstanceOf(Date);
     const twelveMonthsOut = new Date();
     twelveMonthsOut.setMonth(twelveMonthsOut.getMonth() + 11);
@@ -65,7 +65,7 @@ d("answers repo", () => {
     const a = await createAnswer(db, {
       applicationId, questionRaw: "One-off?", answer: "Yes", origin: "ai",
     });
-    await approveAnswer(db, a.id, { reusable: false });
+    await approveAnswer(db, workspaceId, a.id, { reusable: false });
     expect((await listReusableAnswers(db, workspaceId)).find((r) => r.id === a.id)).toBeUndefined();
   });
 
@@ -73,7 +73,7 @@ d("answers repo", () => {
     const a = await createAnswer(db, {
       applicationId, questionRaw: "Rejected question?", answer: "No", origin: "ai",
     });
-    await rejectAnswer(db, a.id);
+    await rejectAnswer(db, workspaceId, a.id);
     const [found] = await listAnswers(db, applicationId).then((rows) => rows.filter((r) => r.id === a.id));
     expect(found?.approval).toBe("rejected");
   });
@@ -103,7 +103,7 @@ d("answers repo", () => {
       applicationId: otherApplication.id, questionRaw: "Other workspace question?",
       answer: "Other workspace answer", origin: "user",
     });
-    await approveAnswer(db, otherAnswer.id, { reusable: true });
+    await approveAnswer(db, otherWorkspaceId, otherAnswer.id, { reusable: true });
 
     try {
       const thisBank = await listReusableAnswers(db, workspaceId);
@@ -116,6 +116,25 @@ d("answers repo", () => {
       expect(otherBank.some((r) => r.questionRaw !== "Other workspace question?")).toBe(false);
     } finally {
       await db.delete(workspaces).where(eq(workspaces.id, otherWorkspaceId));
+    }
+  });
+
+  it("refuses to approve or reject an answer belonging to another workspace", async () => {
+    const other = await db.insert(workspaces).values({ name: `t-other-${Date.now()}`, kind: "personal" }).returning();
+    const otherId = other[0]!.id;
+    try {
+      const otherApp = await createApplication(db, { workspaceId: otherId, companyName: "Other Corp", jobTitle: "Eng" });
+      const otherAnswer = await createAnswer(db, {
+        applicationId: otherApp.id, questionRaw: "Cross-workspace question?", answer: "Should not change", origin: "user",
+      });
+      const approved = await approveAnswer(db, workspaceId, otherAnswer.id, { reusable: true }); // wrong workspace
+      expect(approved).toBeNull();
+      const rejected = await rejectAnswer(db, workspaceId, otherAnswer.id); // wrong workspace
+      expect(rejected).toBeNull();
+      const [stillDraft] = await listAnswers(db, otherApp.id).then((rows) => rows.filter((r) => r.id === otherAnswer.id));
+      expect(stillDraft?.approval).toBe("draft"); // untouched
+    } finally {
+      await db.delete(workspaces).where(eq(workspaces.id, otherId));
     }
   });
 });

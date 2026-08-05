@@ -1,3 +1,4 @@
+import { OPENROUTER_APP_REFERER, OPENROUTER_APP_TITLE } from "./app-identity.js";
 import { OPENROUTER_URL, validateContent, type ChatJsonRequest, type ChatJsonResult } from "./chat-json.js";
 
 export interface StreamCallbacks {
@@ -205,8 +206,8 @@ export async function streamChatJson<T>(
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://github.com/careerhq",
-      "X-Title": "CareerHQ",
+      "HTTP-Referer": OPENROUTER_APP_REFERER,
+      "X-Title": OPENROUTER_APP_TITLE,
     };
 
     const response = await fetchImpl(url, {

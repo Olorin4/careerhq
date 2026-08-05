@@ -75,7 +75,10 @@ function ConnectionRow({ connection }: { connection: EmailConnection }) {
       return;
     }
     startTransition(async () => {
-      await disconnectAction({ connectionId: connection.id });
+      const result = await disconnectAction({ connectionId: connection.id });
+      // A refusal (the hosted demo, or an id that is not this workspace's) has
+      // to be visible; a success removes the row on refresh and needs no message.
+      setTestResult(result.ok ? null : result);
       router.refresh();
     });
   }

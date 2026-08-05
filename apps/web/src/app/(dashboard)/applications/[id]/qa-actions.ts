@@ -6,6 +6,7 @@ import { classifyQuestionSensitivity } from "@careerhq/core";
 import { approveAnswer, createAnswer, rejectAnswer } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { demoRateLimit } from "../../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import { runGeneration, type GenerationOutcome } from "../../../../lib/generation.js";
 
@@ -32,6 +33,8 @@ export async function askQuestionAction(
   raw: { applicationId: string; question: string },
 ): Promise<AskQuestionResult> {
   const args = askSchema.parse(raw);
+  const limited = demoRateLimit("askQuestion");
+  if (limited) return { outcome: { status: "failed", error: limited } };
   const db = getDb();
   const config = loadConfig();
   const ws = await getActiveWorkspace(db);
@@ -61,9 +64,22 @@ const manualAnswerSchema = z.object({
  * `createManualDocumentAction`, and the only path that can ever write a
  * `sensitivity: "sensitive"` row, since `runGeneration` never persists an AI
  * answer to a sensitive question.
+ *
+ * Shaped for `useActionState` like `createManualDocumentAction`, and carries
+ * the submitted answer back with the reason for the same purpose: React resets
+ * an uncontrolled form once its action resolves, so the textarea re-seeds its
+ * `defaultValue` from this instead of emptying itself (P6 task-3 review,
+ * advisory C). `null` means saved.
  */
-export async function saveManualAnswerAction(formData: FormData): Promise<void> {
+export type ManualAnswerState = { reason: string; answer: string } | null;
+
+export async function saveManualAnswerAction(
+  _previous: ManualAnswerState,
+  formData: FormData,
+): Promise<ManualAnswerState> {
   const input = manualAnswerSchema.parse(Object.fromEntries(formData));
+  const limited = demoRateLimit("saveManualAnswer");
+  if (limited) return { reason: limited, answer: input.answer };
   const db = getDb();
   await createAnswer(db, {
     applicationId: input.applicationId,
@@ -73,29 +89,41 @@ export async function saveManualAnswerAction(formData: FormData): Promise<void> 
     sensitivity: input.sensitivity,
   });
   revalidatePath(`/applications/${input.applicationId}`);
+  return null;
 }
 
 const approveSchema = z.object({ id: z.string().uuid(), reusable: z.boolean() });
 
+/** Carries a reason so the panel can say WHY, rather than only that it failed. */
+export type AnswerActionResult = { ok: true } | { ok: false; reason: string };
+
+const ANSWER_GONE = "this answer no longer exists";
+
 export async function approveAnswerAction(
   raw: { id: string; reusable: boolean },
-): Promise<{ ok: boolean }> {
+): Promise<AnswerActionResult> {
   const { id, reusable } = approveSchema.parse(raw);
+  const limited = demoRateLimit("approveAnswer");
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
-  const updated = await approveAnswer(db, id, { reusable });
-  if (updated) {
-    revalidatePath(`/applications/${updated.applicationId}`);
-    if (updated.reusable) revalidatePath("/answers");
-  }
-  return { ok: updated !== null };
+  const ws = await getActiveWorkspace(db);
+  const updated = await approveAnswer(db, ws.id, id, { reusable });
+  if (!updated) return { ok: false, reason: ANSWER_GONE };
+  revalidatePath(`/applications/${updated.applicationId}`);
+  if (updated.reusable) revalidatePath("/answers");
+  return { ok: true };
 }
 
 const idSchema = z.object({ id: z.string().uuid() });
 
-export async function rejectAnswerAction(raw: { id: string }): Promise<{ ok: boolean }> {
+export async function rejectAnswerAction(raw: { id: string }): Promise<AnswerActionResult> {
   const { id } = idSchema.parse(raw);
+  const limited = demoRateLimit("rejectAnswer");
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
-  const updated = await rejectAnswer(db, id);
-  if (updated) revalidatePath(`/applications/${updated.applicationId}`);
-  return { ok: updated !== null };
+  const ws = await getActiveWorkspace(db);
+  const updated = await rejectAnswer(db, ws.id, id);
+  if (!updated) return { ok: false, reason: ANSWER_GONE };
+  revalidatePath(`/applications/${updated.applicationId}`);
+  return { ok: true };
 }

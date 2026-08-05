@@ -10,6 +10,7 @@ import {
 import { isConsentOnlyField, isSensitiveField, requiresUserBeforeSubmit } from "@careerhq/core";
 import type { ApplicationAttempt, CvVariant, FormSnapshot, SiteAttemptDraft } from "@careerhq/db";
 import type { PrepareOutcome, SiteConfirmOutcome, SitePreviewOutcome } from "../../../../lib/site-submission.js";
+import { safeExternalHref } from "../../../../lib/safe-url.js";
 import { resolveReconcileAction } from "./email-actions.js";
 import {
   confirmAndSubmitSiteAction, prepareSiteApplicationAction, previewSiteSubmissionAction,
@@ -34,6 +35,35 @@ const EDITABLE_STATUSES = new Set<ApplicationAttempt["status"]>(["DRAFT", "READY
 const REQUIRES_FRESH_PREVIEW = new Set([
   "fingerprint_mismatch", "token_expired", "token_consumed", "token_invalid", "token_missing",
 ]);
+
+/**
+ * What a server action THROWING looks like to the visitor (P6 final review, A4).
+ *
+ * Every handler below awaits a server action that answers with an outcome
+ * object, and every failure worth telling a user about arrives that way. But an
+ * action can still throw: `prepareSiteApplication` resolves the application,
+ * captures the page for several seconds and only then inserts the attempt, so a
+ * demo reset committing inside that window makes the insert violate a foreign
+ * key — and an uncaught throw out of a server action reaches the browser as the
+ * full-page "Application error" overlay, which is the same thing an oversized
+ * upload used to do (BLOCKING 2) and tells the visitor nothing.
+ *
+ * The thrown value is deliberately NOT rendered: React replaces a server
+ * action's error with an opaque digest in production, so there is no message to
+ * show, and the raw one would be a stack or a Postgres constraint name.
+ */
+const ACTION_THREW = "Something went wrong on the server. Nothing was submitted — try again in a moment.";
+
+/**
+ * The same accident during the confirm, where "nothing happened" is not a claim
+ * this code is entitled to make: `confirmAndSubmitSite` classifies everything
+ * the driver does itself, so a throw that escapes it comes from around that —
+ * and the honest instruction is to look before confirming again, never to
+ * retry blind. Attempt history below the panel is where the answer is.
+ */
+const CONFIRM_THREW =
+  "The server did not answer this confirmation. Do not confirm again until you have checked the attempt "
+  + "history below — it records whether the submission started.";
 
 /** Brief §10.2.8's exact badge labels, in `ANSWER_SOURCES` order. */
 const SOURCE_LABELS: Record<AnswerSource, string> = {
@@ -152,10 +182,14 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
       return;
     }
     startTransition(async () => {
-      const outcome = await prepareSiteApplicationAction({ applicationId, url: trimmedUrl, overrideDuplicate });
-      setPrepareOutcome(outcome);
-      setConfirmOutcome(null);
-      if (outcome.status !== "failed") router.refresh();
+      try {
+        const outcome = await prepareSiteApplicationAction({ applicationId, url: trimmedUrl, overrideDuplicate });
+        setPrepareOutcome(outcome);
+        setConfirmOutcome(null);
+        if (outcome.status !== "failed") router.refresh();
+      } catch {
+        setError(ACTION_THREW);
+      }
     });
   }
 
@@ -163,13 +197,17 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
     if (!readyState) return;
     setError(null);
     startTransition(async () => {
-      const outcome = await previewSiteSubmissionAction({ applicationId, attemptId: readyState.attemptId });
-      if (outcome.status === "ok") {
-        setPreview(outcome);
-        setConfirmOutcome(null);
-        setRetypedTarget("");
-      } else {
-        setError(outcome.reason);
+      try {
+        const outcome = await previewSiteSubmissionAction({ applicationId, attemptId: readyState.attemptId });
+        if (outcome.status === "ok") {
+          setPreview(outcome);
+          setConfirmOutcome(null);
+          setRetypedTarget("");
+        } else {
+          setError(outcome.reason);
+        }
+      } catch {
+        setError(ACTION_THREW);
       }
     });
   }
@@ -184,9 +222,18 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
     if (!preview || !readyState) return;
     setError(null);
     startTransition(async () => {
-      const outcome = await confirmAndSubmitSiteAction({
-        applicationId, attemptId: readyState.attemptId, presentedToken: preview.token, retypedTarget,
-      });
+      let outcome;
+      try {
+        outcome = await confirmAndSubmitSiteAction({
+          applicationId, attemptId: readyState.attemptId, presentedToken: preview.token, retypedTarget,
+        });
+      } catch {
+        // Not `setConfirmOutcome`: there IS no outcome, and the panel must not
+        // imply one. The preview stays on screen with the warning above it.
+        setError(CONFIRM_THREW);
+        router.refresh();
+        return;
+      }
       setConfirmOutcome(outcome);
 
       if (outcome.status === "submitted") {
@@ -202,8 +249,10 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
         setPreview(null);
       }
       // Any other blocked code (gate_closed, sandbox_blocked, driver_unavailable, application_not_ready,
-      // review_required, …) leaves the token unconsumed — keep the preview on screen so the user can
-      // retry once the underlying condition is fixed.
+      // review_required, driver_refused, …) leaves the token unconsumed — keep the preview on screen so
+      // the user can retry once the underlying condition is fixed. `driver_refused` is the one that
+      // reaches this branch from AFTER `beginSubmission`: the driver refused before it clicked anything,
+      // so the orchestrator gave the confirmation back and the preview on screen is still redeemable.
     });
   }
 
@@ -298,14 +347,15 @@ function PrepareOutcomePane({
   onOverride: () => void;
 }) {
   if (outcome.status === "blocked") {
+    const safeUrl = safeExternalHref(url.trim());
     return (
       <div className="site-outcome site-outcome-blocked">
         <p>Paused — {humanize(outcome.kind)}</p>
         <p>{outcome.detail}</p>
         <p className="site-outcome-hint">
           This is a pause, not a failure: nothing was submitted.{" "}
-          {url.trim() && (
-            <a href={url.trim()} target="_blank" rel="noreferrer">Open the application in your browser</a>
+          {safeUrl && (
+            <a href={safeUrl} target="_blank" rel="noreferrer">Open the application in your browser</a>
           )}{" "}
           to finish it yourself.{BLOCKER_HINT[outcome.kind] ? ` ${BLOCKER_HINT[outcome.kind]}` : ""}
         </p>
@@ -384,8 +434,14 @@ function ReviewForm({
       };
     }));
     startTransition(async () => {
-      const result = await updatePlannedAnswerAction({ applicationId, snapshotId, fieldId, value });
-      if (!result.ok) setSaveError(result.reason);
+      try {
+        const result = await updatePlannedAnswerAction({ applicationId, snapshotId, fieldId, value });
+        if (!result.ok) setSaveError(result.reason);
+      } catch {
+        // The row above already shows the new value optimistically, so a silent
+        // throw would leave the user believing an answer was saved that was not.
+        setSaveError(ACTION_THREW);
+      }
     });
   }
 
@@ -401,11 +457,16 @@ function ReviewForm({
     : cvVariantId
       ? cvVariants.find((v) => v.id === cvVariantId)
       : undefined;
+  const safeReviewUrl = safeExternalHref(reviewUrl);
 
   return (
     <div className="site-review">
       <p className="site-review-url">
-        Reviewing <a href={reviewUrl} target="_blank" rel="noreferrer">{reviewUrl}</a>
+        Reviewing {safeReviewUrl ? (
+          <a href={safeReviewUrl} target="_blank" rel="noreferrer">{reviewUrl}</a>
+        ) : (
+          reviewUrl
+        )}
       </p>
 
       <p className="site-cv-line">
@@ -800,16 +861,24 @@ function SiteConfirmOutcomePane({
   onResolved: () => void;
 }) {
   switch (outcome.status) {
-    case "submitted":
+    case "submitted": {
+      const safeFinalUrl = safeExternalHref(outcome.finalUrl);
       return (
         <div className="site-outcome site-outcome-submitted">
           <p>Submitted — confirmation <code>{outcome.confirmationId ?? "(none reported by the site)"}</code></p>
-          <p><a href={outcome.finalUrl} target="_blank" rel="noreferrer">{outcome.finalUrl}</a></p>
+          <p>
+            {safeFinalUrl ? (
+              <a href={safeFinalUrl} target="_blank" rel="noreferrer">{outcome.finalUrl}</a>
+            ) : (
+              outcome.finalUrl
+            )}
+          </p>
           {outcome.screenshotPath && (
             <p className="site-outcome-hint">Evidence saved to <code>{outcome.screenshotPath}</code></p>
           )}
         </div>
       );
+    }
     case "blocked":
       return (
         <div className="site-outcome site-outcome-blocked">
@@ -879,14 +948,18 @@ function SiteReconcilePane({
   function resolve(resolution: "submitted" | "failed") {
     setError(null);
     startTransition(async () => {
-      const result = await resolveReconcileAction({
-        applicationId, attemptId, resolution, evidenceNote: note.trim() || undefined,
-      });
-      if (result.ok) {
-        onResolved?.();
-        router.refresh();
-      } else {
-        setError(result.reason);
+      try {
+        const result = await resolveReconcileAction({
+          applicationId, attemptId, resolution, evidenceNote: note.trim() || undefined,
+        });
+        if (result.ok) {
+          onResolved?.();
+          router.refresh();
+        } else {
+          setError(result.reason);
+        }
+      } catch {
+        setError(ACTION_THREW);
       }
     });
   }

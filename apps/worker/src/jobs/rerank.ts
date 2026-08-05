@@ -2,10 +2,16 @@ import { inArray } from "drizzle-orm";
 import type { AppConfig } from "@careerhq/config";
 import { applyRerank, companies, getScoringProfile, listInboxJobs, type Db } from "@careerhq/db";
 import type { JobScore } from "@careerhq/core";
-import { rerankJobs, type RerankJobInput } from "@careerhq/ai";
+import {
+  buildRerankPrompt, makeFsReplayStore, rerankJobs, withReplay, type RerankJobInput,
+} from "@careerhq/ai";
+import { rerankResultSchema, type RerankResult } from "@careerhq/contracts";
 import { stripHtml } from "@careerhq/ingest";
 
 const SNIPPET_LENGTH = 600;
+
+/** Task id for the record/replay store; keeps re-rank fixtures in their own keyspace. */
+const REPLAY_TASK_ID = "rerank";
 
 export interface RerankSummary {
   status: "skipped_no_key" | "skipped_empty" | "ok" | "failed";
@@ -33,14 +39,26 @@ function isRerankCandidate(keywordBreakdown: unknown): boolean {
  * retrying inline — the next cron pass tries again.
  */
 export async function runRerankOnce(db: Db, workspaceId: string, config: AppConfig): Promise<RerankSummary> {
-  if (!config.openrouterApiKey) return { status: "skipped_no_key", reranked: 0 };
+  const apiKey = config.openrouterApiKey;
+  // Replay mode reads a committed fixture and never opens a socket, so it is
+  // the one mode that works without a key — the hosted demo runs exactly that
+  // way (`AI_MODE=replay`, no key deployed, spec P6 §3).
+  if (!apiKey && config.aiMode !== "replay") return { status: "skipped_no_key", reranked: 0 };
 
   const profile = await getScoringProfile(db, workspaceId);
   const inbox = await listInboxJobs(db, workspaceId);
 
   const candidates = inbox
     .filter((job) => isRerankCandidate(job.keywordBreakdown))
-    .sort((a, b) => (b.keywordScore ?? 0) - (a.keywordScore ?? 0))
+    // The id tie-break is load-bearing, not tidiness. `listInboxJobs` orders on
+    // `llm_score DESC NULLS LAST, keyword_score DESC` with no further key, so
+    // Postgres returns equal-scoring listings in whatever order it read them —
+    // measured different between two runs over the *same* rows. That decides
+    // both which listings survive `topNForLlm` and the order they appear in the
+    // prompt, and the prompt is an AI replay fixture's cache key: without this,
+    // a recorded re-rank misses at random and the demo's keyless re-rank
+    // silently degrades to `replay_miss`.
+    .sort((a, b) => (b.keywordScore ?? 0) - (a.keywordScore ?? 0) || a.id.localeCompare(b.id))
     .slice(0, profile.topNForLlm);
 
   if (candidates.length === 0) return { status: "skipped_empty", reranked: 0 };
@@ -61,9 +79,20 @@ export async function runRerankOnce(db: Db, workspaceId: string, config: AppConf
     descriptionSnippet: stripHtml(job.descriptionMd ?? "").slice(0, SNIPPET_LENGTH),
   }));
 
-  const result = await rerankJobs(inputs, profile, {
-    models: config.aiFastModels,
-    apiKey: config.openrouterApiKey,
+  // The replay wrapper keys on the prompt, which quotes each listing's uuid —
+  // which is why the demo seed pins those ids (see `demoJobId`).
+  const result = await withReplay<RerankResult>({
+    mode: config.aiMode,
+    store: makeFsReplayStore(config.aiReplayDir),
+    taskId: REPLAY_TASK_ID,
+    prompt: buildRerankPrompt(inputs, profile),
+    schema: rerankResultSchema,
+    run: () => {
+      // Unreachable without a key: replay never calls `run`, and every other
+      // mode returned `skipped_no_key` above.
+      if (!apiKey) throw new Error("rerank: no api key outside replay mode");
+      return rerankJobs(inputs, profile, { models: config.aiFastModels, apiKey });
+    },
   });
 
   if (!result.ok || !result.value) {

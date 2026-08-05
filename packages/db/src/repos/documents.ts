@@ -1,7 +1,7 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { AnswerOrigin, ApprovalState, DocumentKind } from "@careerhq/contracts";
-import type { Db } from "../client.js";
-import { generatedDocuments } from "../schema/index.js";
+import type { Db, DbOrTx } from "../client.js";
+import { applications, generatedDocuments } from "../schema/index.js";
 import type { GeneratedDocument } from "../index.js";
 
 export interface CreateDocumentInput {
@@ -13,7 +13,7 @@ export interface CreateDocumentInput {
   origin?: AnswerOrigin; // default "ai"
 }
 
-export async function createDocument(db: Db, input: CreateDocumentInput): Promise<GeneratedDocument> {
+export async function createDocument(db: DbOrTx, input: CreateDocumentInput): Promise<GeneratedDocument> {
   const [doc] = await db.insert(generatedDocuments).values({
     applicationId: input.applicationId,
     kind: input.kind,
@@ -25,22 +25,36 @@ export async function createDocument(db: Db, input: CreateDocumentInput): Promis
   return doc!;
 }
 
+/**
+ * Scoped to `workspaceId` via the document's application (there is no
+ * `workspace_id` column on `generated_documents` itself) — mirrors
+ * `listReusableAnswers`'s application join so a document can only be
+ * approved/rejected by the workspace that owns its application.
+ */
 export async function setDocumentApproval(
-  db: Db,
+  db: DbOrTx,
+  workspaceId: string,
   id: string,
   approval: ApprovalState,
 ): Promise<GeneratedDocument | null> {
   const [updated] = await db.update(generatedDocuments).set({
     approval,
-    approvedAt: approval === "approved" ? sql`now()` : null,
-  }).where(eq(generatedDocuments.id, id)).returning();
+    approvedAt: approval === "approved" ? sql`clock_timestamp()` : null,
+  }).where(and(
+    eq(generatedDocuments.id, id),
+    inArray(
+      generatedDocuments.applicationId,
+      db.select({ id: applications.id }).from(applications).where(eq(applications.workspaceId, workspaceId)),
+    ),
+  )).returning();
   return updated ?? null;
 }
 
 export async function listDocuments(db: Db, applicationId: string): Promise<GeneratedDocument[]> {
   return db.select().from(generatedDocuments)
     .where(eq(generatedDocuments.applicationId, applicationId))
-    .orderBy(desc(generatedDocuments.createdAt));
+    // `id` last so equal-timestamped rows cannot swap places between renders.
+    .orderBy(desc(generatedDocuments.createdAt), asc(generatedDocuments.id));
 }
 
 /**

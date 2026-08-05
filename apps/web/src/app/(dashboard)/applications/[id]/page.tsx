@@ -8,6 +8,7 @@ import {
 } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { safeExternalHref } from "../../../../lib/safe-url.js";
 import { TransitionButtons } from "../transition-buttons.js";
 import { CvSelect } from "./cv-select.js";
 import { EmailPanel } from "./email-panel.js";
@@ -42,6 +43,7 @@ export default async function ApplicationDetailPage({
   const detail = await getApplicationDetail(db, id);
   if (!detail) notFound();
   const { application, job, events } = detail;
+  const safeJobUrl = safeExternalHref(job.url);
 
   const [company] = job.companyId
     ? await db.select().from(companiesTable).where(eq(companiesTable.id, job.companyId))
@@ -55,7 +57,16 @@ export default async function ApplicationDetailPage({
   const factClaims: Record<string, string> = Object.fromEntries(
     facts.map((fact) => [fact.id, fact.claim] as const),
   );
-  const aiAvailable = loadConfig().openrouterApiKey !== null;
+  // Replay mode answers from committed fixtures and opens no socket, so the
+  // hosted demo — `AI_MODE=replay` with no key deployed — must still offer the
+  // generate controls; without this the demo's replay fixtures are unreachable
+  // from the UI. `prepareGeneration` enforces the same rule server-side.
+  const aiConfig = loadConfig();
+  const aiAvailable = aiConfig.openrouterApiKey !== null || aiConfig.aiMode === "replay";
+  // The hosted demo (and only it) answers strangers from committed fixtures, so
+  // it is the one deployment where an unrecorded prompt needs explaining rather
+  // than reporting — see `lib/replay-miss.ts`.
+  const replayDemo = aiConfig.demoMode && aiConfig.aiMode === "replay";
   const answers = await listAnswers(db, application.id);
   const cvVariants = await listCvVariants(db, application.workspaceId);
   const emailConnections = await listEmailConnections(db, application.workspaceId);
@@ -77,9 +88,13 @@ export default async function ApplicationDetailPage({
       </h1>
       {job.url && (
         <p>
-          <a href={job.url} target="_blank" rel="noreferrer">
-            {job.url}
-          </a>
+          {safeJobUrl ? (
+            <a href={safeJobUrl} target="_blank" rel="noreferrer">
+              {job.url}
+            </a>
+          ) : (
+            job.url
+          )}
         </p>
       )}
       <p>
@@ -111,9 +126,15 @@ export default async function ApplicationDetailPage({
         documents={documents}
         factClaims={factClaims}
         aiAvailable={aiAvailable}
+        replayDemo={replayDemo}
       />
 
-      <QaPanel applicationId={application.id} answers={answers} factClaims={factClaims} />
+      <QaPanel
+        applicationId={application.id}
+        answers={answers}
+        factClaims={factClaims}
+        replayDemo={replayDemo}
+      />
 
       <EmailPanel
         applicationId={application.id}

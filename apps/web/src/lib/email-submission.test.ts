@@ -32,6 +32,8 @@ let masterKey: string;
 let workspaceId: string;
 let connectionId: string;
 let cvVariantId: string;
+/** A connection on the PERSONAL workspace pointed at a non-sandbox host — used to prove SANDBOX_FORCE_SAFE alone. */
+let otherHostConnectionId: string;
 /** A sandbox-kind workspace whose connection points somewhere other than SANDBOX_HOST. */
 let sandboxWorkspaceId: string;
 let sandboxConnectionId: string;
@@ -106,6 +108,11 @@ beforeAll(async () => {
   connectionId = (await createEmailConnection(db, {
     workspaceId, label: "Mailpit", fromAddress: "alex@careerhq.test", displayName: "Alex Demo",
     smtp: smtp(SANDBOX_HOST), smtpPassword: SMTP_PASSWORD,
+    retention: { mode: "metadata_only" }, masterKeyB64: masterKey,
+  })).id;
+  otherHostConnectionId = (await createEmailConnection(db, {
+    workspaceId, label: "Real mail on a personal workspace", fromAddress: "alex@careerhq.test",
+    smtp: smtp("smtp.production.example"), smtpPassword: SMTP_PASSWORD,
     retention: { mode: "metadata_only" }, masterKeyB64: masterKey,
   })).id;
 
@@ -283,6 +290,48 @@ d("email submission orchestrator", () => {
     if (outcome.status !== "blocked") return;
     expect(outcome.code).toBe("sandbox_blocked");
     expect((await getEmailAttempt(db, fixture.attemptId))?.status).toBe("PENDING_CONFIRMATION");
+  });
+
+  // Belt-and-braces (spec P6 §3): SANDBOX_FORCE_SAFE is an independent hard
+  // switch, not a DEMO_MODE alias — it must sandbox-block a PERSONAL
+  // workspace's live-looking send, proving the gate input's workspaceKind is
+  // actually forced rather than merely read from the (personal) workspace row.
+  it("forces the sandbox path for a PERSONAL workspace when SANDBOX_FORCE_SAFE is set → sandbox_blocked, nothing sent, token unburned", async () => {
+    const fixture = await draftedAttempt("Force Safe Co", { connection: otherHostConnectionId });
+    const token = await preview(fixture);
+
+    const sent: SentMail[] = [];
+    const outcome = await confirmAndSend(deps({
+      config: config({ SANDBOX_FORCE_SAFE: "true" }),
+      makeTransport: () => stubTransport({ kind: "sent" }, sent),
+    }), {
+      workspaceId, attemptId: fixture.attemptId, presentedToken: token, retypedTarget: "careers@acme.test",
+    });
+
+    expect(outcome.status).toBe("blocked");
+    if (outcome.status !== "blocked") return;
+    expect(outcome.code).toBe("sandbox_blocked");
+    expect(sent).toHaveLength(0); // the transport was never opened
+
+    // Nothing was burned: the token still works once the flag is off (below).
+    const attempt = await getEmailAttempt(db, fixture.attemptId);
+    expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+    const confirmation = await getActiveConfirmation(db, fixture.attemptId);
+    expect(confirmation?.consumedAt ?? null).toBeNull();
+  });
+
+  // Guard: the exact same PERSONAL-workspace + off-allow-list-host case must
+  // NOT be sandbox-blocked with the flag off — proving the flag, not
+  // something else about the fixture, is what blocked the test above.
+  it("does not sandbox-block the same personal-workspace case when SANDBOX_FORCE_SAFE is false", async () => {
+    const fixture = await draftedAttempt("Not Forced Co", { connection: otherHostConnectionId });
+    const token = await preview(fixture);
+
+    const outcome = await confirmAndSend(deps({ config: config({ SANDBOX_FORCE_SAFE: "false" }) }), {
+      workspaceId, attemptId: fixture.attemptId, presentedToken: token, retypedTarget: "careers@acme.test",
+    });
+
+    expect(outcome.status).toBe("submitted");
   });
 
   it("blocks a confirm when the application has drifted out of READY_FOR_REVIEW → application_not_ready, nothing sent, token unburned", async () => {

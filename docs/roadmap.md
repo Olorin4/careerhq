@@ -74,17 +74,54 @@ Carried from the P4 final review (land in P5, all minor/deferred — no correctn
 
 **Demo:** full end-to-end auto-apply against `demo-ats`.
 
-## P6 — Hosted demo and portfolio polish
+## P6 — Hosted demo and portfolio polish (done)
 
 Delivered (2026-08-04, `feature/attestation-consent`, ahead of and outside this phase's numbered plan): the field-level-consent design the P5 final review proposed for reconsideration here has shipped. `detectBlockers` no longer treats a required legal-attestation *checkbox* as a permanent page-level blocker — the review screen renders it as an explicit, never-pre-ticked checkbox next to the exact attestation wording, and only the user's own click sets `source: "user"` into the fingerprinted payload and the confirmed receipt (spec §10.6, revised in spec v0.4 — see [ADR-0007](adr/0007-canonical-form-schema.md)'s revision note). Consent is never reused across applications (`CONSENT_ONLY_FIELDS`, `packages/core/src/autoapply/plan.ts`). A required attestation that is *not* a checkbox — a typed signature, a signature-date field, anything that cannot be rendered as one honest tick — still pauses the attempt exactly as before; `demo-ats`'s `/signature/jobs/:id` fixture is that case's CI/demo proof.
 
-- **Live-page re-verification before typing** (carried from the `feature/attestation-consent` final review, F5): the driver fills from the `RawFormPage` captured at prepare time and re-extracts at submit time, but it never checks that the field under a selector still asks the question the user reviewed. A page edited between review and submit could therefore receive an answer planned for a different field — pre-existing in kind (it predates the consent work), but it matters most for a consent tick, whose whole meaning is the statement it sits next to. Options: pin a per-field label/nearby-text hash into the snapshot and refuse the fill on a mismatch, or fold the re-extracted labels into the payload fingerprint so the confirmation simply fails.
-- `docker-compose.demo.yml`: sandbox workspace, `SANDBOX_FORCE_SAFE`, Mailpit egress, demo-ats allowlist, AI replay mode, 6-hour reset job, mutation rate limits, demo banner.
-- VPS deployment behind reverse-proxy TLS; public demo URL.
-- Docs complete: architecture diagrams current, full ADR set, `SECURITY.md`, license.
-- README final: screenshot gallery, 2–3 minute demo video, one-command quickstart, backup/restore procedure.
+- **Live-page re-verification before typing** (carried from the `feature/attestation-consent` final review as F5) — **done** in `b848f93` and hardened in `3248d4a`. Before a keystroke, the driver refuses to fill a control unless it still has the same id, the same field-identity hash (selector *and* the question beside it) and the same `CanonicalFormField.kind` it had at review, checked from both the live page's side and the reviewed side. A mismatch throws pre-click, so the refusal costs nothing: the orchestrator undoes `beginSubmission` — the confirmation goes back to unconsumed and the attempt back to `PENDING_CONFIRMATION` — and the same token confirms again once the page matches what was reviewed, instead of the attempt being parked `NEEDS_RECONCILE`. (Corrected in the P6 final branch review: until then it was `FAILED` with the token spent, which is not retryable at all.) The residual gaps are carried below.
+- **DNS-name SSRF** (found by the Task 2 review, partially closed in `7429766`, redirect half closed in `5d5c1ec`): see the carried list below — the entry there is the current, corrected wording and this line is only a pointer, not a second copy.
+- `docker-compose.demo.yml`: sandbox workspace, `SANDBOX_FORCE_SAFE`, Mailpit egress, demo-ats allowlist, AI replay mode, 6-hour reset job, mutation rate limits, demo banner — plus hard `mem_limit`s, log rotation, and a profiled one-shot `migrate` service so a fresh box needs no Node toolchain.
+- Demo safety as a runtime mode, not a fork: `DEMO_MODE` resolves the sandbox workspace, disables credential setup server-side, arms the per-action rate limiter, and schedules a transactional six-hourly wipe-and-reseed that a personal deployment never so much as registers.
+- Disk ceilings a reset gives back: 2 MB per CV and a 64 MB/100-file store in demo mode, a shared 64 MB/200-file ceiling for auto-apply evidence screenshots reserved *before* the submit click, and Next's server-action body limit raised to 6 MB so the app's own caps are the ones that decide.
+- Global browser-concurrency limit with an honest refusal, holding the slot across a whole confirm so a refusal cannot burn a confirmation token.
+- AI replay fixtures for every demo flow, so the demo spends no tokens and depends on no provider's uptime.
+- VPS deployment behind the existing `edge-nginx` reverse-proxy TLS; public demo URL <https://careerhq.nickkalas.dev>.
+- Docs complete: architecture diagram refreshed with the demo overlay and the edge proxy, full ADR set, [`SECURITY.md`](../SECURITY.md), MIT [`LICENSE`](../LICENSE), and [`runbook-demo.md`](runbook-demo.md) with real deploy/update/reset/backup/restore/rollback commands.
+- README final: screenshot gallery, walkthrough recording, one-command quickstart verified from a clean clone, complete env table.
 
 **Demo:** the public URL, and `git clone && docker compose up`.
+
+### Carried beyond P6
+
+Found by execution during P6 and deliberately not fixed, each with the reason it was left. A deferred item without its rationale gets re-litigated or silently dropped, so the reasoning is part of the entry. The security-relevant ones are also stated in [`SECURITY.md`](../SECURITY.md); the two documents are meant to agree.
+
+**Security**
+
+- **DNS-name SSRF — resolve-then-pin.** The capture policy refuses non-`http(s)` URLs and literal private/loopback/link-local/CGNAT/benchmarking/IPv6-translation hosts, and it re-applies itself at **every redirect hop** — judged from the `Location` header before the hop is requested. (An earlier version of this entry claimed the hosted demo was unaffected because the sandbox host allow-list is a separate, earlier layer. That was wrong and was proven wrong: until `5d5c1ec`, one `302` from the allow-listed host to `127.0.0.1` walked straight through. The allow-list narrows which *first* host may be visited; it never constrained where that host could send the browser next.) What remains is that the check is on the *literal* host, so a DNS name resolving to a private address still passes. Closing it needs resolve → reject the resolved address → connect to the pinned IP, so the name cannot be re-resolved between check and fetch.
+- **Non-GET navigations are not chain-walked.** The submit POST is policy-checked on its target and backstopped by a landed-URL assertion, but that assertion lands *after* the click. Walking a multipart POST's redirects via `route.fetch` was judged worse than the gap: replaying the request risks submitting an application twice.
+- **The sandbox allow-list names a host, not an origin**, so a sandbox pointed at `localhost` can still reach any port on it.
+- **A post-click `writeFile` failure in `runSubmitJob` throws, and pg-boss would retry it — a double submit.** Unreachable today because neither auto-apply consumer is registered in `apps/worker/src/main.ts`. **This is a hard precondition on ever registering them**, not a nice-to-have: double submission is the failure mode the entire gated protocol exists to prevent.
+
+**Correctness**
+
+- **A field that disappears between review and submit is not always caught.** The identity check compares fields the live extraction returned; requiring presence outright would break multi-step forms whose later controls do not exist in the first extraction. Step scoping is what keeps that workable, and "rendered steps" is inferred from a single pre-click extraction — so a form whose later-step fields are *replaced* rather than revealed after "Next" is not judged. Needs a per-step design. Matters most for a consent tick.
+- **`NEEDS_RECONCILE` screenshot paths are persisted to no row**, so in demo mode the evidence collector reclaims the file after five minutes while the attempt's reason still tells the user to check it. Fix: persist the path onto the snapshot's `recovery_state`, as the worker already does elsewhere.
+- **Three of 1,549 reads can straddle a demo reset commit.** Resolving the workspace and counting applications are two statements; the data is never half-built, but a page load can catch the boundary. Needs a read transaction in `apps/web`.
+
+**Operational**
+
+- **Rate limiting is per-process and per-action, not per-visitor.** One aggressive visitor consumes the shared budget for everyone. The browser cap has the same shape — per process, so `web` and `worker` can each hold one Chromium. A host-wide cap needs `pg_try_advisory_lock` or equivalent outside both processes.
+- **Eleven mutating server actions remain unthrottled** across `applications/`, `facts/`, `inbox/` and `settings/actions.ts`. None is dangerous on a public URL: they write rows, which the six-hourly reset reclaims — unlike `uploadCv`, which wrote files it did not. Six are one-line fixes; five return `void` and need a `useActionState` conversion across three pages. Do it as **one complete pass** — throttling one action but not its neighbour in the same file advertises a guarantee the file lacks.
+- **`apps/worker/src/autoapply/driver.test.ts:584` asserts `toEqual([])` absolutely** where every sibling uses a scoped delta, so a `demo-ats` instance holding a submission from an earlier run turns it red with no code change. Make it a scoped delta.
+- **Free-text fields have no `.max()`** — `notes`, `claim`, `detail` and the scoring textareas are bounded only by Next's server-action body limit. That limit is now 6 MB and applies to *every* action, so the previously-1 MB implicit bound on these row writes is six times looser than it was, which makes adding the caps more worthwhile than it was when they were skipped.
+
+**The identity check now fails closed — a trade made deliberately in `3248d4a`**
+
+- **The driver is strictly more willing to refuse than before, and no real ATS was available to probe it against — only `demo-ats`.** After the consent-bypass fix, a fill is refused unless the field has the same id, the same `fieldIdentityHash`, *and* the same `CanonicalFormField.kind`. What to watch when this first meets a real Greenhouse or Lever page: an ATS that legitimately re-renders a control into a different `type`, or reveals a field conditionally *within the same step*, will be refused; step scoping is the only thing preventing multi-step breakage, and a form whose later-step fields are replaced rather than revealed would be refused (no committed test covers that shape, since `demo-ats` renders all steps up front); and T6's original tolerance for a field that *disappears* is deliberately reversed for rendered steps. Refusing is the safe direction — a refusal is pre-click and genuinely retryable (the confirmation is handed back unspent; see the entry above), whereas the bug it replaced sent a consent the user had declined. But if false refusals show up against a real ATS, the fix is to narrow the `kind` comparison, **not** to restore the old skip.
+
+**Verification practice** (worth stating here, and in CONTRIBUTING when there is one)
+
+- **A green `pnpm build` plus a green Vitest run does not prove the app works.** Vitest resolves through Node; Next compiles server actions through a separate webpack pass with different semantics. Two real bugs shipped through a fully green gate this phase: `import.meta.dirname` undefined in the flight-action bundle (every `/applications/[id]` action 500'd while 204 tests passed), and a module-level `Map` instantiated once per bundle rather than once per process (the rate limiter's counters silently unshared). Anything touching a server action, an API route, or module-level state in `apps/web` must be verified against a real `next start`.
 
 ## P7 — Restricted-source connector (optional, post-core)
 

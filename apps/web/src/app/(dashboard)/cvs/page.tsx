@@ -1,8 +1,10 @@
 import { listCvVariants } from "@careerhq/db";
 import { CV_FORMATS } from "@careerhq/contracts";
+import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../lib/db.js";
+import { cvSizeLimit } from "../../../lib/cv-storage.js";
 import { getActiveWorkspace } from "../../../lib/workspace.js";
-import { uploadCvAction } from "./actions.js";
+import { CvUploadForm } from "./cv-upload-form.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -22,28 +24,17 @@ export default async function CvsPage() {
   return (
     <main>
       <h1>CV variants</h1>
-      <form action={uploadCvAction} className="cv-form">
-        <h2>Upload CV</h2>
-        <label>
-          Label
-          <input name="label" type="text" required />
-        </label>
-        <label>
-          Format
-          <select name="format" required defaultValue={CV_FORMATS[0]}>
-            {CV_FORMATS.map((format) => (
-              <option key={format} value={format}>
-                {humanize(format)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          PDF file
-          <input name="file" type="file" accept="application/pdf" required />
-        </label>
-        <button type="submit">Upload</button>
-      </form>
+      {/* `humanize` runs here, on the server: a "use client" module's exports
+          are client references, so the form takes already-labelled options
+          rather than importing the helper across the boundary. `cvSizeLimit`
+          crosses the same way and for a stronger reason — its module reads the
+          filesystem, so the form takes the resolved cap and its wording, not
+          the function. */}
+      <CvUploadForm
+        formats={CV_FORMATS.map((format) => ({ value: format, label: humanize(format) }))}
+        sizeLimit={cvSizeLimit(loadConfig().demoMode)}
+      />
+
       {variants.length === 0 ? (
         <p className="cv-empty">No CV variants uploaded yet.</p>
       ) : (

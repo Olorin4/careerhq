@@ -5,6 +5,7 @@ import { documentKindSchema } from "@careerhq/contracts";
 import { createDocument, setDocumentApproval } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { demoRateLimit } from "../../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import { runGeneration, type GenerationOutcome } from "../../../../lib/generation.js";
 
@@ -23,6 +24,17 @@ export async function generateDocumentAction(
   raw: { applicationId: string; kind: string },
 ): Promise<GenerationOutcome> {
   const args = generateSchema.parse(raw);
+  // "generateDocument" is deliberately the SSE route's bucket too
+  // (`app/api/generate/stream/route.ts`): they are two transports for one
+  // user-visible click, so one budget covers both — driving the pair must not
+  // buy twice the generations. That only holds because rate-limit.ts keeps its
+  // counters on `globalThis`: this action and that route are compiled into
+  // different Next.js server bundles, and a module-level Map would give each
+  // its own counter (P6 task-3 review, B1). (A "use server" module may only
+  // export async functions, so the name is repeated here rather than shared as
+  // a const.)
+  const limited = demoRateLimit("generateDocument");
+  if (limited) return { status: "failed", error: limited };
   const db = getDb();
   const config = loadConfig();
   const ws = await getActiveWorkspace(db);
@@ -36,20 +48,31 @@ export async function generateDocumentAction(
 
 const approvalIdSchema = z.object({ id: z.string().uuid() });
 
-export async function approveDocumentAction(raw: { id: string }): Promise<{ ok: boolean }> {
+/** Carries a reason so the panel can say WHY, rather than only that it failed. */
+export type ApprovalActionResult = { ok: true } | { ok: false; reason: string };
+
+async function setApproval(
+  raw: { id: string },
+  approval: "approved" | "rejected",
+  bucket: string,
+): Promise<ApprovalActionResult> {
   const { id } = approvalIdSchema.parse(raw);
+  const limited = demoRateLimit(bucket);
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
-  const updated = await setDocumentApproval(db, id, "approved");
-  if (updated) revalidatePath(`/applications/${updated.applicationId}`);
-  return { ok: updated !== null };
+  const ws = await getActiveWorkspace(db);
+  const updated = await setDocumentApproval(db, ws.id, id, approval);
+  if (!updated) return { ok: false, reason: "this document no longer exists" };
+  revalidatePath(`/applications/${updated.applicationId}`);
+  return { ok: true };
 }
 
-export async function rejectDocumentAction(raw: { id: string }): Promise<{ ok: boolean }> {
-  const { id } = approvalIdSchema.parse(raw);
-  const db = getDb();
-  const updated = await setDocumentApproval(db, id, "rejected");
-  if (updated) revalidatePath(`/applications/${updated.applicationId}`);
-  return { ok: updated !== null };
+export async function approveDocumentAction(raw: { id: string }): Promise<ApprovalActionResult> {
+  return setApproval(raw, "approved", "approveDocument");
+}
+
+export async function rejectDocumentAction(raw: { id: string }): Promise<ApprovalActionResult> {
+  return setApproval(raw, "rejected", "rejectDocument");
 }
 
 const manualDocumentSchema = z.object({
@@ -59,13 +82,32 @@ const manualDocumentSchema = z.object({
 });
 
 /**
+ * What a refused manual save hands back: the reason, plus the text that was
+ * submitted. The text matters as much as the reason — React resets an
+ * uncontrolled form once its action resolves, so without carrying the content
+ * back for the textarea to re-seed its `defaultValue` from, a refused save
+ * would silently discard what the user had just typed and restore the last
+ * saved draft (P6 task-3 review, advisory C). `null` means saved.
+ */
+export type ManualDocumentState = { reason: string; content: string } | null;
+
+/**
  * The manual editor's save action. Always inserts a new draft row with
  * `origin: "user"` — documents are append-only history, not edited in
  * place, so a manual edit (even of a previously AI-drafted document) becomes
  * its own new latest version rather than mutating the AI-authored row.
+ *
+ * Shaped for `useActionState`: it returns why it did nothing (or null on
+ * success) rather than throwing, so a rate-limited save is reported in the
+ * form and the typed draft survives it.
  */
-export async function createManualDocumentAction(formData: FormData): Promise<void> {
+export async function createManualDocumentAction(
+  _previous: ManualDocumentState,
+  formData: FormData,
+): Promise<ManualDocumentState> {
   const input = manualDocumentSchema.parse(Object.fromEntries(formData));
+  const limited = demoRateLimit("createManualDocument");
+  if (limited) return { reason: limited, content: input.content };
   const db = getDb();
   await createDocument(db, {
     applicationId: input.applicationId,
@@ -75,4 +117,5 @@ export async function createManualDocumentAction(formData: FormData): Promise<vo
     origin: "user",
   });
   revalidatePath(`/applications/${input.applicationId}`);
+  return null;
 }

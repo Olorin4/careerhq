@@ -2,6 +2,7 @@ import { listFacts, isFactStale, type CandidateFact } from "@careerhq/db";
 import { FACT_CATEGORIES } from "@careerhq/contracts";
 import { getDb } from "../../../lib/db.js";
 import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { safeExternalHref } from "../../../lib/safe-url.js";
 import { FactForm } from "./fact-form.js";
 import { reverifyFactAction, archiveFactAction } from "./actions.js";
 
@@ -64,6 +65,7 @@ function FactRow({
   stale: boolean;
   reviewByDefault: string;
 }) {
+  const safeEvidenceUrl = safeExternalHref(fact.evidenceUrl);
   return (
     <li className="fact-row">
       <div className="fact-row-main">
@@ -79,9 +81,13 @@ function FactRow({
       </div>
       {fact.detail && <p className="fact-row-detail">{fact.detail}</p>}
       {fact.evidenceUrl && (
-        <a href={fact.evidenceUrl} target="_blank" rel="noreferrer">
-          Evidence
-        </a>
+        safeEvidenceUrl ? (
+          <a href={safeEvidenceUrl} target="_blank" rel="noreferrer">
+            Evidence
+          </a>
+        ) : (
+          <span className="fact-row-detail">{fact.evidenceUrl}</span>
+        )
       )}
       <p className="fact-row-dates">
         Verified {fact.verifiedAt.toLocaleDateString()} · Review by{" "}

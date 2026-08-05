@@ -7,6 +7,7 @@ import {
 } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { demoRateLimit } from "../../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import {
   confirmAndSend, previewSubmission, type ConfirmOutcome, type PreviewOutcome,
@@ -18,6 +19,12 @@ import {
  * to call as server actions. None of these add business logic of their own —
  * every real decision (editability, gate checks, receipts) lives in the
  * functions they wrap.
+ *
+ * The one thing they do add is the demo rate limit (spec P6 §3): it is checked
+ * first, before any state is read and long before anything irreversible, so a
+ * throttled call leaves the attempt exactly as it found it. It composes with
+ * the gate matrix rather than replacing any part of it — outside demo mode
+ * `demoRateLimit` is a no-op and nothing below changes at all.
  */
 
 function applicationPath(applicationId: string): string {
@@ -36,6 +43,8 @@ export type DraftActionResult =
 
 export async function createEmailAttemptAction(raw: unknown): Promise<DraftActionResult> {
   const { applicationId, connectionId, draft } = draftInputSchema.parse(raw);
+  const limited = demoRateLimit("createEmailAttempt");
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
   const attempt = await createEmailAttempt(db, { applicationId, draft, connectionId });
   revalidatePath(applicationPath(applicationId));
@@ -51,6 +60,8 @@ const updateInputSchema = z.object({
 
 export async function updateEmailDraftAction(raw: unknown): Promise<DraftActionResult> {
   const { applicationId, attemptId, connectionId, draft } = updateInputSchema.parse(raw);
+  const limited = demoRateLimit("updateEmailDraft");
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
   const updated = await updateEmailDraft(db, attemptId, draft, connectionId);
   revalidatePath(applicationPath(applicationId));
@@ -63,6 +74,8 @@ const previewInputSchema = z.object({ applicationId: z.string().uuid(), attemptI
 
 export async function previewSubmissionAction(raw: unknown): Promise<PreviewOutcome> {
   const { applicationId, attemptId } = previewInputSchema.parse(raw);
+  const limited = demoRateLimit("previewSubmission");
+  if (limited) return { status: "blocked", reason: limited };
   const db = getDb();
   const config = loadConfig();
   const ws = await getActiveWorkspace(db);
@@ -80,6 +93,10 @@ const confirmInputSchema = z.object({
 
 export async function confirmAndSendAction(raw: unknown): Promise<ConfirmOutcome> {
   const { applicationId, attemptId, presentedToken, retypedTarget } = confirmInputSchema.parse(raw);
+  // Before `confirmAndSend` and therefore before the token is burned, before
+  // `beginSubmission` and before any transport is built.
+  const limited = demoRateLimit("confirmAndSend");
+  if (limited) return { status: "blocked", code: "rate_limited", reason: limited };
   const db = getDb();
   const config = loadConfig();
   const ws = await getActiveWorkspace(db);
@@ -102,6 +119,8 @@ export type ReconcileActionResult = { ok: true } | { ok: false; reason: string }
 
 export async function resolveReconcileAction(raw: unknown): Promise<ReconcileActionResult> {
   const { applicationId, attemptId, resolution, evidenceNote } = reconcileInputSchema.parse(raw);
+  const limited = demoRateLimit("resolveReconcile");
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
   const result = await resolveReconcile(db, {
     attemptId,

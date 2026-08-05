@@ -1,0 +1,45 @@
+# Third overlay, applied ONLY on a box that fronts the demo with the shared
+# `edge` reverse proxy (the Hetzner VPS). Kept separate from
+# docker-compose.demo.yml on purpose: that file must stay runnable on a laptop,
+# and `edge` is an external network that exists only where the proxy lives —
+# declaring it there would break every local `docker compose up` with
+# "network edge declared as external, but could not be found".
+#
+#   docker compose -f infra/docker-compose.yml \
+#                  -f infra/docker-compose.demo.yml \
+#                  -f infra/docker-compose.edge.yml up -d --build
+#
+# What it changes, and why each is necessary:
+#
+#  * `web` joins the external `edge` network in ADDITION to the project's own
+#    default network, so it can still reach postgres/mailpit/demo-ats by service
+#    name while also being reachable from `edge-nginx`.
+#
+#  * `web` gets a fixed container_name. The vhost proxies to it by name
+#    (`proxy_pass http://careerhq-web:3000`), matching how the box's other
+#    stacks are wired (see outreach.getkelevo.conf). A generated name like
+#    `careerhq-web-1` would change with the project directory and silently
+#    break the proxy.
+#
+#  * The host port publish is REMOVED. docker-compose.demo.yml publishes
+#    127.0.0.1:3100 so a box without an edge proxy can still be reached; here
+#    the proxy talks to the container directly over `edge`, so publishing a host
+#    port would be a second, unnecessary way in. Note `127.0.0.1:3100` was never
+#    reachable from `edge-nginx` anyway — inside that container 127.0.0.1 is
+#    nginx's own loopback, not the host's.
+#
+# Nothing else joins `edge`: postgres, mailpit, demo-ats and worker stay on the
+# project network only, so Mailpit's UI and the fictional ATS remain unreachable
+# from outside the stack.
+
+services:
+    web:
+        container_name: careerhq-web
+        ports: !reset []
+        networks:
+            - default
+            - edge
+
+networks:
+    edge:
+        external: true

@@ -1,18 +1,39 @@
-import { asc, eq } from "drizzle-orm";
-import { workspaces, type Db } from "@careerhq/db";
+import type { WorkspaceKind } from "@careerhq/contracts";
+import { loadConfig } from "@careerhq/config";
+import { and, asc, eq } from "drizzle-orm";
+// `DbOrTx`, not `Db`, for the same reason apps/web's resolver takes one: the
+// demo-mode branch can only be tested against a row set this suite controls,
+// and establishing that row set on a shared database is only safe inside a
+// transaction that rolls back.
+import { DEMO_WORKSPACE_NAME, workspaces, type DbOrTx } from "@careerhq/db";
+
+export interface GetPersonalWorkspaceIdOptions {
+  /** Defaults to `loadConfig().demoMode` — pass explicitly only in tests. */
+  demoMode?: boolean;
+}
 
 /**
- * Resolves the single-tenant app's personal workspace for scheduled jobs. Mirrors the
- * ordering rule in apps/web/src/lib/workspace.ts (oldest personal workspace, id as
- * tiebreaker) without importing across the apps/packages boundary — the worker only needs
- * the selection, not web's bootstrap-on-missing behavior, so it returns null rather than
- * creating a workspace when none exists yet (e.g. before the seed has run).
+ * Resolves the single-tenant app's active workspace id for scheduled jobs:
+ * personal normally, or sandbox in demo mode (spec P6 §3) — the same switch
+ * apps/web/src/lib/workspace.ts's `getActiveWorkspace` uses, so the reset/sync
+ * jobs operate on the same workspace the web app serves. Mirrors that
+ * resolver's predicate exactly — including the demo-mode name match, without
+ * which a reset (which drops and recreates the demo workspace) could leave the
+ * worker on a different, older sandbox row than the one the web app serves —
+ * without importing across the apps/packages boundary. The worker only needs
+ * the selection, not web's bootstrap-on-missing behavior, so it returns null
+ * rather than creating a workspace when none exists yet (e.g. before the seed,
+ * or before the demo reset job has run in demo mode).
  */
-export async function getPersonalWorkspaceId(db: Db): Promise<string | null> {
+export async function getPersonalWorkspaceId(db: DbOrTx, opts: GetPersonalWorkspaceIdOptions = {}): Promise<string | null> {
+  const demoMode = opts.demoMode ?? loadConfig().demoMode;
+  const kind: WorkspaceKind = demoMode ? "sandbox" : "personal";
   const [ws] = await db
     .select({ id: workspaces.id })
     .from(workspaces)
-    .where(eq(workspaces.kind, "personal"))
+    .where(demoMode
+      ? and(eq(workspaces.kind, kind), eq(workspaces.name, DEMO_WORKSPACE_NAME))
+      : eq(workspaces.kind, kind))
     .orderBy(asc(workspaces.createdAt), asc(workspaces.id))
     .limit(1);
   return ws?.id ?? null;

@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./gates": { "types": "./dist/gates/index.d.ts", "default": "./dist/gates/index.js" }
+    "./gates": { "types": "./dist/gates/index.d.ts", "default": "./dist/gates/index.js" },
+    "./storage": { "types": "./dist/storage/index.d.ts", "default": "./dist/storage/index.js" }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -14,5 +15,5 @@
     "test": "vitest run"
   },
   "dependencies": { "@careerhq/contracts": "workspace:*" },
-  "devDependencies": { "vitest": "^3.2.0" }
+  "devDependencies": { "@types/node": "^22.0.0", "vitest": "^3.2.0" }
 }

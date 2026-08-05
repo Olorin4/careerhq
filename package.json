@@ -11,6 +11,7 @@
     "test": "turbo run test",
     "format": "prettier --write .",
     "seed": "pnpm --filter @careerhq/db seed",
+    "demo:media": "tsx scripts/capture-demo-media.ts",
     "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs"
   },
   "devDependencies": {
@@ -20,6 +21,8 @@
     "eslint": "^9.30.0",
     "typescript-eslint": "^8.35.0",
     "@eslint/js": "^9.30.0",
-    "dependency-cruiser": "^16"
+    "dependency-cruiser": "^16",
+    "playwright": "1.62.1",
+    "tsx": "^4.20.0"
   }
 }

@@ -3,7 +3,7 @@ import {
   retentionSettingSchema,
   type ApplicationState, type MatchMethod, type ReplyClassification, type SuggestionState,
 } from "@careerhq/contracts";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import {
   applications, companies, emailConnections, emailMessages, jobs,
 } from "../schema/index.js";
@@ -40,6 +40,13 @@ export interface RecordOutboundMessageInput {
   toAddrs: string[];
   subject: string;
   applicationId: string;
+  /**
+   * When the message left. Defaults to now, which is right for every real send
+   * — the caller runs moments after SMTP accepted it. Only backdated by the
+   * demo seed, which builds a thread whose reply must sort after the message it
+   * replies to (`listMessagesForApplication` orders by `received_at`).
+   */
+  sentAt?: Date;
 }
 
 /**
@@ -50,7 +57,7 @@ export interface RecordOutboundMessageInput {
  * Idempotent on (workspace, messageId): the caller runs right after a send it
  * has already recorded a receipt for, and a retry there must never 23505.
  */
-export async function recordOutboundMessage(db: Db, input: RecordOutboundMessageInput): Promise<void> {
+export async function recordOutboundMessage(db: DbOrTx, input: RecordOutboundMessageInput): Promise<void> {
   const [connection] = await db.select({ fromAddress: emailConnections.fromAddress })
     .from(emailConnections).where(eq(emailConnections.id, input.connectionId));
 
@@ -64,7 +71,7 @@ export async function recordOutboundMessage(db: Db, input: RecordOutboundMessage
     subject: input.subject,
     applicationId: input.applicationId,
     matchMethod: "manual",
-    receivedAt: new Date(),
+    receivedAt: input.sentAt ?? new Date(),
   }).onConflictDoNothing({ target: [emailMessages.workspaceId, emailMessages.messageId] });
 }
 
@@ -88,7 +95,7 @@ export interface UpsertInboundMessageInput {
  * file) it would otherwise pay for again.
  */
 export async function upsertInboundMessage(
-  db: Db,
+  db: DbOrTx,
   input: UpsertInboundMessageInput,
 ): Promise<{ inserted: boolean; id: string }> {
   const { msg } = input;
@@ -191,7 +198,9 @@ export async function buildSenderDomainIndex(db: Db, workspaceId: string): Promi
 export async function listMessagesForApplication(db: Db, applicationId: string): Promise<EmailMessage[]> {
   return db.select().from(emailMessages)
     .where(eq(emailMessages.applicationId, applicationId))
-    .orderBy(asc(emailMessages.receivedAt));
+    // `id` last so two messages sharing a received_at (a threaded reply and
+    // its cc, say) render in the same order every time.
+    .orderBy(asc(emailMessages.receivedAt), asc(emailMessages.id));
 }
 
 /** The suggestion queue: everything still awaiting a human accept/dismiss, newest first. */
@@ -201,7 +210,7 @@ export async function listPendingSuggestions(db: Db, workspaceId: string): Promi
       eq(emailMessages.workspaceId, workspaceId),
       eq(emailMessages.suggestionState, "pending"),
     ))
-    .orderBy(desc(emailMessages.receivedAt));
+    .orderBy(desc(emailMessages.receivedAt), asc(emailMessages.id));
 }
 
 export interface SetClassificationInput {
@@ -216,7 +225,7 @@ export interface SetClassificationInput {
 
 /** Records a model verdict against a stored message. `id` is the `email_messages` row id. */
 export async function setClassification(
-  db: Db,
+  db: DbOrTx,
   id: string,
   input: SetClassificationInput,
 ): Promise<void> {

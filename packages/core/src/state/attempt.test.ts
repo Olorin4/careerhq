@@ -28,6 +28,19 @@ describe("attempt lifecycle (architecture §3)", () => {
     // an option, only SUBMITTED/FAILED/NEEDS_RECONCILE are.
     expect(canAttemptTransition("SUBMITTING", "BLOCKED").ok).toBe(false);
   });
+  it("rewinds SUBMITTING → PENDING_CONFIRMATION, but never past it", () => {
+    // The pre-click refusal: the driver never touched the submit button, so the
+    // attempt goes back to awaiting its (un-consumed) confirmation.
+    expect(canAttemptTransition("SUBMITTING", "PENDING_CONFIRMATION").ok).toBe(true);
+    // And no further: rewinding to READY or DRAFT would drop the pinned
+    // fingerprints the confirmation was issued against.
+    expect(canAttemptTransition("SUBMITTING", "READY").ok).toBe(false);
+    expect(canAttemptTransition("SUBMITTING", "DRAFT").ok).toBe(false);
+    // The ambiguous post-click parking has no way back — a click that may have
+    // landed is never made retryable.
+    expect(canAttemptTransition("NEEDS_RECONCILE", "PENDING_CONFIRMATION").ok).toBe(false);
+  });
+
   it("NEEDS_RECONCILE resolves only to SUBMITTED or FAILED (human decision)", () => {
     expect(canAttemptTransition("NEEDS_RECONCILE", "SUBMITTED").ok).toBe(true);
     expect(canAttemptTransition("NEEDS_RECONCILE", "FAILED").ok).toBe(true);

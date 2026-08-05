@@ -7,10 +7,13 @@ import type { FallbackOptions, GenerateInput } from "@careerhq/ai";
 import type { GenerationResult } from "@careerhq/contracts";
 import { loadConfig, type AppConfig } from "@careerhq/config";
 import {
-  createApplication, createDb, createFact, jobs as jobsTable, listAnswers, listDocuments,
-  workspaces, type Db,
+  applications, companies as companiesTable, createApplication, createDb, createFact,
+  jobs as jobsTable, listAnswers, listDocuments, lockDemoSeed, seedDemoWorkspace, workspaces,
+  type Db,
 } from "@careerhq/db";
-import { prepareGeneration, runGeneration, type GenerationDeps } from "./generation";
+import {
+  prepareGeneration, runGeneration, type GenerationArgs, type GenerationDeps,
+} from "./generation";
 
 const url = process.env.TEST_DATABASE_URL;
 const d = describe.skipIf(!url);
@@ -359,4 +362,121 @@ d("prepareGeneration", () => {
     });
     expect(prepared).toEqual({ ready: false, outcome: { status: "ai_unavailable" } });
   });
+});
+
+/**
+ * The hosted demo's premise, asserted end to end (spec P6 §3, Task 8): it
+ * deploys with `AI_MODE=replay` and **no** `OPENROUTER_API_KEY`, so every AI
+ * answer a visitor sees has to come out of a committed fixture in
+ * `packages/ai/fixtures/replay/`.
+ *
+ * Two things are being proved here, and neither is "the fixture files exist":
+ *
+ *  1. a keyless replay run reaches the model layer at all (the api-key gate
+ *     used to refuse it before anything else ran), and
+ *  2. the fixtures still *hit* against a freshly reset demo workspace — which
+ *     they only can because `demo-seed.ts` pins its fact ids. Every run of this
+ *     suite reseeds, so a change that unpins them fails here rather than six
+ *     hours after a deploy.
+ *
+ * `generate` is a stub that throws: reaching it would mean the run tried to
+ * talk to OpenRouter, which is the failure this whole arrangement exists to
+ * make impossible.
+ */
+d("the hosted demo's keyless replay path", () => {
+  /**
+   * Seeding runs inside a rolled-back transaction holding the demo seed's own
+   * advisory lock, exactly like `apps/worker/src/lib/workspace.test.ts`: the
+   * seed's delete predicate is database-global, `jobs/demo-reset.test.ts` runs
+   * resets in parallel with this file, and without the lock one of them would
+   * delete this test's workspace between the seed and the assertions. The
+   * rollback is why running this suite never disturbs a real demo workspace.
+   */
+  async function inSeededDemoWorkspace(
+    body: (tx: Db, workspaceId: string) => Promise<void>,
+  ): Promise<void> {
+    const ROLLBACK = new Error("rollback: this test must leave no trace");
+    await expect(db.transaction(async (tx) => {
+      await lockDemoSeed(tx);
+      // The seed only needs a transaction handle; drizzle nests its own
+      // `db.transaction` on this one as a savepoint.
+      const txDb = tx as unknown as Db;
+      const { workspaceId: demoWorkspaceId } = await seedDemoWorkspace(txDb, {
+        fileStorageDir: mkdtempSync(path.join(tmpdir(), "careerhq-demo-replay-")),
+      });
+      await body(txDb, demoWorkspaceId);
+      throw ROLLBACK;
+    })).rejects.toBe(ROLLBACK);
+  }
+
+  /**
+   * Every seeded application with its company name, in `/applications`' order.
+   * Enumerated rather than named one by one: the point of this test is that a
+   * visitor's *first* click succeeds whichever row they open, so a new seeded
+   * application must fail here until it has a fixture, not surface as a
+   * `replay_miss` on the live demo (Task 12, C1).
+   */
+  async function demoApplications(
+    tx: Db, demoWorkspaceId: string,
+  ): Promise<Array<{ id: string; company: string }>> {
+    return tx.select({ id: applications.id, company: companiesTable.name })
+      .from(applications)
+      .innerJoin(jobsTable, eq(applications.jobId, jobsTable.id))
+      .innerJoin(companiesTable, eq(jobsTable.companyId, companiesTable.id))
+      .where(eq(applications.workspaceId, demoWorkspaceId))
+      .orderBy(applications.createdAt, applications.id);
+  }
+
+  it("answers every seeded application's generation flows from committed fixtures with no api key", async () => {
+    // Exactly the demo's AI environment: replay mode, no key, and the
+    // repo's committed fixture directory (AI_REPLAY_DIR's default).
+    const replayConfig = loadConfig({ DATABASE_URL: BASE_ENV.DATABASE_URL, AI_MODE: "replay" });
+    expect(replayConfig.openrouterApiKey).toBeNull();
+
+    const generate = vi.fn(async () => {
+      throw new Error("replay mode must never call the model");
+    });
+    const classifySensitive = vi.fn(async () => {
+      throw new Error("replay mode must never call the model");
+    });
+
+    await inSeededDemoWorkspace(async (tx, demoWorkspaceId) => {
+      const seeded = await demoApplications(tx, demoWorkspaceId);
+      expect(seeded.length).toBeGreaterThan(0);
+      const wexford = seeded.find((a) => a.company === "Wexford Health")?.id;
+      if (!wexford) throw new Error("no seeded application for Wexford Health");
+
+      const cases: Array<{ label: string; args: GenerationArgs }> = [
+        ...seeded.flatMap(({ id, company }): Array<{ label: string; args: GenerationArgs }> => [
+          { label: `cover letter — ${company}`, args: { workspaceId: demoWorkspaceId, applicationId: id, kind: "cover_letter" } },
+          { label: `email body — ${company}`, args: { workspaceId: demoWorkspaceId, applicationId: id, kind: "email_body" } },
+        ]),
+        {
+          label: "screening question",
+          args: {
+            workspaceId: demoWorkspaceId, applicationId: wexford, kind: "question",
+            question: "Why do you want to work here?",
+          },
+        },
+      ];
+
+      for (const { label, args } of cases) {
+        const outcome = await runGeneration(
+          { db: tx, config: replayConfig, generate, classifySensitive }, args,
+        );
+        expect(outcome.status, `${label}: ${JSON.stringify(outcome)}`).toBe("ok");
+        if (outcome.status !== "ok") throw new Error("unreachable");
+        // "replay:<recorded model>" is withReplay's marker for a fixture hit,
+        // so this distinguishes a real replay from a lucky live call.
+        expect(outcome.model).toMatch(/^replay:/);
+        expect(outcome.answer.length).toBeGreaterThan(0);
+        // The grounding contract still runs on a replayed answer: every cited
+        // fact is one the prompt actually offered.
+        expect(outcome.factIds.length).toBeGreaterThan(0);
+      }
+
+      expect(generate).not.toHaveBeenCalled();
+      expect(classifySensitive).not.toHaveBeenCalled();
+    });
+  }, 120_000);
 });

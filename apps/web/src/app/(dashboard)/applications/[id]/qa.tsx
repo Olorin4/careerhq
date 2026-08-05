@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition, type FormEvent } from "react";
+import { useActionState, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicationAnswer } from "@careerhq/db";
 import { ProvenanceChips } from "../../../../components/provenance-chips.js";
+import { REPLAY_MISS, replayMissMessage } from "../../../../lib/replay-miss.js";
 import {
   approveAnswerAction, askQuestionAction, rejectAnswerAction, saveManualAnswerAction,
   type AskQuestionResult,
@@ -18,9 +19,11 @@ interface QaPanelProps {
   answers: ApplicationAnswer[];
   /** Every fact claim in the workspace (including archived), keyed by id, for provenance chip labels. */
   factClaims: Record<string, string>;
+  /** Whether this deployment is the hosted demo answering from recorded AI output — decides how a `replay_miss` is worded. */
+  replayDemo: boolean;
 }
 
-function OutcomePane({ result }: { result: AskQuestionResult }) {
+function OutcomePane({ result, replayDemo }: { result: AskQuestionResult; replayDemo: boolean }) {
   const { outcome } = result;
   switch (outcome.status) {
     case "ok":
@@ -62,6 +65,12 @@ function OutcomePane({ result }: { result: AskQuestionResult }) {
         </>
       );
     case "failed":
+      // The Q&A box takes free text, so on the hosted demo a miss is the
+      // *normal* outcome for anything but the recorded question — see
+      // `lib/replay-miss.ts`.
+      if (replayDemo && outcome.error === REPLAY_MISS) {
+        return <p className="qa-manual-note">{replayMissMessage("question")}</p>;
+      }
       return <p className="qa-error">Could not answer: {outcome.error}</p>;
   }
 }
@@ -77,8 +86,14 @@ function ManualAnswerForm({
   onQuestionChange: (value: string) => void;
   sensitive: boolean;
 }) {
+  // Same reasoning as the materials panel's manual draft form: the action
+  // reports why it saved nothing rather than throwing or failing silently, and
+  // hands the submitted answer back so React's post-action form reset does not
+  // empty the textarea. `question` is already controlled by the parent, so it
+  // survives on its own.
+  const [saveState, saveManualAnswer] = useActionState(saveManualAnswerAction, null);
   return (
-    <form action={saveManualAnswerAction} className="qa-manual-form">
+    <form action={saveManualAnswer} className="qa-manual-form">
       <input type="hidden" name="applicationId" value={applicationId} />
       <input type="hidden" name="sensitivity" value={sensitive ? "sensitive" : "normal"} />
       <label>
@@ -94,9 +109,12 @@ function ManualAnswerForm({
       </label>
       <label>
         Answer
-        <textarea name="answer" rows={4} required />
+        <textarea name="answer" defaultValue={saveState?.answer ?? ""} rows={4} required />
       </label>
       <button type="submit">Save manual answer</button>
+      {saveState && (
+        <p className="qa-error">Not saved — {saveState.reason}. Your answer is still here; try again.</p>
+      )}
     </form>
   );
 }
@@ -154,7 +172,7 @@ function AnswerRow({
   );
 }
 
-export function QaPanel({ applicationId, answers, factClaims }: QaPanelProps) {
+export function QaPanel({ applicationId, answers, factClaims, replayDemo }: QaPanelProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [question, setQuestion] = useState("");
@@ -185,7 +203,7 @@ export function QaPanel({ applicationId, answers, factClaims }: QaPanelProps) {
     startTransition(async () => {
       const approveResult = await approveAnswerAction({ id, reusable });
       if (approveResult.ok) router.refresh();
-      else setError("Could not approve this answer.");
+      else setError(`Could not approve this answer: ${approveResult.reason}`);
     });
   }
 
@@ -193,7 +211,7 @@ export function QaPanel({ applicationId, answers, factClaims }: QaPanelProps) {
     startTransition(async () => {
       const rejectResult = await rejectAnswerAction({ id });
       if (rejectResult.ok) router.refresh();
-      else setError("Could not reject this answer.");
+      else setError(`Could not reject this answer: ${rejectResult.reason}`);
     });
   }
 
@@ -221,7 +239,7 @@ export function QaPanel({ applicationId, answers, factClaims }: QaPanelProps) {
       </form>
 
       {error && <p className="qa-error">{error}</p>}
-      {result && <OutcomePane result={result} />}
+      {result && <OutcomePane result={result} replayDemo={replayDemo} />}
 
       <ManualAnswerForm
         applicationId={applicationId}

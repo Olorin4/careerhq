@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   DEFAULT_SCORING_PROFILE, normalizedJobSchema, type NormalizedJob,
 } from "@careerhq/contracts";
@@ -229,6 +229,39 @@ d("discovery repo", () => {
     }]);
     [row] = await db.select().from(jobs).where(and(eq(jobs.workspaceId, workspaceId), eq(jobs.externalId, "sal1")));
     expect(row?.salaryRaw).toBe("$110k-$150k");
+  });
+
+  it("listInboxJobs returns the same order on every read when scores tie", async () => {
+    const externalIds = Array.from({ length: 12 }, (_, i) => `tie-${i}`);
+    await upsertNormalizedJobs(db, workspaceId, externalIds.map((externalId) => ({
+      job: nj({ externalId }), contentHash: `h-${externalId}`,
+    })));
+    // Both scoring keys deliberately identical: this is the state the demo seed
+    // produces (a re-rank hands out repeated round numbers) and the state in
+    // which the ordering was previously up to Postgres.
+    await db.update(jobs).set({ llmScore: 70, keywordScore: 55 })
+      .where(and(eq(jobs.workspaceId, workspaceId), inArray(jobs.externalId, externalIds)));
+
+    const readOrder = async (): Promise<string[]> => (await listInboxJobs(db, workspaceId))
+      .filter((j) => j.externalId?.startsWith("tie-"))
+      .map((j) => j.id);
+
+    const first = await readOrder();
+    expect(first).toHaveLength(externalIds.length);
+
+    // One read proves nothing — an untied query returns rows in whatever order
+    // the executor read the heap, which is stable until the heap moves. Each
+    // UPDATE rewrites its tuple at the end of the table, so without a final
+    // sort key the next read comes back in a different order.
+    for (const id of first) {
+      await db.update(jobs).set({ lastSeenAt: sql`clock_timestamp()` }).where(eq(jobs.id, id));
+      expect(await readOrder()).toEqual(first);
+    }
+
+    // And the order is the one the worker's rerank tie-break also produces:
+    // ascending id. Postgres compares uuids bytewise, which for the canonical
+    // lowercase text form is the same order JS gives.
+    expect(first).toEqual([...first].sort());
   });
 
   it("dismissJob flips job status and removes it from the inbox", async () => {

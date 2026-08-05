@@ -13,11 +13,75 @@
 #
 # Dockerfile.web uses the SAME tag for the same reason: in P5 the web app drives
 # the interactive auto-apply session in-process. Keep the two tags identical.
-FROM mcr.microsoft.com/playwright:v1.62.1-noble AS base
+FROM mcr.microsoft.com/playwright:v1.62.1-noble AS build
 RUN corepack enable
 WORKDIR /app
 # See Dockerfile.web: a partial workspace copy fails `--frozen-lockfile`.
 COPY . .
-RUN pnpm install --frozen-lockfile
+# `--prod=false` is pnpm's default; stated because the P6 demo work asked
+# specifically whether the dev half could be dropped again afterwards. It
+# cannot, profitably — see the note at the bottom of this file.
+RUN pnpm install --frozen-lockfile --prod=false
 RUN pnpm --filter @careerhq/worker... build
+
+# The runtime stage restarts from the base and takes ONE copy of /app, leaving
+# the pnpm store, pnpm's metadata cache and every intermediate layer behind in
+# the discarded build stage. Measured, so nobody has to guess: 3.20 GB for the
+# build stage against 3.17 GB here — only ~30 MB, because pnpm hardlinks
+# node_modules into its store and a layer counts shared inodes once. It is kept
+# because it is free and it stops future build-time cruft from accumulating in
+# the shipped image, not because it is a large win.
+#
+# Same base tag as the build stage and as Dockerfile.web, so all three share
+# those layers on disk rather than each carrying a copy — which matters far
+# more than the 30 MB: the base is ~2.45 GB of the 3.17.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble AS runtime
+# The CMD is plain `node`, but `docker compose exec worker pnpm …` is how the
+# demo runbook forces a reset or inspects the workspace, and corepack costs
+# ~135 kB.
+RUN corepack enable
+WORKDIR /app
+COPY --from=build /app /app
+# `corepack enable` only shims pnpm; the tarball for the version in
+# package.json's `packageManager` is fetched on first use and cached under
+# /root/.cache/node. The build stage already paid for that, and without this
+# line the runtime stage does not inherit it (only /app is copied), so the
+# first `pnpm` in the container reaches out to registry.npmjs.org — on a demo
+# box that is a startup-time network dependency nobody asked for, and it
+# reappears on every `docker compose up` that recreates the container. 21 MB.
+COPY --from=build /root/.cache/node /root/.cache/node
 CMD ["node", "apps/worker/dist/main.js"]
+
+# ---------------------------------------------------------------------------
+# Why the dev dependencies are still here (P6 task 7, measured 2026-08-04)
+#
+# The obvious next slim is "drop devDependencies before the runtime stage".
+# Three variants were built and measured on this workspace, and all three are
+# worse than doing nothing:
+#
+#   pnpm prune --prod            in a workspace this considers only the ROOT
+#                                project. It removed turbo, typescript and the
+#                                eslint stack — 4 packages — and left every
+#                                package's own dev half (vitest, tsx,
+#                                drizzle-kit, linkedom) exactly where it was.
+#                                Image unchanged at 3.17 GB.
+#
+#   pnpm install --prod          without a TTY, pnpm asks "the modules
+#                                directories will be removed and reinstalled
+#                                from scratch, proceed?", gets no answer, and
+#                                exits 0 having done nothing. A silent no-op
+#                                that reads as success in the build log.
+#
+#   CI=true … --prod --force     this one genuinely rebuilds the tree prod-only
+#                                — and the image grew from 3.17 GB to 4.17 GB.
+#                                The first install hardlinks node_modules into
+#                                the pnpm store; a forced reinstall re-fetches
+#                                and materialises its own copies, so /app went
+#                                from 721 MB to 1.7 GB. It also cost three
+#                                minutes of network per build.
+#
+# So the slimming that survives is the two things above: `.dockerignore` keeps
+# tests, non-AI fixtures, docs and agent scaffolding out of the context, and
+# the runtime stage's single COPY leaves the pnpm store and every intermediate
+# layer in the discarded build stage. Re-open this only with a measurement.
+# ---------------------------------------------------------------------------

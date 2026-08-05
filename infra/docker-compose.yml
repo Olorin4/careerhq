@@ -1,3 +1,23 @@
+# The base stack: everything the app needs, wired for a laptop.
+#
+# Every published port below is bound to `127.0.0.1` DELIBERATELY, and that is a
+# safety property, not a preference. Docker publishes to `0.0.0.0` by default
+# and inserts its own DOCKER chain rules ahead of the host firewall, so an
+# unqualified `"8025:8025"` is reachable from the internet on any box with a
+# public IP — UFW included. The demo overlay removes these publishes outright
+# (`ports: !reset []`), but the overlays are opt-in: applying the base file with
+# only `docker-compose.edge.yml` (which joins `web` to a public-facing proxy
+# network) used to leave Mailpit's UNAUTHENTICATED mail viewer, the fictional
+# ATS and Postgres itself on a public interface, guarded by nothing but a
+# sentence in a comment. Loopback here means a missing overlay cannot expose
+# them, and nothing is lost: every consumer of these ports (the e2e suites,
+# `psql`, a browser on the box) is on the box already, and a container reaches
+# its neighbours by service name on the compose network, never through a
+# published port.
+#
+# `web` is the one service that is meant to be reachable, and it is the one the
+# operator decides about: `CAREERHQ_WEB_BIND` defaults to loopback here too, and
+# a LAN demo sets it to `0.0.0.0` explicitly.
 name: careerhq
 services:
   postgres:
@@ -6,7 +26,7 @@ services:
       POSTGRES_USER: careerhq
       POSTGRES_PASSWORD: careerhq
       POSTGRES_DB: careerhq
-    ports: ["${CAREERHQ_PG_PORT:-5432}:5432"]
+    ports: ["127.0.0.1:${CAREERHQ_PG_PORT:-5432}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U careerhq"]
@@ -15,13 +35,15 @@ services:
       retries: 10
   mailpit:
     image: axllent/mailpit:latest
-    ports: ["1025:1025", "8025:8025"]
+    # 8025 is an unauthenticated web mail viewer showing every message the app
+    # "sent". Loopback-only, always — see the header note.
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
   # Fictional ATS used as the e2e target and only auto-apply destination for
   # demos (spec P5). No dependencies, present by default (not behind a
   # profile) since the e2e suite needs it the same way it needs mailpit.
   demo-ats:
     build: { context: .., dockerfile: infra/Dockerfile.demo-ats }
-    ports: ["3001:3001"]
+    ports: ["127.0.0.1:3001:3001"]
   web:
     build: { context: .., dockerfile: infra/Dockerfile.web }
     environment:
@@ -47,13 +69,31 @@ services:
       SUBMISSIONS_LIVE_COMPANY_SITE: ${SUBMISSIONS_LIVE_COMPANY_SITE:-false}
       SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
       SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-demo-ats}
+      # Demo mode (spec P6 §3), and the per-action call budget it applies. Both
+      # default to the plain-checkout behaviour: no demo, no throttling. The
+      # images carry no .env, so without these passthroughs the demo compose
+      # could not turn either of them on.
+      SANDBOX_FORCE_SAFE: ${SANDBOX_FORCE_SAFE:-false}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      DEMO_RATE_LIMIT_PER_MIN: ${DEMO_RATE_LIMIT_PER_MIN:-30}
       # Fictional ATS target for auto-apply demos (spec P5). `web` is what
       # drives a browser against it: the interactive prepare/preview/confirm
       # flow launches Chromium in-process (apps/web/src/lib/site-driver.ts),
       # which is why Dockerfile.web is built on the Playwright base image.
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
       AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
-    ports: ["3000:3000"]
+      # How many headless Chromium instances this container may hold open at
+      # once (spec P6 §3). Per PROCESS, so `web` and `worker` each get this
+      # many — see the note on the worker's copy below.
+      AUTOAPPLY_MAX_CONCURRENT_BROWSERS: ${AUTOAPPLY_MAX_CONCURRENT_BROWSERS:-1}
+      # Deliberately absent from `web`, and audited as such: FOLLOW_UP_DAYS,
+      # INGEST_CRON, EMAIL_SYNC_CRON and DEMO_RESET_CRON are read only by the
+      # worker's jobs and schedules.
+      # Every other variable `packages/config` parses is set above.
+    # The only service anyone is meant to reach, and the only bind address an
+    # operator chooses: `CAREERHQ_WEB_BIND=0.0.0.0` for a LAN demo, which is a
+    # decision made on purpose rather than a default nobody noticed.
+    ports: ["${CAREERHQ_WEB_BIND:-127.0.0.1}:3000:3000"]
     volumes: [files:/app/var/files]
     depends_on:
       postgres: { condition: service_healthy }
@@ -65,9 +105,17 @@ services:
       # Discovery/AI knobs. The images carry no .env, so without these the
       # worker can never re-rank (skipped_no_key) and INGEST_CRON is fixed.
       # All optional: empty passes through to the config defaults.
+      # AI_WRITING_MODELS / AI_MODE / AI_REPLAY_DIR are deliberately absent:
+      # only the web app generates materials or replays recorded calls
+      # (apps/web/src/lib/generation.ts); the worker's one AI pass is the fast
+      # tier in rerank/email-sync.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       AI_FAST_MODELS: ${AI_FAST_MODELS:-}
       INGEST_CRON: ${INGEST_CRON:-0 */6 * * *}
+      # How long after submitting an application the follow-up nudge is due.
+      # Worker-only: apps/worker/src/jobs/email-sync.ts is the sole reader
+      # (`config.followUpDays`), so it is deliberately absent from `web`.
+      FOLLOW_UP_DAYS: ${FOLLOW_UP_DAYS:-7}
       # Cron for the IMAP poll that links replies to applications (email.sync).
       EMAIL_SYNC_CRON: ${EMAIL_SYNC_CRON:-*/15 * * * *}
       # Credential encryption key (packages/db/src/crypto.ts). Unset disables
@@ -79,6 +127,17 @@ services:
       SUBMISSIONS_LIVE_COMPANY_SITE: ${SUBMISSIONS_LIVE_COMPANY_SITE:-false}
       SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
       SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-demo-ats}
+      # Same two demo switches as web: the worker resolves the same workspace
+      # (apps/worker/src/lib/workspace.ts) and shares the hard-safety gate.
+      # DEMO_RATE_LIMIT_PER_MIN is deliberately absent — nothing in the worker
+      # reads it; the limiter guards the web app's request path only.
+      SANDBOX_FORCE_SAFE: ${SANDBOX_FORCE_SAFE:-false}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      # How often the demo workspace is wiped and reseeded. Worker-only —
+      # apps/worker/src/main.ts is the sole reader — and the `demo.reset` queue
+      # is registered only when DEMO_MODE is true, so this value is inert in a
+      # plain checkout.
+      DEMO_RESET_CRON: ${DEMO_RESET_CRON:-0 */6 * * *}
       # Auto-apply (spec P5): the fictional ATS the Playwright driver targets,
       # and the driver's per-action budget (navigation, one field, the submit
       # wait) — not the budget for a whole attempt. The worker carries the
@@ -86,6 +145,13 @@ services:
       # yet (see apps/worker/src/main.ts).
       DEMO_ATS_URL: ${DEMO_ATS_URL:-http://demo-ats:3001}
       AUTOAPPLY_BROWSER_TIMEOUT_MS: ${AUTOAPPLY_BROWSER_TIMEOUT_MS:-45000}
+      # Same cap, and set here too because the limit is enforced per process:
+      # `web` and `worker` are separate containers with separate counters, so
+      # the BOX can see one browser per service, not one browser total. A
+      # host-wide cap would need a lock outside both processes (a Postgres
+      # advisory lock is the obvious candidate — both already connect); until
+      # then the RAM budget must assume `web` + `worker` × this number.
+      AUTOAPPLY_MAX_CONCURRENT_BROWSERS: ${AUTOAPPLY_MAX_CONCURRENT_BROWSERS:-1}
     volumes: [files:/app/var/files]
     depends_on:
       postgres: { condition: service_healthy }

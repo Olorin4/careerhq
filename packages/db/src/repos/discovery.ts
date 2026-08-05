@@ -7,7 +7,7 @@ import {
   type ApplicationState, type AtsType, type NormalizedJob, type RerankResult, type ScoringProfile,
 } from "@careerhq/contracts";
 import { computeNextAction, scoreJob } from "@careerhq/core";
-import type { Db } from "../client.js";
+import type { Db, DbOrTx } from "../client.js";
 import {
   applicationEvents, applications, companies, ingestRuns, jobs, scoringProfiles, watchlistCompanies,
 } from "../schema/index.js";
@@ -20,17 +20,30 @@ const DEFAULT_INGEST_RUNS_LIMIT = 20;
 
 export interface UpsertResult { inserted: number; updated: number; duplicates: number }
 
+/**
+ * `id` overrides the generated primary key on INSERT only (an existing row
+ * keeps the id it already has). Exists for one caller — the demo seed, whose
+ * listings must keep the same ids across every six-hourly rebuild because the
+ * re-rank prompt embeds them verbatim and that prompt is an AI replay
+ * fixture's cache key. Real ingest sources never set it.
+ */
+export interface UpsertJobItem {
+  job: NormalizedJob;
+  contentHash: string;
+  id?: string;
+}
+
 export async function upsertNormalizedJobs(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
-  items: Array<{ job: NormalizedJob; contentHash: string }>,
+  items: UpsertJobItem[],
 ): Promise<UpsertResult> {
   return db.transaction(async (tx) => {
     let inserted = 0;
     let updated = 0;
     let duplicates = 0;
 
-    for (const { job, contentHash } of items) {
+    for (const { job, contentHash, id } of items) {
       await tx.insert(companies).values({ workspaceId, name: job.companyName })
         .onConflictDoNothing({ target: [companies.workspaceId, companies.name] });
       const [company] = await tx.select({ id: companies.id }).from(companies)
@@ -54,7 +67,7 @@ export async function upsertNormalizedJobs(
           salaryRaw: job.salaryRaw,
           postedAt: job.postedAt,
           contentHash,
-          lastSeenAt: sql`now()`,
+          lastSeenAt: sql`clock_timestamp()`,
           expiredAt: null,
         }).where(eq(jobs.id, existing.id));
         updated += 1;
@@ -62,6 +75,7 @@ export async function upsertNormalizedJobs(
       }
 
       const [created] = await tx.insert(jobs).values({
+        ...(id !== undefined ? { id } : {}),
         workspaceId,
         companyId,
         source: job.source,
@@ -82,7 +96,11 @@ export async function upsertNormalizedJobs(
         eq(jobs.contentHash, contentHash),
         isNull(jobs.expiredAt),
         ne(jobs.id, created!.id),
-      )).orderBy(asc(jobs.firstSeenAt)).limit(1);
+      // Two rows can share a first_seen_at (clock_timestamp() has microsecond
+      // resolution and a seed inserts a batch inside one transaction), and
+      // which of them wins decides which listing the inbox hides as a
+      // duplicate. `id` makes that choice the same one every time.
+      )).orderBy(asc(jobs.firstSeenAt), asc(jobs.id)).limit(1);
 
       if (firstSeen) {
         await tx.update(jobs).set({ duplicateOfJobId: firstSeen.id })
@@ -95,7 +113,7 @@ export async function upsertNormalizedJobs(
   });
 }
 
-export async function scoreInboxJobs(db: Db, workspaceId: string, profile: ScoringProfile): Promise<number> {
+export async function scoreInboxJobs(db: DbOrTx, workspaceId: string, profile: ScoringProfile): Promise<number> {
   const rows = await db.select().from(jobs).where(and(
     eq(jobs.workspaceId, workspaceId),
     eq(jobs.status, "inbox"),
@@ -116,7 +134,7 @@ export async function scoreInboxJobs(db: Db, workspaceId: string, profile: Scori
 
 export async function markExpiredJobs(db: Db, workspaceId: string, olderThanDays = EXPIRY_DAYS): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanDays * 86_400_000);
-  const updated = await db.update(jobs).set({ expiredAt: sql`now()` })
+  const updated = await db.update(jobs).set({ expiredAt: sql`clock_timestamp()` })
     .where(and(
       eq(jobs.workspaceId, workspaceId),
       isNull(jobs.expiredAt),
@@ -126,7 +144,7 @@ export async function markExpiredJobs(db: Db, workspaceId: string, olderThanDays
   return updated.length;
 }
 
-export async function recordIngestRun(db: Db, run: NewIngestRun & { finishedAt: Date }): Promise<void> {
+export async function recordIngestRun(db: DbOrTx, run: NewIngestRun & { finishedAt: Date }): Promise<void> {
   await db.insert(ingestRuns).values(run);
 }
 
@@ -137,7 +155,7 @@ export async function listIngestRuns(
 ): Promise<IngestRun[]> {
   return db.select().from(ingestRuns)
     .where(eq(ingestRuns.workspaceId, workspaceId))
-    .orderBy(desc(ingestRuns.startedAt))
+    .orderBy(desc(ingestRuns.startedAt), asc(ingestRuns.id))
     .limit(limit);
 }
 
@@ -159,7 +177,15 @@ export async function listInboxJobs(db: Db, workspaceId: string): Promise<Job[]>
         )),
       ),
     ),
-  )).orderBy(sql`${jobs.llmScore} DESC NULLS LAST`, desc(jobs.keywordScore));
+  // `id` last is what makes this a *total* order, and it is load-bearing rather
+  // than tidiness. Without it Postgres is free to return equal-scoring listings
+  // in whatever order it read them — measured different between two runs over
+  // the same rows — so the inbox reshuffles between renders and the demo's
+  // screenshots and walkthrough recording stop being reproducible. It also
+  // decides which listings survive `topNForLlm` and the order they take in the
+  // re-rank prompt, and that prompt is an AI replay fixture's cache key.
+  // Ascending, to agree with the same tie-break in the worker's rerank job.
+  )).orderBy(sql`${jobs.llmScore} DESC NULLS LAST`, desc(jobs.keywordScore), asc(jobs.id));
 }
 
 export async function countInboxDuplicates(db: Db, workspaceId: string): Promise<number> {
@@ -173,7 +199,7 @@ export async function countInboxDuplicates(db: Db, workspaceId: string): Promise
 }
 
 export async function applyRerank(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
   results: RerankResult["results"],
 ): Promise<number> {
@@ -213,18 +239,18 @@ export async function getScoringProfile(db: Db, workspaceId: string): Promise<Sc
   return parsed.success ? parsed.data : DEFAULT_SCORING_PROFILE;
 }
 
-export async function saveScoringProfile(db: Db, workspaceId: string, profile: ScoringProfile): Promise<void> {
+export async function saveScoringProfile(db: DbOrTx, workspaceId: string, profile: ScoringProfile): Promise<void> {
   await db.insert(scoringProfiles).values({ workspaceId, profile })
     .onConflictDoUpdate({
       target: scoringProfiles.workspaceId,
-      set: { profile, updatedAt: sql`now()` },
+      set: { profile, updatedAt: sql`clock_timestamp()` },
     });
 }
 
 export async function listWatchlist(db: Db, workspaceId: string): Promise<WatchlistCompany[]> {
   return db.select().from(watchlistCompanies)
     .where(eq(watchlistCompanies.workspaceId, workspaceId))
-    .orderBy(asc(watchlistCompanies.createdAt));
+    .orderBy(asc(watchlistCompanies.createdAt), asc(watchlistCompanies.id));
 }
 
 export async function addWatchlistEntry(
@@ -249,7 +275,7 @@ export type PromoteJobOutcome = { ok: true; applicationId: string } | { ok: fals
  * not in the inbox, or already has an application (covers "already promoted"
  * and any other terminal/duplicate state) to keep promotion idempotent.
  */
-export async function promoteJob(db: Db, workspaceId: string, jobId: string): Promise<PromoteJobOutcome> {
+export async function promoteJob(db: DbOrTx, workspaceId: string, jobId: string): Promise<PromoteJobOutcome> {
   return db.transaction(async (tx) => {
     const [job] = await tx.select().from(jobs)
       .where(and(eq(jobs.id, jobId), eq(jobs.workspaceId, workspaceId)))

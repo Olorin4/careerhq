@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 import PgBoss from "pg-boss";
 import { loadConfig } from "@careerhq/config";
 import { createDb } from "@careerhq/db";
+// Imported from the module itself rather than ./autoapply/index.js: that
+// barrel re-exports the driver, whose graph pulls in playwright, and the worker
+// process should not load a browser library just to learn a number.
+import { configureBrowserLimit } from "./autoapply/browser-limit.js";
+import { runDemoResetOnce } from "./jobs/demo-reset.js";
 import { runEmailSyncOnce } from "./jobs/email-sync.js";
 import { runIngestOnce } from "./jobs/ingest.js";
 import { runRerankOnce } from "./jobs/rerank.js";
@@ -17,12 +22,19 @@ const envFile = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../.
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 const config = loadConfig();
+// Applied at wiring time, before any queue exists, so every browser this
+// process ever launches is counted against the same cap (spec P6 §3). Set here
+// even though the autoapply consumers below are deliberately unregistered: the
+// day one of them is registered, the limit must already be true, not a thing
+// someone remembers to add.
+configureBrowserLimit(config.autoapplyMaxConcurrentBrowsers);
 const boss = new PgBoss(config.databaseUrl);
 const db = createDb(config.databaseUrl);
 
 const INGEST_QUEUE = "discovery.ingest";
 const RERANK_QUEUE = "discovery.rerank";
 const EMAIL_SYNC_QUEUE = "email.sync";
+const DEMO_RESET_QUEUE = "demo.reset";
 const AUTOAPPLY_CAPTURE_QUEUE = "autoapply.capture";
 const AUTOAPPLY_SUBMIT_QUEUE = "autoapply.submit";
 
@@ -72,6 +84,40 @@ await boss.work(EMAIL_SYNC_QUEUE, async () => {
   console.log(`[worker] ${EMAIL_SYNC_QUEUE}`, summary);
 });
 
+// The demo reset (spec P6 §3) is registered ONLY in demo mode. It deletes and
+// rebuilds a whole workspace, so a personal deployment must never so much as
+// have the queue: `createQueue`/`schedule` are inside the branch too, not just
+// the consumer.
+//
+// The `else` is the other half of that. A schedule is a row in `pgboss.schedule`
+// and it outlives the process that created it, so a one-off DEMO_MODE=true run
+// left `demo.reset | 0 */6 * * *` firing forever against workers that no longer
+// register a consumer — jobs piling up unconsumed. Nothing ran (that is the
+// safety property, and it held), but the comment claimed a guarantee the code
+// did not make. `unschedule` makes it true.
+if (config.demoMode) {
+  await boss.createQueue(DEMO_RESET_QUEUE);
+  await boss.schedule(DEMO_RESET_QUEUE, config.demoResetCron);
+  await boss.work(DEMO_RESET_QUEUE, async () => {
+    const result = await runDemoResetOnce(db, config);
+    console.log(`[worker] ${DEMO_RESET_QUEUE}`, result);
+  });
+
+  // pg-boss does not fire a schedule on registration, so without this a freshly
+  // deployed demo box has no demo workspace until the next cron boundary — up
+  // to six hours of an empty site, and in the meantime the web app bootstraps
+  // an empty demo workspace of its own. Failure is logged, not fatal: the
+  // reset is transactional, so a failed seed leaves the previous demo intact
+  // and the scheduled run tries again.
+  try {
+    console.log(`[worker] ${DEMO_RESET_QUEUE} (boot)`, await runDemoResetOnce(db, config));
+  } catch (err) {
+    console.error(`[worker] ${DEMO_RESET_QUEUE} (boot) failed; waiting for the schedule`, err);
+  }
+} else {
+  await boss.unschedule(DEMO_RESET_QUEUE);
+}
+
 // INTENTIONALLY NOT REGISTERED (spec §11).
 //
 // `runCaptureJob`/`runSubmitJob` (./jobs/autoapply.ts) and their tests stay in
@@ -92,5 +138,6 @@ await boss.work(EMAIL_SYNC_QUEUE, async () => {
 const UNREGISTERED_QUEUES = [AUTOAPPLY_CAPTURE_QUEUE, AUTOAPPLY_SUBMIT_QUEUE] as const;
 
 console.log(
-  `[worker] started; queues registered (not registered: ${UNREGISTERED_QUEUES.join(", ")} — ungated until P6)`,
+  `[worker] started; queues registered${config.demoMode ? ` (demo mode: ${DEMO_RESET_QUEUE} on "${config.demoResetCron}")` : ""}`
+  + ` (not registered: ${UNREGISTERED_QUEUES.join(", ")} — ungated until P6)`,
 );

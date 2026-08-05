@@ -202,6 +202,17 @@ export const canonicalFormFieldSchema = z.object({
   maxLength: z.number().int().positive().optional(),
   accept: z.string().optional(),               // file inputs
   step: z.number().int().min(0).default(0),    // multi-step forms
+  /**
+   * `fieldIdentityHash(rawField)` — this control AND the question it asked when
+   * the user reviewed it. `id` covers only the selector, so it survives a page
+   * that rewords a label; this does not, which is exactly what makes it the
+   * thing the driver re-verifies against the live page before typing.
+   *
+   * Optional because a snapshot captured before this existed has none, and a
+   * form built by hand (tests, fixtures) has nothing to re-verify: absent means
+   * "no recorded identity", never "identity mismatch".
+   */
+  identityHash: z.string().optional(),
   canonicalField: canonicalFieldSchema.default("unknown"),
   mappingConfidence: z.number().min(0).max(1).default(0),
   sensitive: z.boolean().default(false),

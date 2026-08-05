@@ -14,6 +14,7 @@ export * from "./repos/email-attempts.js";
 export * from "./repos/email-messages.js";
 export * from "./repos/form-snapshots.js";
 export * from "./crypto.js";
+export * from "./demo-seed.js";
 import type {
   applicationAnswers, applicationAttempts, applicationEvents, applications, attemptConfirmations,
   candidateFacts, credentials, cvVariants, emailConnections, emailMessages, formSnapshots,

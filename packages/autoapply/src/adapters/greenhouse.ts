@@ -5,8 +5,6 @@
 // tenants and bare `first_name` on others, so each hint is a substring match
 // against `name`/`id` rather than an exact match.
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { canonicalFormSchema, type CanonicalField, type CanonicalForm, type FieldKind } from "@careerhq/contracts";
 import { parseGenericForm } from "../generic.js";
 import { rawFieldId, type RawField, type RawFormPage } from "../raw.js";
@@ -126,23 +124,11 @@ export function hashRawFormPage(page: RawFormPage): string {
   return createHash("sha256").update(JSON.stringify(page)).digest("hex");
 }
 
-// `import.meta.dirname` (Node 22+) rather than `fileURLToPath(new URL(".",
-// import.meta.url))`: webpack's static `new URL(literal, import.meta.url)`
-// asset-import analysis — which apps/web's production build applies to every
-// module it bundles, this one included, once @careerhq/autoapply is reachable
-// from a server action — tries to resolve "." as an asset and fails the
-// build; a plain string has no such special handling.
-const FIXTURE_PATH = path.resolve(import.meta.dirname, "..", "..", "fixtures", "greenhouse-page.json");
-
-function loadFixtureRawPage(): RawFormPage {
-  return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as RawFormPage;
-}
-
-/**
- * sha256 of the committed `fixtures/greenhouse-page.json` — the
- * parser-drift tripwire (spec §10.5). Compared in greenhouse.test.ts
- * against a freshly-computed hash of the live demo-ats helper output: if
- * apps/demo-ats's Greenhouse markup drifts without regenerating the
- * fixture (`scripts/write-fixture.ts`), that test fails.
- */
-export const GREENHOUSE_FIXTURE_HASH: string = hashRawFormPage(loadFixtureRawPage());
+// The parser-drift tripwire (spec §10.5) used to live here as
+// `export const GREENHOUSE_FIXTURE_HASH = hashRawFormPage(loadFixtureRawPage())`,
+// which read a test fixture off disk on every import of this module — including
+// apps/web's production server bundle, where @careerhq/autoapply is reachable
+// from the application-detail server actions and webpack leaves
+// `import.meta.dirname` undefined. It now lives in `../testing/fixtures.ts` as
+// `readGreenhouseFixtureHash()`, called only by the tests: this module performs
+// no I/O at import time and touches no `import.meta` at all.

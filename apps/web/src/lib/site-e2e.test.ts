@@ -58,7 +58,8 @@ import { loadConfig, type AppConfig } from "@careerhq/config";
 import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
 import { openSession } from "@careerhq/worker/autoapply";
 import {
-  applications, createApplication, createCvVariant, createDb, createFact, getAttempt, getLatestSnapshot,
+  applications, createApplication, createCvVariant, createDb, createFact, getActiveConfirmation,
+  getAttempt, getLatestSnapshot,
   listAttemptsForApplication, transitionApplication, updateSnapshotAnswers, workspaces, type Db,
 } from "@careerhq/db";
 import {
@@ -143,6 +144,17 @@ function config(over: Record<string, string> = {}): AppConfig {
     DATABASE_URL: url ?? "postgres://u:p@localhost:5432/careerhq",
     SUBMISSIONS_LIVE_COMPANY_SITE: "true",
     SANDBOX_SITE_ALLOWED_HOST: HOST,
+    // This suite drives a demo-ats on `localhost`, which is a loopback name,
+    // and the capture policy's exemption for the configured sandbox host is
+    // scoped to sandbox-EFFECTIVE workspaces (fix-wave review A3 — honouring
+    // it for a personal workspace made every local port reachable). So the
+    // outside-compose local setup this suite models has to say so: this is the
+    // same flag the deployed demo sets, and README's auto-apply env table
+    // documents it as the required companion to
+    // `SANDBOX_SITE_ALLOWED_HOST=localhost`. Nothing about the flows below
+    // changes — the gate matrix's only sandbox-specific rule is
+    // `sandboxTargetAllowed`, which HOST satisfies by construction.
+    SANDBOX_FORCE_SAFE: "true",
     DEMO_ATS_URL,
     ...over,
   });
@@ -549,7 +561,7 @@ d("company-site end-to-end round trip against demo-ats", () => {
   );
 
   it(
-    "reports a consent box it cannot untick as FAILED, never as needs_reconcile",
+    "hands the token back for a consent box it cannot untick — pre-click, never needs_reconcile",
     async () => {
       // The fixture ships the consent box pre-ticked inside a display:none
       // wrapper, so `uncheck()` waits for actionability and throws a
@@ -558,6 +570,12 @@ d("company-site end-to-end round trip against demo-ats", () => {
       // so a field that could not be ticked took the assume-the-worst branch
       // and parked the attempt for a human to reconcile a submission that was
       // never made. Interacting with a form control cannot submit the form.
+      //
+      // This is the whole-stack proof of the P6 final review's BLOCKING 1: the
+      // refusal is raised INSIDE `submit`, after `beginSubmission`, so being
+      // pre-click used to still cost the visitor their confirmation and leave a
+      // terminal FAILED attempt that could not be re-previewed. A refusal that
+      // provably typed nothing must cost nothing.
       const jobUrl = `${DEMO_ATS_URL}/hidden-consent/jobs/e2e-hidden-consent`;
       const applicationId = await readyApplication("Untickable Robotics Co", jobUrl);
       const before = await submissionsFor("e2e-hidden-consent");
@@ -589,13 +607,17 @@ d("company-site end-to-end round trip against demo-ats", () => {
       const confirm = await confirmAndSubmitSite(fastDeps, {
         workspaceId, attemptId: outcome.attemptId, presentedToken: preview.token, retypedTarget: HOST,
       });
-      expect(confirm.status).toBe("failed");
+      expect(confirm).toMatchObject({ status: "blocked", code: "driver_refused" });
       expect(confirm.status).not.toBe("needs_reconcile");
 
-      // FAILED, not NEEDS_RECONCILE: nothing reached the site, so there is
-      // nothing for a human to reconcile.
+      // Nothing reached the site, so there is nothing for a human to
+      // reconcile — and nothing was spent either: the attempt is back where the
+      // preview left it and its confirmation is live again, so the same token
+      // still works.
       const attempt = await getAttempt(db, outcome.attemptId);
-      expect(attempt?.status).toBe("FAILED");
+      expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+      expect(attempt?.pendingReceipt).toBeNull();
+      expect((await getActiveConfirmation(db, outcome.attemptId))?.consumedAt ?? null).toBeNull();
       expect(await submissionsFor("e2e-hidden-consent")).toHaveLength(before.length);
     },
     BROWSER_TIMEOUT_MS,

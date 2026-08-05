@@ -2,8 +2,8 @@ import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { AttemptStatus } from "@careerhq/contracts";
 import { canAttemptTransition } from "@careerhq/core";
 import { payloadFingerprint } from "@careerhq/core/gates";
-import type { Db, Tx } from "../client.js";
-import { applicationAttempts, attemptConfirmations } from "../schema/index.js";
+import type { Db, DbOrTx, Tx } from "../client.js";
+import { applicationAttempts, attemptConfirmations, formSnapshots } from "../schema/index.js";
 import type { ApplicationAttempt, AttemptConfirmation, NewApplicationAttempt } from "../index.js";
 import { transitionApplicationTx } from "./applications.js";
 
@@ -91,7 +91,7 @@ export interface SiteAttemptDraft {
   url: string;
 }
 
-export async function createSiteAttempt(db: Db, input: {
+export async function createSiteAttempt(db: DbOrTx, input: {
   applicationId: string; url: string;
 }): Promise<ApplicationAttempt> {
   const draftPayload: SiteAttemptDraft = { url: input.url };
@@ -113,7 +113,7 @@ export async function listAttemptsForApplication(
 ): Promise<ApplicationAttempt[]> {
   return db.select().from(applicationAttempts)
     .where(eq(applicationAttempts.applicationId, applicationId))
-    .orderBy(asc(applicationAttempts.startedAt));
+    .orderBy(asc(applicationAttempts.startedAt), asc(applicationAttempts.id));
 }
 
 /**
@@ -168,7 +168,7 @@ export async function markAttemptBlocked(
  * confirmation dialog still holding the previous token cannot redeem it. At
  * most one confirmation for an attempt is ever redeemable.
  */
-export async function recordPreview(db: Db, input: {
+export async function recordPreview(db: DbOrTx, input: {
   attemptId: string; payloadFingerprint: string; target: string; tokenHash: string; expiresAt: Date;
 }): Promise<AttemptOutcome> {
   return refusable(() => db.transaction(async (tx) => {
@@ -181,7 +181,7 @@ export async function recordPreview(db: Db, input: {
     });
 
     await tx.update(attemptConfirmations)
-      .set({ consumedAt: sql`now()` })
+      .set({ consumedAt: sql`clock_timestamp()` })
       .where(and(
         eq(attemptConfirmations.attemptId, attempt.id),
         isNull(attemptConfirmations.consumedAt),
@@ -214,6 +214,7 @@ export async function getLatestConfirmation(
     .orderBy(
       desc(attemptConfirmations.createdAt),
       asc(sql`(${attemptConfirmations.consumedAt} is not null)`),
+      asc(attemptConfirmations.id),
     )
     .limit(1);
   return row ?? null;
@@ -221,7 +222,7 @@ export async function getLatestConfirmation(
 
 /** The newest confirmation for the attempt that is neither consumed nor expired. */
 export async function getActiveConfirmation(
-  db: Db,
+  db: DbOrTx,
   attemptId: string,
 ): Promise<AttemptConfirmation | null> {
   const [row] = await db.select().from(attemptConfirmations)
@@ -230,7 +231,7 @@ export async function getActiveConfirmation(
       isNull(attemptConfirmations.consumedAt),
       gt(attemptConfirmations.expiresAt, sql`now()`),
     ))
-    .orderBy(desc(attemptConfirmations.createdAt))
+    .orderBy(desc(attemptConfirmations.createdAt), asc(attemptConfirmations.id))
     .limit(1);
   return row ?? null;
 }
@@ -246,7 +247,7 @@ export async function getActiveConfirmation(
  * so two concurrent callers cannot both win the token even if they read it at
  * the same instant.
  */
-export async function beginSubmission(db: Db, input: {
+export async function beginSubmission(db: DbOrTx, input: {
   attemptId: string; confirmationId: string; pendingReceipt: unknown;
 }): Promise<AttemptOutcome> {
   return refusable(() => db.transaction(async (tx) => {
@@ -270,7 +271,7 @@ export async function beginSubmission(db: Db, input: {
     }
 
     const consumed = await tx.update(attemptConfirmations)
-      .set({ consumedAt: sql`now()` })
+      .set({ consumedAt: sql`clock_timestamp()` })
       .where(and(
         eq(attemptConfirmations.id, confirmation.id),
         isNull(attemptConfirmations.consumedAt),
@@ -280,6 +281,61 @@ export async function beginSubmission(db: Db, input: {
 
     await advance(tx, attempt.id, attempt.status, "SUBMITTING", {
       pendingReceipt: input.pendingReceipt,
+    });
+  }));
+}
+
+/**
+ * The exact inverse of {@link beginSubmission}, and the only way out of
+ * SUBMITTING that does not close the attempt: the confirmation goes back to
+ * unconsumed, the pending receipt is cleared, and the attempt returns to
+ * PENDING_CONFIRMATION — one transaction, so a confirmation can never read
+ * "live" for an attempt that is still mid-submission.
+ *
+ * CALL THIS ONLY WHEN NOTHING WAS SUBMITTED, AND ONLY WHEN THAT IS PROVABLE.
+ * Its one caller is `confirmAndSubmitSite`'s `isPreClickDriverFailure` branch
+ * (apps/web/src/lib/site-submission.ts): a `DriverError` of kind `navigation`
+ * or `fill` is raised before the submit button is touched, so the browser
+ * cannot have sent anything. Every ambiguous outcome — a click that timed out,
+ * a between-steps advance, an unrecognised throw — still parks in
+ * NEEDS_RECONCILE, because handing a token back for a submission that MAY have
+ * landed is how you get a double application, which is the worst thing this
+ * system can do. `PRE_CLICK_DRIVER_ERROR_KINDS` is where that judgement lives
+ * and it is deliberately narrow; nothing here can widen it.
+ *
+ * Why the attempt has to be SUBMITTING and the confirmation has to be the one
+ * `beginSubmission` burned: `recordPreview` supersedes every unconsumed
+ * confirmation when it issues a new one, so restoring a row by any looser
+ * predicate could resurrect a superseded token. It cannot happen in practice
+ * (an attempt in SUBMITTING is not previewable, so no newer row can exist), and
+ * this is what keeps that true if the statuses ever change.
+ *
+ * An expired confirmation is restored expired, not refreshed: the gate matrix
+ * then reports `token_expired` and the user re-previews the attempt, which
+ * PENDING_CONFIRMATION allows. Minting time here would be inventing consent.
+ */
+export async function abandonSubmission(db: Db, input: {
+  attemptId: string; confirmationId: string;
+}): Promise<AttemptOutcome> {
+  return refusable(() => db.transaction(async (tx) => {
+    const attempt = await lockAttempt(tx, input.attemptId);
+    if (attempt.status !== "SUBMITTING") {
+      throw new AttemptRefusal(`only a submitting attempt can be abandoned (status ${attempt.status})`);
+    }
+
+    const restored = await tx.update(attemptConfirmations)
+      .set({ consumedAt: null })
+      .where(and(
+        eq(attemptConfirmations.id, input.confirmationId),
+        eq(attemptConfirmations.attemptId, input.attemptId),
+      ))
+      .returning({ id: attemptConfirmations.id });
+    if (restored.length === 0) throw new AttemptRefusal("confirmation not found for this attempt");
+
+    // `failureReason` is cleared with the receipt: the attempt is live again,
+    // and a stale reason on a PENDING_CONFIRMATION row reads as a failure.
+    await advance(tx, attempt.id, attempt.status, "PENDING_CONFIRMATION", {
+      pendingReceipt: null, failureReason: null,
     });
   }));
 }
@@ -296,7 +352,7 @@ export async function beginSubmission(db: Db, input: {
  * attempt SUBMITTING — in flight, blocking, and visible to a human via
  * `markNeedsReconcile`/`resolveReconcile`.
  */
-export async function completeSubmission(db: Db, input: {
+export async function completeSubmission(db: DbOrTx, input: {
   attemptId: string; confirmedReceipt: unknown;
 }): Promise<AttemptOutcome> {
   return refusable(() => db.transaction(async (tx) => {
@@ -395,4 +451,36 @@ export async function hasBlockingAttempt(db: Db, applicationId: string): Promise
     confirmed: rows.some((r) => r.status === "SUBMITTED"),
     inFlight: rows.some((r) => IN_FLIGHT.includes(r.status)),
   };
+}
+
+/**
+ * Every evidence-screenshot path the database still points at, across all
+ * workspaces — the live set for the demo's screenshot collector
+ * (`@careerhq/core/storage`'s `reserveEvidenceScreenshot`).
+ *
+ * Deliberately NOT workspace-scoped, for exactly the reason `listCvFilePaths`
+ * is not: the collector deletes whatever it does not see here, so scoping it
+ * would delete another workspace's evidence. It is also deliberately the union
+ * of BOTH writers' references, because the two of them share one store:
+ *
+ *   - `application_attempts.confirmed_receipt->>'screenshotPath'` — what
+ *     apps/web's `completeSubmission` records for an interactive submission
+ *     (and what `seedDemoWorkspace` records for the seeded one), and
+ *   - `form_snapshots.recovery_state->>'screenshotPath'` — what the worker's
+ *     `runSubmitJob` records for the queue variant.
+ *
+ * `pending_receipt` carries no screenshot path (nothing has been captured when
+ * it is written), so it is not read; a receipt shape that grows one must be
+ * added here in the same commit, or its file becomes collectable.
+ */
+export async function listEvidenceScreenshotPaths(db: Db): Promise<string[]> {
+  const [receipts, recoveries] = await Promise.all([
+    db.select({ p: sql<string | null>`${applicationAttempts.confirmedReceipt}->>'screenshotPath'` })
+      .from(applicationAttempts),
+    db.select({ p: sql<string | null>`${formSnapshots.recoveryState}->>'screenshotPath'` })
+      .from(formSnapshots),
+  ]);
+  return [...receipts, ...recoveries]
+    .map((row) => row.p)
+    .filter((p): p is string => typeof p === "string" && p.length > 0);
 }

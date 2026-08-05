@@ -22,6 +22,7 @@ import {
 import {
   makeSmtpTransport, redactError, sendApplicationEmail, type SmtpTransportLike,
 } from "@careerhq/email";
+import { effectiveWorkspaceKind } from "@careerhq/autoapply/policy";
 
 /**
  * `makeSmtpTransport` widened to its structural contract: tests inject a
@@ -291,7 +292,14 @@ export async function confirmAndSend(
 
   const gateInput: GateCheckInput = {
     envGateOpen: config.submissionsLiveEmail,
-    workspaceKind: workspace.kind,
+    // Belt-and-braces (spec P6 §3): SANDBOX_FORCE_SAFE forces every workspace
+    // through the sandbox path independently of workspace.kind — a second,
+    // independent layer so a regression in workspace resolution (which
+    // workspace this really is) doesn't also disable the sandbox host
+    // allow-list. Deliberately not derived from/coupled to DEMO_MODE; it is
+    // its own hard-safety switch. One shared derivation (`effectiveWorkspaceKind`)
+    // across both channels and both phases — see @careerhq/autoapply/policy.
+    workspaceKind: effectiveWorkspaceKind(config, workspace.kind),
     // Only consulted for sandbox workspaces; a sandbox may reach exactly one host.
     sandboxTargetAllowed: smtp.host === config.sandboxSmtpAllowedHost,
     tokenRecord: confirmation

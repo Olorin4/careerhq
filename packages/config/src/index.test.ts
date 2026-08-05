@@ -27,6 +27,20 @@ describe("loadConfig", () => {
   it("rejects non-numeric FOLLOW_UP_DAYS", () => {
     expect(() => loadConfig({ ...BASE, FOLLOW_UP_DAYS: "soon" })).toThrow();
   });
+  // The other half of the empty-value audit. Zod's .default() never fires on
+  // "", so every setting had to be checked: the string ones now fall back
+  // (see FILE_STORAGE_DIR / AI_REPLAY_DIR / the crons below), and the numeric,
+  // boolean and enum ones fail at startup instead — loud, not silent, which is
+  // an acceptable answer for a value nobody can guess a meaning for.
+  it("fails loudly rather than silently on an empty numeric, boolean or enum setting", () => {
+    expect(() => loadConfig({ ...BASE, FOLLOW_UP_DAYS: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_BROWSER_TIMEOUT_MS: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, DEMO_MODE: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, SUBMISSIONS_LIVE_EMAIL: "" })).toThrow();
+    expect(() => loadConfig({ ...BASE, AI_MODE: "" })).toThrow(/AI_MODE/);
+  });
   it("resolves a relative FILE_STORAGE_DIR against the repo root, not cwd", () => {
     // vitest runs with cwd = packages/config; the shared file tree is at the
     // repo root, so seed and web must agree on the same absolute directory.
@@ -36,6 +50,13 @@ describe("loadConfig", () => {
   });
   it("keeps an absolute FILE_STORAGE_DIR as given (the Docker volume path)", () => {
     expect(loadConfig({ ...BASE, FILE_STORAGE_DIR: "/app/var/files" }).fileStorageDir).toBe("/app/var/files");
+  });
+  // Same empty-value trap as AI_REPLAY_DIR: "" would resolve to the repo root
+  // and scatter uploaded CVs across the checkout instead of var/files.
+  it("falls back to var/files when FILE_STORAGE_DIR is empty or whitespace", () => {
+    const expected = path.resolve(process.cwd(), "../..", "var/files");
+    expect(loadConfig({ ...BASE, FILE_STORAGE_DIR: "" }).fileStorageDir).toBe(expected);
+    expect(loadConfig({ ...BASE, FILE_STORAGE_DIR: "  " }).fileStorageDir).toBe(expected);
   });
 
   it("defaults AI features off: no OPENROUTER_API_KEY → null", () => {
@@ -52,10 +73,11 @@ describe("loadConfig", () => {
   it("treats a whitespace-only OPENROUTER_API_KEY as unset", () => {
     expect(loadConfig({ ...BASE, OPENROUTER_API_KEY: "  " }).openrouterApiKey).toBeNull();
   });
-  it("defaults aiFastModels to the free-tier fallback list", () => {
+  it("defaults aiFastModels to the verified fallback list", () => {
     expect(loadConfig(BASE).aiFastModels).toEqual([
-      "google/gemini-2.0-flash-exp:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemini-2.5-flash-lite",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("parses AI_FAST_MODELS as a comma list, trimming whitespace and dropping empties", () => {
@@ -69,14 +91,16 @@ describe("loadConfig", () => {
   // empty model list would leave the fallback client with nothing to try.
   it("falls back to the default model list when AI_FAST_MODELS is empty", () => {
     expect(loadConfig({ ...BASE, AI_FAST_MODELS: "" }).aiFastModels).toEqual([
-      "google/gemini-2.0-flash-exp:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemini-2.5-flash-lite",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("falls back to the default model list when AI_FAST_MODELS holds only separators", () => {
     expect(loadConfig({ ...BASE, AI_FAST_MODELS: " , ," }).aiFastModels).toEqual([
-      "google/gemini-2.0-flash-exp:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemini-2.5-flash-lite",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("never returns an empty aiFastModels list", () => {
@@ -94,6 +118,13 @@ describe("loadConfig", () => {
   it("passes through a custom EMAIL_SYNC_CRON", () => {
     expect(loadConfig({ ...BASE, EMAIL_SYNC_CRON: "*/5 * * * *" }).emailSyncCron).toBe("*/5 * * * *");
   });
+  // An empty cron schedules nothing at all, so a blank value has to fall back
+  // to the documented interval rather than silently disabling the job.
+  it("falls back to the documented cron when a cron variable is empty", () => {
+    expect(loadConfig({ ...BASE, INGEST_CRON: "" }).ingestCron).toBe("0 */6 * * *");
+    expect(loadConfig({ ...BASE, EMAIL_SYNC_CRON: "" }).emailSyncCron).toBe("*/15 * * * *");
+    expect(loadConfig({ ...BASE, DEMO_RESET_CRON: "" }).demoResetCron).toBe("0 */6 * * *");
+  });
 
   it("defaults aiMode to live", () => {
     expect(loadConfig(BASE).aiMode).toBe("live");
@@ -106,11 +137,11 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...BASE, AI_MODE: "bogus" })).toThrow(/AI_MODE/);
   });
 
-  it("defaults aiWritingModels to the free-tier writing-tier fallback list", () => {
+  it("defaults aiWritingModels to the verified writing-tier fallback list", () => {
     expect(loadConfig(BASE).aiWritingModels).toEqual([
-      "deepseek/deepseek-chat:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
-      "google/gemini-2.0-flash-001",
+      "deepseek/deepseek-v4-flash",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("parses AI_WRITING_MODELS as a comma list, trimming whitespace and dropping empties", () => {
@@ -118,16 +149,16 @@ describe("loadConfig", () => {
   });
   it("falls back to the default writing model list when AI_WRITING_MODELS is empty", () => {
     expect(loadConfig({ ...BASE, AI_WRITING_MODELS: "" }).aiWritingModels).toEqual([
-      "deepseek/deepseek-chat:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
-      "google/gemini-2.0-flash-001",
+      "deepseek/deepseek-v4-flash",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("falls back to the default writing model list when AI_WRITING_MODELS holds only separators", () => {
     expect(loadConfig({ ...BASE, AI_WRITING_MODELS: " , ," }).aiWritingModels).toEqual([
-      "deepseek/deepseek-chat:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
-      "google/gemini-2.0-flash-001",
+      "deepseek/deepseek-v4-flash",
+      "qwen/qwen3-30b-a3b-instruct-2507",
+      "meta-llama/llama-3.3-70b-instruct",
     ]);
   });
   it("never returns an empty aiWritingModels list", () => {
@@ -148,6 +179,19 @@ describe("loadConfig", () => {
   });
   it("keeps an absolute AI_REPLAY_DIR as given (the container path)", () => {
     expect(loadConfig({ ...BASE, AI_REPLAY_DIR: "/app/fixtures" }).aiReplayDir).toBe("/app/fixtures");
+  });
+  // The failure this guards is silent, not loud: Compose passes
+  // `AI_REPLAY_DIR: ${AI_REPLAY_DIR:-}` — "" for anyone who never set it —
+  // zod's .default() fires only on undefined, and "" resolved to the repo
+  // root, where no fixture lives. Every replay then missed with no error.
+  it("falls back to the committed fixtures dir when AI_REPLAY_DIR is empty", () => {
+    const dir = loadConfig({ ...BASE, AI_REPLAY_DIR: "" }).aiReplayDir;
+    expect(dir).toBe(path.resolve(process.cwd(), "../..", "packages/ai/fixtures/replay"));
+    expect(dir).not.toBe(path.resolve(process.cwd(), "../.."));
+  });
+  it("falls back to the committed fixtures dir when AI_REPLAY_DIR is whitespace only", () => {
+    expect(loadConfig({ ...BASE, AI_REPLAY_DIR: "   " }).aiReplayDir)
+      .toBe(path.resolve(process.cwd(), "../..", "packages/ai/fixtures/replay"));
   });
 
   it("defaults masterKey to null: email connections disabled with no key configured", () => {
@@ -250,5 +294,57 @@ describe("loadConfig", () => {
   });
   it("rejects a DEMO_ATS_URL that isn't a URL, naming the var in prose", () => {
     expect(() => loadConfig({ ...BASE, DEMO_ATS_URL: "demo-ats:3001" })).toThrow(/DEMO_ATS_URL/);
+  });
+
+  // Demo mode (spec P6 §3): the switch that puts the app on the sandbox
+  // workspace, hides credential setup, and shows the banner. Off by default
+  // like every other gate — a plain checkout must never be a demo.
+  it("defaults demoMode to false", () => {
+    expect(loadConfig(BASE).demoMode).toBe(false);
+  });
+  it("enables demoMode for DEMO_MODE=true", () => {
+    expect(loadConfig({ ...BASE, DEMO_MODE: "true" }).demoMode).toBe(true);
+  });
+
+  // The per-action budget the hosted demo's rate limiter spends (spec P6 §3).
+  // Only consulted when demoMode is on, but parsed always: a nonsense value
+  // should fail at startup, not the first time a visitor clicks something.
+  it("defaults demoRateLimitPerMin to 30", () => {
+    expect(loadConfig(BASE).demoRateLimitPerMin).toBe(30);
+  });
+  it("takes an explicit DEMO_RATE_LIMIT_PER_MIN", () => {
+    expect(loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "5" }).demoRateLimitPerMin).toBe(5);
+  });
+  it("rejects a non-positive DEMO_RATE_LIMIT_PER_MIN", () => {
+    expect(() => loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "0" })).toThrow(/DEMO_RATE_LIMIT_PER_MIN/);
+    expect(() => loadConfig({ ...BASE, DEMO_RATE_LIMIT_PER_MIN: "-1" })).toThrow(/DEMO_RATE_LIMIT_PER_MIN/);
+  });
+
+  // The schedule the worker reseeds the demo workspace on (spec P6 §3). Read
+  // only when demoMode is on — a personal deployment never registers the
+  // queue — but parsed always, like every other cron in this file.
+  it("defaults demoResetCron to every 6 hours", () => {
+    expect(loadConfig(BASE).demoResetCron).toBe("0 */6 * * *");
+  });
+  it("passes through a custom DEMO_RESET_CRON", () => {
+    expect(loadConfig({ ...BASE, DEMO_RESET_CRON: "0 */2 * * *" }).demoResetCron).toBe("0 */2 * * *");
+  });
+
+  // Spec P6 §3: "Chromium runs one at a time, globally". Unlike the demo-only
+  // knobs above this one is NOT gated on demoMode — a browser is the most
+  // expensive thing the app does in any deployment — so the default has to be
+  // the safe number, and zero (which would mean "no browser ever") as well as
+  // a negative must fail loudly at startup.
+  it("defaults autoapplyMaxConcurrentBrowsers to 1", () => {
+    expect(loadConfig(BASE).autoapplyMaxConcurrentBrowsers).toBe(1);
+  });
+  it("takes an explicit AUTOAPPLY_MAX_CONCURRENT_BROWSERS", () => {
+    expect(loadConfig({ ...BASE, AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "3" }).autoapplyMaxConcurrentBrowsers).toBe(3);
+  });
+  it("rejects a non-positive AUTOAPPLY_MAX_CONCURRENT_BROWSERS", () => {
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "0" }))
+      .toThrow(/AUTOAPPLY_MAX_CONCURRENT_BROWSERS/);
+    expect(() => loadConfig({ ...BASE, AUTOAPPLY_MAX_CONCURRENT_BROWSERS: "-2" }))
+      .toThrow(/AUTOAPPLY_MAX_CONCURRENT_BROWSERS/);
   });
 });
