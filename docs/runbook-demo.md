@@ -300,7 +300,7 @@ dc up -d --build
 dc ps && curl -skI -H 'Host: careerhq.nickkalas.dev' https://127.0.0.1/overview | head -1
 ```
 
-To return to the branch afterwards: `git checkout main && dc up -d --build`.
+To return to the branch afterwards: `git checkout master && dc up -d --build`.
 
 **Schema.** There are no down-migrations — `drizzle-kit` only rolls forward.
 If the bad commit added a migration, rolling the code back leaves a schema
