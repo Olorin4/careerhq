@@ -4,7 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { cvFormatSchema } from "@careerhq/contracts";
+import { cvFormatSchema, TEXT_LIMITS } from "@careerhq/contracts";
 import { createCvVariant, listCvFilePaths } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../lib/db.js";
@@ -12,7 +12,10 @@ import { reserveCvUpload } from "../../../lib/cv-storage.js";
 import { demoRateLimit } from "../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../lib/workspace.js";
 
-const metaSchema = z.object({ label: z.string().trim().min(1), format: cvFormatSchema });
+const metaSchema = z.object({
+  label: z.string().trim().min(1).max(TEXT_LIMITS.name),
+  format: cvFormatSchema,
+});
 
 /**
  * Why the upload did nothing, plus the label that was typed so the form can

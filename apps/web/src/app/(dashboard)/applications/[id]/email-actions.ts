@@ -1,12 +1,13 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { emailDraftSchema } from "@careerhq/contracts";
+import { emailDraftSchema, TEXT_LIMITS } from "@careerhq/contracts";
 import {
   createEmailAttempt, resolveReconcile, updateEmailDraft,
 } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { describeZodIssue } from "../../../../lib/form-state.js";
 import { demoRateLimit } from "../../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import {
@@ -42,7 +43,14 @@ export type DraftActionResult =
   | { ok: false; reason: string };
 
 export async function createEmailAttemptAction(raw: unknown): Promise<DraftActionResult> {
-  const { applicationId, connectionId, draft } = draftInputSchema.parse(raw);
+  // safeParse, not parse: `emailDraftSchema` caps the subject and body a person
+  // typed, and the panel already renders `{ ok: false, reason }` — a throw here
+  // would be the full-page error overlay instead.
+  const parsedInput = draftInputSchema.safeParse(raw);
+  if (!parsedInput.success) {
+    return { ok: false, reason: describeZodIssue(parsedInput.error, "invalid draft") };
+  }
+  const { applicationId, connectionId, draft } = parsedInput.data;
   const limited = demoRateLimit("createEmailAttempt");
   if (limited) return { ok: false, reason: limited };
   const db = getDb();
@@ -59,7 +67,11 @@ const updateInputSchema = z.object({
 });
 
 export async function updateEmailDraftAction(raw: unknown): Promise<DraftActionResult> {
-  const { applicationId, attemptId, connectionId, draft } = updateInputSchema.parse(raw);
+  const parsedInput = updateInputSchema.safeParse(raw);
+  if (!parsedInput.success) {
+    return { ok: false, reason: describeZodIssue(parsedInput.error, "invalid draft") };
+  }
+  const { applicationId, attemptId, connectionId, draft } = parsedInput.data;
   const limited = demoRateLimit("updateEmailDraft");
   if (limited) return { ok: false, reason: limited };
   const db = getDb();
@@ -87,12 +99,21 @@ export async function previewSubmissionAction(raw: unknown): Promise<PreviewOutc
 const confirmInputSchema = z.object({
   applicationId: z.string().uuid(),
   attemptId: z.string().uuid(),
-  presentedToken: z.string().min(1),
-  retypedTarget: z.string(),
+  presentedToken: z.string().min(1).max(TEXT_LIMITS.name),
+  // Both are typed by hand into the confirmation box; the target is an address here.
+  retypedTarget: z.string().max(TEXT_LIMITS.emailAddress),
 });
 
 export async function confirmAndSendAction(raw: unknown): Promise<ConfirmOutcome> {
-  const { applicationId, attemptId, presentedToken, retypedTarget } = confirmInputSchema.parse(raw);
+  const parsedInput = confirmInputSchema.safeParse(raw);
+  if (!parsedInput.success) {
+    return {
+      status: "blocked",
+      code: "invalid_input",
+      reason: describeZodIssue(parsedInput.error, "invalid confirmation"),
+    };
+  }
+  const { applicationId, attemptId, presentedToken, retypedTarget } = parsedInput.data;
   // Before `confirmAndSend` and therefore before the token is burned, before
   // `beginSubmission` and before any transport is built.
   const limited = demoRateLimit("confirmAndSend");
@@ -112,13 +133,17 @@ const reconcileInputSchema = z.object({
   applicationId: z.string().uuid(),
   attemptId: z.string().uuid(),
   resolution: z.enum(["submitted", "failed"]),
-  evidenceNote: z.string().trim().optional(),
+  evidenceNote: z.string().trim().max(TEXT_LIMITS.note).optional(),
 });
 
 export type ReconcileActionResult = { ok: true } | { ok: false; reason: string };
 
 export async function resolveReconcileAction(raw: unknown): Promise<ReconcileActionResult> {
-  const { applicationId, attemptId, resolution, evidenceNote } = reconcileInputSchema.parse(raw);
+  const parsedInput = reconcileInputSchema.safeParse(raw);
+  if (!parsedInput.success) {
+    return { ok: false, reason: describeZodIssue(parsedInput.error, "invalid resolution") };
+  }
+  const { applicationId, attemptId, resolution, evidenceNote } = parsedInput.data;
   const limited = demoRateLimit("resolveReconcile");
   if (limited) return { ok: false, reason: limited };
   const db = getDb();

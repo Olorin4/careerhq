@@ -1,5 +1,44 @@
 import { z } from "zod";
 
+/**
+ * Length caps for free text a *person* types into the app.
+ *
+ * Until these existed, every free-text field was bounded only by Next's
+ * server-action body limit — `experimental.serverActions.bodySizeLimit` in
+ * `apps/web/next.config.ts`, raised to 6 MB so a real CV upload is refused by
+ * the app's own message rather than by a 413. That limit applies to every
+ * action, so raising it for one file upload loosened the implicit bound on
+ * every `notes` textarea in the app by the same factor. A cap of 50 000
+ * characters is roughly 120× tighter than that, and still an order of
+ * magnitude more than any cover letter anyone has written.
+ *
+ * These bound only what a human submits through a form. Machine-produced text
+ * — a parsed job description, a model's rationale, an extracted form field's
+ * help text — is deliberately NOT capped here: those schemas describe data the
+ * app receives rather than data it accepts, and a `.max()` there would turn an
+ * unusually long job posting into a failed ingest.
+ */
+export const TEXT_LIMITS = {
+  /** A one-line name or title: company, job title, CV label, watchlist entry. */
+  name: 200,
+  /** A URL typed or pasted into a field. Comfortably past the ~2 000 every browser caps at. */
+  url: 2_048,
+  /** An email address. The exact RFC 5321 maximum, so no legal address is refused. */
+  emailAddress: 254,
+  /** One line of a one-per-line textarea: a role, a stack item, a keyword. */
+  term: 100,
+  /** How many lines one of those textareas may contribute. */
+  terms: 200,
+  /** A sentence, shown as a heading: a fact's claim, an email subject. */
+  headline: 500,
+  /** A short note: reconcile evidence, an application question. */
+  note: 2_000,
+  /** A paragraph or two: a fact's supporting detail, one answer to a form field. */
+  detail: 10_000,
+  /** Long-form text a person wrote: a cover letter, an email body, a long answer. */
+  prose: 50_000,
+} as const;
+
 export const APPLICATION_STATES = [
   "DISCOVERED", "SHORTLISTED", "PREPARING", "READY_FOR_REVIEW", "SUBMITTED",
   "ACKNOWLEDGED", "INTERVIEW", "OFFER", "REJECTED", "WITHDRAWN", "EXPIRED",
@@ -67,11 +106,20 @@ export const normalizedJobSchema = z.object({
 });
 export type NormalizedJob = z.infer<typeof normalizedJobSchema>;
 
+/**
+ * The four keyword lists come from plain textareas (one term per line —
+ * `parseLines` in the settings action splits them), so they are free text a
+ * visitor types and are capped both per term and in count. Everything a real
+ * profile holds is a handful of short phrases; 200 terms of 100 characters is
+ * generous by two orders of magnitude and still bounded.
+ */
+const termListSchema = z.array(z.string().max(TEXT_LIMITS.term)).max(TEXT_LIMITS.terms);
+
 export const scoringProfileSchema = z.object({
-  roles: z.array(z.string()).default([]),
-  stack: z.array(z.string()).default([]),
-  boost: z.array(z.string()).default([]),
-  exclude: z.array(z.string()).default([]),
+  roles: termListSchema.default([]),
+  stack: termListSchema.default([]),
+  boost: termListSchema.default([]),
+  exclude: termListSchema.default([]),
   requireRemote: z.boolean().default(true),
   includeUnknownRemote: z.boolean().default(true),
   minRoleHits: z.number().int().min(0).default(1),
@@ -156,10 +204,15 @@ export const imapConfigSchema = z.object({
 });
 export type ImapConfig = z.infer<typeof imapConfigSchema>;
 
+/**
+ * The subject and body are edited by hand in the email panel before a send, so
+ * they are capped like the app's other person-typed prose. `to` is capped too:
+ * it is a typed address, not a parsed one.
+ */
 export const emailDraftSchema = z.object({
-  to: z.string().email(),
-  subject: z.string().trim().min(1),
-  body: z.string().trim().min(1),
+  to: z.string().email().max(TEXT_LIMITS.emailAddress),
+  subject: z.string().trim().min(1).max(TEXT_LIMITS.headline),
+  body: z.string().trim().min(1).max(TEXT_LIMITS.prose),
   cvVariantId: z.string().uuid().optional(),
 });
 export type EmailDraft = z.infer<typeof emailDraftSchema>;
