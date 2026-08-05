@@ -9,7 +9,7 @@ import type { RawFormPage } from "@careerhq/autoapply";
 import { DEMO_MAX_EVIDENCE_STORE_FILES, ORPHAN_GRACE_MS } from "@careerhq/core/storage";
 import {
   createApplication, createCvVariant, createDb, createSiteAttempt, getAttempt,
-  getLatestSnapshot, saveFormSnapshot, workspaces, type Db,
+  getLatestSnapshot, saveFormSnapshot, updateRecoveryState, workspaces, type Db,
 } from "@careerhq/db";
 import type { BrowserSession } from "../autoapply/driver.js";
 import { runCaptureJob, runSubmitJob } from "./autoapply.js";
@@ -125,6 +125,35 @@ function expectPolicyPredicate(deps: { isNavigationAllowed: (url: string) => boo
   expect(deps.isNavigationAllowed("file:///etc/passwd")).toBe(false);
 }
 
+/**
+ * A stand-in for the driver's `DriverError`, built the way the job recognises
+ * one — by `name` plus a string `kind`, never `instanceof`, because this suite
+ * mocks the whole driver module away and an `instanceof` against a mocked-away
+ * class answers false in the unsafe direction.
+ */
+function driverError(message: string, kind: string): Error {
+  const err = new Error(message);
+  err.name = "DriverError";
+  return Object.assign(err, { kind });
+}
+
+/**
+ * A `FILE_STORAGE_DIR` that cannot be created: a path *inside* a regular file,
+ * so the job's `mkdir` fails with a real ENOTDIR. Used to fail the post-click
+ * evidence write without mocking `node:fs/promises`, so what is asserted is the
+ * job's behaviour on a genuine filesystem failure.
+ */
+function unwritableStorageDir(): string {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), "careerhq-unwritable-")), "not-a-directory");
+  writeFileSync(file, "this is a file, not a directory");
+  return path.join(file, "storage");
+}
+
+/** The recovery state the job left on the attempt's newest snapshot. */
+async function recoveryOf(attemptId: string): Promise<unknown> {
+  return (await getLatestSnapshot(db, attemptId))?.recoveryState;
+}
+
 const fakeSession: BrowserSession = {
   newPage: () => {
     throw new Error("newPage should be unused — capturePage/fillAndSubmit are mocked directly");
@@ -235,6 +264,28 @@ d("runCaptureJob", () => {
 
     expect(openSessionMock).not.toHaveBeenCalled();
   });
+
+  /**
+   * The capture write is the one thing in the repo that could erase
+   * `runSubmitJob`'s in-flight marker, and the marker is the only record that a
+   * submit click may already have happened. Overwriting it would hand a later
+   * submit retry a clean slate — the double submit, reintroduced sideways.
+   */
+  it("refuses to overwrite a snapshot that has already begun submitting", async () => {
+    const { applicationId, attemptId } = await siteAttempt("Capture After Submit Co");
+    const snapshot = await saveFormSnapshot(db, {
+      attemptId, form: canonicalForm(), answers: plannedAnswers(),
+    });
+    const marker = { kind: "submit_in_flight", startedAt: new Date().toISOString() };
+    await updateRecoveryState(db, snapshot.id, snapshot.currentStep, marker);
+
+    await expect(runCaptureJob(db, config(), {
+      workspaceId, applicationId, attemptId, url: "https://acme.example/jobs/1/apply",
+    })).rejects.toThrow(/already begun submitting/);
+
+    expect(openSessionMock).not.toHaveBeenCalled();
+    expect((await getLatestSnapshot(db, attemptId))?.recoveryState).toEqual(marker);
+  });
 });
 
 d("runSubmitJob", () => {
@@ -288,6 +339,7 @@ d("runSubmitJob", () => {
       confirmationId: "NR-abc123",
       finalUrl: "https://acme.example/apply/1/done",
       screenshotPath,
+      evidenceError: null,
       pageText: "Thanks for applying!",
     });
 
@@ -295,10 +347,18 @@ d("runSubmitJob", () => {
     expect(attempt?.status).toBe("DRAFT");
   });
 
-  it("a driver throw writes no screenshot and leaves recoveryState untouched, but still closes the session", async () => {
+  /**
+   * A `DriverError` of kind "navigation" or "fill" is provably raised BEFORE
+   * the submit button is touched — the same two kinds apps/web's
+   * `PRE_CLICK_DRIVER_ERROR_KINDS` trusts. Nothing was submitted, so this must
+   * keep behaving exactly as it always did: throw, leave no trace, and let
+   * pg-boss retry. The retry half of that is asserted below, because a fix
+   * that made every failure terminal would pass the first half alone.
+   */
+  it("a provably pre-click driver throw writes no screenshot, leaves recoveryState untouched, and stays retryable", async () => {
     const { attemptId } = await siteAttempt("Submit Boom Co");
     await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
-    fillAndSubmitMock.mockRejectedValueOnce(new Error("submit boom"));
+    fillAndSubmitMock.mockRejectedValueOnce(driverError("submit boom", "navigation"));
 
     await expect(runSubmitJob(db, config(), { workspaceId, attemptId })).rejects.toThrow("submit boom");
 
@@ -306,10 +366,136 @@ d("runSubmitJob", () => {
     const screenshotPath = path.join(fileStorageDir, "autoapply", `${attemptId}.png`);
     expect(() => readFileSync(screenshotPath)).toThrow();
 
+    // The in-flight marker was withdrawn: a browser that never clicked must
+    // not leave a "may have clicked" record behind, or the retry below would
+    // be parked instead of run.
     const latest = await getLatestSnapshot(db, attemptId);
     expect(latest?.recoveryState).toBeNull();
     const attempt = await getAttempt(db, attemptId);
     expect(attempt?.status).toBe("DRAFT");
+
+    // pg-boss retries it, and this time it works — the whole point of keeping
+    // the pre-click path retryable.
+    fillAndSubmitMock.mockResolvedValueOnce({
+      confirmationId: "NR-retried",
+      finalUrl: "https://acme.example/apply/1/done",
+      screenshotPng: Buffer.from("fake-png-bytes"),
+      pageText: "Thanks for applying!",
+    });
+    await runSubmitJob(db, config(), { workspaceId, attemptId });
+
+    expect(fillAndSubmitMock).toHaveBeenCalledTimes(2);
+    expect(await recoveryOf(attemptId)).toMatchObject({ kind: "submit_result", confirmationId: "NR-retried" });
+  });
+
+  /**
+   * The hazard this whole shape exists for, in its most direct form: the click
+   * lands and the evidence write fails. `fileStorageDir` points inside a
+   * regular file, so `mkdir` fails with a real ENOTDIR — no mocking of
+   * `node:fs/promises`, so the assertion is about what the job does with a
+   * genuine filesystem failure.
+   *
+   * Everything here is one claim: the submission is a fact in the world, the
+   * missing screenshot is not, and the job says both.
+   */
+  it("a post-click evidence write failure is terminal and honest — never a throw, which pg-boss would retry", async () => {
+    const { attemptId } = await siteAttempt("Evidence Boom Co");
+    await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+    fillAndSubmitMock.mockResolvedValueOnce({
+      confirmationId: "NR-noshot",
+      finalUrl: "https://acme.example/apply/1/done",
+      screenshotPng: Buffer.from("fake-png-bytes"),
+      pageText: "Thanks for applying!",
+    });
+
+    // Does not throw. A throw is a pg-boss retry, and a pg-boss retry here is
+    // a second application.
+    await runSubmitJob(db, config({ fileStorageDir: unwritableStorageDir() }), { workspaceId, attemptId });
+
+    const recovery = await recoveryOf(attemptId);
+    expect(recovery).toMatchObject({
+      kind: "submit_result",
+      confirmationId: "NR-noshot",
+      finalUrl: "https://acme.example/apply/1/done",
+      // The receipt does not claim evidence that does not exist...
+      screenshotPath: null,
+    });
+    // ...and it says why, rather than leaving a silent hole.
+    expect((recovery as { evidenceError: string }).evidenceError).toMatch(/screenshot could not be saved/);
+
+    // The retry pg-boss would make if this had thrown: no second click.
+    await runSubmitJob(db, config({ fileStorageDir: unwritableStorageDir() }), { workspaceId, attemptId });
+    expect(fillAndSubmitMock).toHaveBeenCalledTimes(1);
+    expect(openSessionMock).toHaveBeenCalledTimes(1);
+    expect(await recoveryOf(attemptId)).toMatchObject({ confirmationId: "NR-noshot", screenshotPath: null });
+  });
+
+  /**
+   * An unclassified throw out of `fillAndSubmit` straddles the click: the
+   * driver did not say it happened before the button, so it may have happened
+   * after. Terminal and parked, never retried — the same judgement
+   * `confirmAndSubmitSite` makes when it chooses NEEDS_RECONCILE over a guess.
+   */
+  it("an unclassified driver throw parks the attempt as submit_unknown instead of inviting a retry", async () => {
+    const { attemptId } = await siteAttempt("Ambiguous Click Co");
+    await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+    fillAndSubmitMock.mockRejectedValueOnce(new Error("Target page, context or browser has been closed"));
+
+    await runSubmitJob(db, config(), { workspaceId, attemptId });
+
+    const recovery = await recoveryOf(attemptId);
+    expect(recovery).toMatchObject({ kind: "submit_unknown" });
+    expect((recovery as { reason: string }).reason).toMatch(/may have landed/);
+    expect(sessionCloseMock).toHaveBeenCalledTimes(1);
+
+    // And it stays parked: a second run neither clicks nor re-opens a browser.
+    await runSubmitJob(db, config(), { workspaceId, attemptId });
+    expect(fillAndSubmitMock).toHaveBeenCalledTimes(1);
+    expect(openSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The case no post-click write could ever cover: the process died between
+   * the marker and the result, so the row says "a click was in progress" and
+   * nothing says how it went. The retry must refuse to click on the strength
+   * of that marker alone.
+   */
+  it("a retry that finds an in-flight marker records submit_unknown without opening a browser", async () => {
+    const { attemptId } = await siteAttempt("Killed Mid Click Co");
+    const snapshot = await saveFormSnapshot(db, {
+      attemptId, form: canonicalForm(), answers: plannedAnswers(),
+    });
+    await updateRecoveryState(db, snapshot.id, snapshot.currentStep, {
+      kind: "submit_in_flight", startedAt: new Date().toISOString(),
+    });
+
+    await runSubmitJob(db, config(), { workspaceId, attemptId });
+
+    expect(openSessionMock).not.toHaveBeenCalled();
+    expect(fillAndSubmitMock).not.toHaveBeenCalled();
+    const recovery = await recoveryOf(attemptId);
+    expect(recovery).toMatchObject({ kind: "submit_unknown" });
+    expect((recovery as { reason: string }).reason).toMatch(/already clicked Submit/);
+  });
+
+  /** A completed run is a no-op on retry, not a second submission. */
+  it("does not click again when the snapshot already carries a submit_result", async () => {
+    const { attemptId } = await siteAttempt("Already Submitted Co");
+    await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+    fillAndSubmitMock.mockResolvedValueOnce({
+      confirmationId: "NR-once",
+      finalUrl: "https://acme.example/apply/1/done",
+      screenshotPng: Buffer.from("fake-png-bytes"),
+      pageText: "Thanks for applying!",
+    });
+
+    await runSubmitJob(db, config(), { workspaceId, attemptId });
+    await runSubmitJob(db, config(), { workspaceId, attemptId });
+    await runSubmitJob(db, config(), { workspaceId, attemptId });
+
+    expect(fillAndSubmitMock).toHaveBeenCalledTimes(1);
+    expect(openSessionMock).toHaveBeenCalledTimes(1);
+    expect(await recoveryOf(attemptId)).toMatchObject({ kind: "submit_result", confirmationId: "NR-once" });
   });
 
   it("refuses before opening a session when a file field's document id does not resolve to a CV variant", async () => {
