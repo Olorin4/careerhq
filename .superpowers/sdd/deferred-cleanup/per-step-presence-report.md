@@ -1,7 +1,7 @@
 # Per-step presence — the field that disappears between review and submit
 
 **Branch** `feature/deferred-cleanup` · **baseline** `b29b335` (1,143 tests) ·
-**commits** `00d443f` (fixture), `feb6434` (fix), `<docs>` (roadmap)
+**commits** `00d443f` (fixture), `feb6434` (fix), `04faf78` (roadmap + this report)
 
 Driven as the bug manifests **before** the fix and re-measured against the same harness after.
 Every claim below is asserted against demo-ats's `/api/submissions` — what the site actually
