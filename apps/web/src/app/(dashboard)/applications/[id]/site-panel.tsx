@@ -11,6 +11,7 @@ import { isConsentOnlyField, isSensitiveField, requiresUserBeforeSubmit } from "
 import type { ApplicationAttempt, CvVariant, FormSnapshot, SiteAttemptDraft } from "@careerhq/db";
 import type { PrepareOutcome, SiteConfirmOutcome, SitePreviewOutcome } from "../../../../lib/site-submission.js";
 import { safeExternalHref } from "../../../../lib/safe-url.js";
+import { formatTimestamp } from "../../../../lib/time.js";
 import { resolveReconcileAction } from "./email-actions.js";
 import {
   confirmAndSubmitSiteAction, prepareSiteApplicationAction, previewSiteSubmissionAction,
@@ -1010,7 +1011,7 @@ function SiteAttemptRow({ applicationId, attempt }: { applicationId: string; att
     <li className={highlighted ? "site-attempt-row site-attempt-row-reconcile" : "site-attempt-row"}>
       <div className="site-attempt-meta">
         <span className={statusBadgeClass(attempt.status)}>{humanize(attempt.status)}</span>
-        <span className="site-attempt-date">{attempt.startedAt.toLocaleString()}</span>
+        <span className="site-attempt-date">{formatTimestamp(attempt.startedAt)}</span>
         {draft?.url && <span className="site-attempt-url">{draft.url}</span>}
       </div>
       {blocked && <p className="site-error">{humanize(blocked.kind)}: {blocked.detail}</p>}

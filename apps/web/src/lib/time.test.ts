@@ -1,5 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { timeAgo } from "./time";
+import { formatDate, formatTimestamp, timeAgo } from "./time";
+
+/**
+ * These are the assertions behind the #418 fix. Vitest never hydrates, so a
+ * green run here does NOT prove the page is clean — what it does prove is the
+ * property the fix rests on: the output depends on neither the host locale nor
+ * the host time zone, so the server and the browser cannot disagree.
+ */
+describe("formatTimestamp / formatDate", () => {
+  const instant = new Date("2026-08-05T13:02:20.877Z");
+
+  it("renders a stable, explicitly-UTC timestamp", () => {
+    expect(formatTimestamp(instant)).toBe("2026-08-05 13:02 UTC");
+  });
+
+  it("accepts the ISO strings the server actions hand back, not just Date", () => {
+    expect(formatTimestamp("2026-08-05T13:02:20.877Z")).toBe(formatTimestamp(instant));
+  });
+
+  it("renders the same text whatever the host time zone is", () => {
+    const original = process.env.TZ;
+    const rendered = new Set<string>();
+    for (const tz of ["UTC", "Europe/Athens", "America/New_York", "Asia/Kolkata"]) {
+      process.env.TZ = tz;
+      rendered.add(formatTimestamp(instant));
+      rendered.add(formatDate(instant));
+    }
+    process.env.TZ = original;
+    // Two values — one timestamp, one date — and not one more.
+    expect(rendered).toEqual(new Set(["2026-08-05 13:02 UTC", "2026-08-05"]));
+  });
+
+  it("renders a date-only value without a time", () => {
+    expect(formatDate(instant)).toBe("2026-08-05");
+  });
+});
 
 describe("timeAgo", () => {
   const baseTime = new Date("2025-08-02T12:00:00Z");

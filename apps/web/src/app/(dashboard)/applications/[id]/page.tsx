@@ -9,6 +9,7 @@ import {
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
 import { safeExternalHref } from "../../../../lib/safe-url.js";
+import { formatDate } from "../../../../lib/time.js";
 import { TransitionButtons } from "../transition-buttons.js";
 import { CvSelect } from "./cv-select.js";
 import { EmailPanel } from "./email-panel.js";
@@ -104,7 +105,7 @@ export default async function ApplicationDetailPage({
         <p>
           Next action: {application.nextAction}
           {application.nextActionDue
-            ? ` — due ${application.nextActionDue.toLocaleDateString()}`
+            ? ` — due ${formatDate(application.nextActionDue)}`
             : ""}
         </p>
       )}

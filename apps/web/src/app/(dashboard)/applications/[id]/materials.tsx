@@ -7,6 +7,7 @@ import type { GeneratedDocument } from "@careerhq/db";
 import { ProvenanceChips } from "../../../../components/provenance-chips.js";
 import type { GenerationOutcome } from "../../../../lib/generation.js";
 import { REPLAY_MISS, replayMissMessage } from "../../../../lib/replay-miss.js";
+import { formatTimestamp } from "../../../../lib/time.js";
 import {
   approveDocumentAction, createManualDocumentAction, generateDocumentAction, rejectDocumentAction,
 } from "./materials-actions.js";
@@ -233,7 +234,7 @@ function MaterialSection({
               <span className="badge badge-ai-draft">AI-generated — not yet approved</span>
             )}
             <span className="badge">{humanize(document.approval)}</span>
-            <span className="materials-doc-date">{document.createdAt.toLocaleString()}</span>
+            <span className="materials-doc-date">{formatTimestamp(document.createdAt)}</span>
           </div>
           <pre className="materials-doc-content">{document.contentMd}</pre>
           <ProvenanceChips factIds={document.sourceFactIds} factClaims={factClaims} />
