@@ -286,6 +286,61 @@ export async function beginSubmission(db: DbOrTx, input: {
 }
 
 /**
+ * The exact inverse of {@link beginSubmission}, and the only way out of
+ * SUBMITTING that does not close the attempt: the confirmation goes back to
+ * unconsumed, the pending receipt is cleared, and the attempt returns to
+ * PENDING_CONFIRMATION — one transaction, so a confirmation can never read
+ * "live" for an attempt that is still mid-submission.
+ *
+ * CALL THIS ONLY WHEN NOTHING WAS SUBMITTED, AND ONLY WHEN THAT IS PROVABLE.
+ * Its one caller is `confirmAndSubmitSite`'s `isPreClickDriverFailure` branch
+ * (apps/web/src/lib/site-submission.ts): a `DriverError` of kind `navigation`
+ * or `fill` is raised before the submit button is touched, so the browser
+ * cannot have sent anything. Every ambiguous outcome — a click that timed out,
+ * a between-steps advance, an unrecognised throw — still parks in
+ * NEEDS_RECONCILE, because handing a token back for a submission that MAY have
+ * landed is how you get a double application, which is the worst thing this
+ * system can do. `PRE_CLICK_DRIVER_ERROR_KINDS` is where that judgement lives
+ * and it is deliberately narrow; nothing here can widen it.
+ *
+ * Why the attempt has to be SUBMITTING and the confirmation has to be the one
+ * `beginSubmission` burned: `recordPreview` supersedes every unconsumed
+ * confirmation when it issues a new one, so restoring a row by any looser
+ * predicate could resurrect a superseded token. It cannot happen in practice
+ * (an attempt in SUBMITTING is not previewable, so no newer row can exist), and
+ * this is what keeps that true if the statuses ever change.
+ *
+ * An expired confirmation is restored expired, not refreshed: the gate matrix
+ * then reports `token_expired` and the user re-previews the attempt, which
+ * PENDING_CONFIRMATION allows. Minting time here would be inventing consent.
+ */
+export async function abandonSubmission(db: Db, input: {
+  attemptId: string; confirmationId: string;
+}): Promise<AttemptOutcome> {
+  return refusable(() => db.transaction(async (tx) => {
+    const attempt = await lockAttempt(tx, input.attemptId);
+    if (attempt.status !== "SUBMITTING") {
+      throw new AttemptRefusal(`only a submitting attempt can be abandoned (status ${attempt.status})`);
+    }
+
+    const restored = await tx.update(attemptConfirmations)
+      .set({ consumedAt: null })
+      .where(and(
+        eq(attemptConfirmations.id, input.confirmationId),
+        eq(attemptConfirmations.attemptId, input.attemptId),
+      ))
+      .returning({ id: attemptConfirmations.id });
+    if (restored.length === 0) throw new AttemptRefusal("confirmation not found for this attempt");
+
+    // `failureReason` is cleared with the receipt: the attempt is live again,
+    // and a stale reason on a PENDING_CONFIRMATION row reads as a failure.
+    await advance(tx, attempt.id, attempt.status, "PENDING_CONFIRMATION", {
+      pendingReceipt: null, failureReason: null,
+    });
+  }));
+}
+
+/**
  * Records a successful submission: attempt SUBMITTING→SUBMITTED with its
  * confirmed receipt and `submitted_at`, plus the genuine guarded
  * READY_FOR_REVIEW→SUBMITTED application transition (trigger "attempt",

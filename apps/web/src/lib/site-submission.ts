@@ -22,6 +22,7 @@ import {
 } from "@careerhq/core/gates";
 import { reserveEvidenceScreenshot } from "@careerhq/core/storage";
 import {
+  abandonSubmission,
   applicationEvents as applicationEventsTable, beginSubmission, completeSubmission,
   createSiteAttempt, cvVariants as cvVariantsTable, failSubmission, findRequisitionAttempt,
   formSnapshots as formSnapshotsTable,
@@ -230,16 +231,29 @@ function errorMessage(err: unknown): string {
  *     rest of the form through, because the receipt written below would then
  *     record a decision the employer never received (or the opposite one).
  *     Reported as "fill" because it is strictly stronger than one: nothing on
- *     the page was touched at all, so the attempt is FAILED and retryable —
- *     re-run auto-apply, review the question as it now reads, submit again —
- *     never parked NEEDS_RECONCILE for a submission that provably never
- *     happened.
+ *     the page was touched at all.
+ *
+ * What membership of this set BUYS is the whole point of it (P6 final review,
+ * BLOCKING 1): a refusal here does not merely avoid NEEDS_RECONCILE, it costs
+ * the visitor nothing at all. `confirmAndSubmitSite` hands the confirmation
+ * back unspent and rewinds the attempt to PENDING_CONFIRMATION
+ * (`abandonSubmission`), so the same token confirms again once the cause is
+ * gone — which is what "a browser that never clicked cannot have submitted"
+ * has to mean if it means anything. It used to mean a terminal FAILED attempt
+ * with a burned token and no way to re-preview, i.e. exactly the state
+ * {@link BROWSER_BUSY_ABANDONED_REASON} was written to describe, reached from
+ * two refusals that were added after that lesson was learned.
+ *
  * Everything else stays ambiguous on purpose. "submit" is the click itself;
  * "advance" is the between-steps click, which was dispatched before its error
  * surfaced and may have been the real submit on an ATS whose next-labelled
  * button the step heuristics misplaced; "timeout" is what a CLICK-phase
  * timeout collapses to, and a click that timed out may still have landed —
- * which is exactly why it must not be widened into this set.
+ * which is exactly why it must not be widened into this set. The cost of
+ * getting that wrong is now higher in one direction and unchanged in the
+ * other: a kind wrongly ADDED here makes a possible submission retryable, and
+ * a double application is the worst outcome this system has. Add nothing to
+ * this set that the driver does not raise before the click.
  */
 const PRE_CLICK_DRIVER_ERROR_KINDS: ReadonlySet<string> = new Set(["navigation", "fill"]);
 
@@ -300,6 +314,28 @@ const BROWSER_BUSY_REASON = "the auto-apply browser is busy with another applica
 const BROWSER_BUSY_ABANDONED_REASON =
   "the auto-apply browser was busy, so nothing was submitted — this attempt is closed and its "
   + "confirmation is spent; start auto-apply again from the job URL to try once more";
+
+/**
+ * What a pre-click driver refusal adds to the driver's own sentence. It is a
+ * statement of fact about what just happened to the visitor's confirmation, and
+ * it is only true because `abandonSubmission` succeeded — see the branch that
+ * uses it. "review it again" rather than "just retry": the two refusals that
+ * reach here (a question whose text changed, a redirect off the allowed host)
+ * are both the page disagreeing with what was reviewed, so confirming again
+ * unchanged will simply refuse again.
+ */
+const PRE_CLICK_RETRY_HINT =
+  " — your confirmation has not been used, so review the page again and confirm when it is what you expect";
+
+/**
+ * The same refusal when the give-back fails, which leaves the visitor where
+ * they used to be for every one of these: nothing submitted, but the attempt
+ * closed and the confirmation gone. Same instruction as
+ * {@link BROWSER_BUSY_ABANDONED_REASON} for the same reason — a fresh
+ * auto-apply run is the only route left, so say so instead of implying a retry.
+ */
+const PRE_CLICK_ABANDONED_SUFFIX =
+  " — this attempt is closed and its confirmation is spent; start auto-apply again from the job URL";
 
 /**
  * A stable, human-readable attachment name derived from the variant label. It
@@ -977,6 +1013,13 @@ export async function previewSiteSubmission(
  * have landed. An exception, or a confirmation page with no confirmation id,
  * parks the attempt in NEEDS_RECONCILE for a human — recording a false
  * "submitted" or a false "failed" are both worse than asking.
+ *
+ * The one exception is the refusal the driver raises BEFORE the click
+ * (`PRE_CLICK_DRIVER_ERROR_KINDS`). `beginSubmission` has already run by then,
+ * so that refusal cannot be handled by ordering alone: it is undone instead —
+ * `abandonSubmission` un-consumes the confirmation and rewinds the attempt to
+ * PENDING_CONFIRMATION, and the outcome is `blocked`, like every other refusal
+ * that costs the visitor nothing. Ambiguity is never undone, only parked.
  */
 export async function confirmAndSubmitSite(
   deps: SiteDeps,
@@ -1186,8 +1229,27 @@ export async function confirmAndSubmitSite(
       await failSubmissionSafely(deps, attempt.id, BROWSER_BUSY_ABANDONED_REASON);
       return { status: "failed", reason: BROWSER_BUSY_ABANDONED_REASON };
     }
+    // Provably pre-click: the driver refused while navigating or before it
+    // typed a character, so no button was pressed and nothing left the browser.
+    // The attempt is put back exactly where `beginSubmission` found it —
+    // PENDING_CONFIRMATION, token unspent — and the refusal is reported in the
+    // same `blocked` shape as every other harmless one, so the confirm screen
+    // keeps the preview and the SAME token confirms again once the cause is
+    // gone. Nothing was spent, so nothing is owed.
     if (isPreClickDriverFailure(err)) {
-      const reason = `the form could not be filled in, so nothing was submitted: ${redactError(err, [])}`;
+      const detail = `the form could not be filled in, so nothing was submitted: ${redactError(err, [])}`;
+      const returned = await abandonSubmission(db, {
+        attemptId: attempt.id, confirmationId: confirmation.id,
+      });
+      if (returned.ok) {
+        return { status: "blocked", code: "driver_refused", reason: `${detail}${PRE_CLICK_RETRY_HINT}` };
+      }
+      // The give-back itself was refused (the attempt moved underneath us, the
+      // row is gone). Fall back to the old, weaker outcome rather than leaving
+      // the attempt SUBMITTING: still true — nothing was submitted — and still
+      // never NEEDS_RECONCILE, but terminal, so it says so.
+      console.error(`[site-submission] attempt ${attempt.id} could not be rewound: ${returned.reason}`);
+      const reason = `${detail}${PRE_CLICK_ABANDONED_SUFFIX}`;
       await failSubmissionSafely(deps, attempt.id, reason);
       return { status: "failed", reason };
     }

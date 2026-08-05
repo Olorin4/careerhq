@@ -16,10 +16,11 @@ within a few days, and expect an honest answer about whether a fix is planned
 rather than a silent triage queue.
 
 Findings against the hosted demo at <https://careerhq.nickkalas.dev> are welcome.
-It holds nothing real (see "The hosted demo" below), so please do not spend
-effort on data exfiltration there — the interesting questions are whether a
-visitor can reach the outside world, escape the sandbox workspace, or cost the
-host more than the demo's own caps allow.
+It holds no personal data of any kind — the only real records in it are public
+job advertisements, see "The hosted demo" below — so please do not spend effort
+on data exfiltration there. The interesting questions are whether a visitor can
+reach the outside world, escape the sandbox workspace, or cost the host more
+than the demo's own caps allow.
 
 ## The credential master key
 
@@ -117,10 +118,42 @@ creation server-side, rate-limits mutating actions, and rebuilds itself from a
 fixed seed every six hours. Visitors cannot configure a real mailbox or reach a
 real employer.
 
-**Every record in it is fictional.** The persona is "Alex Demo"; the companies,
-jobs, facts, CVs and mail are invented for the seed. No real person's data has
-ever been in that database, and the reset means nothing a visitor types survives
-six hours either.
+**The persona and everything attached to it are fictional.** "Alex Demo", the
+applications and their companies, the facts, the CVs, the generated materials
+and the mail are all invented for the seed. No real person's data has ever been
+in that database, and the reset means nothing a visitor types survives six hours
+either.
+
+**One screen is deliberately not fictional: the discovery inbox.** The worker
+runs `discovery.ingest` on the same six-hourly cron a self-hosted install uses,
+against the same five keyless public feeds — Remotive, RemoteOK, Arbeitnow, We
+Work Remotely and The Muse — so most of what a visitor sees scored and ranked at
+`/jobs` is a **real, currently-advertised job at a real company**, sitting beside
+the 30 seeded listings. That is the point: watching the scorer rank genuine
+postings is worth more than uniformity, and it is the one part of the pipeline a
+fixture cannot honestly stand in for. An earlier version of this section said
+every record in the demo was fictional; for this screen that was false.
+
+What that does *not* involve, stated plainly:
+
+- **No personal data of any real person.** These feeds return public job
+  advertisements — company, title, location, salary band, description, a link
+  back to the posting. There is no applicant, no candidate and no named
+  individual in them.
+- **Read-only public GETs.** Ingestion issues HTTP `GET` to documented public
+  endpoints and nothing else. It holds no account and no credential for any of
+  them, posts nothing, and alters nothing. It identifies itself honestly as
+  `CareerHQ/0.6 (+https://careerhq.nickkalas.dev)`
+  (`packages/ingest/src/net.ts`) rather than impersonating a browser — the same
+  boundary [ADR-0006](docs/adr/0006-scraping-and-tos-boundaries.md) draws.
+- **Bounded, not accumulating.** Ingested listings are written into the demo
+  workspace, and the six-hourly rebuild deletes that workspace row, which
+  cascades to `jobs`, `companies` and `ingest_runs`. Measured locally against
+  the real feeds: 39 job rows after a reset (30 seeded listings plus the nine
+  jobs behind the seeded applications), 466 after one ingest run inserted 427,
+  and 39 again after the next reset. A missed reset would not compound either —
+  `jobs_workspace_source_external` is unique, so a second run over the same
+  feeds updates rows rather than inserting them.
 
 What a visitor **can** do: browse and edit everything, promote a discovered job,
 generate grounded materials (from committed AI fixtures — `AI_MODE=replay`, with
@@ -135,7 +168,7 @@ tokens, keep anything past the next reset, or reach Postgres, Mailpit or
 the edge proxy.
 
 **There is no login, and that is deliberate for the demo specifically.** It is a
-public exhibit holding fictional data with every mutating channel shut; an
+public exhibit holding no personal data, with every mutating channel shut; an
 authentication wall would add a secret to protect without protecting anything.
 Do not read that as a property of CareerHQ itself — see the last bullet under
 "Known limitations".
@@ -235,9 +268,14 @@ dropped between phases.
   control unless it still has the same id, the same field-identity hash (the
   selector *and* the question beside it) and the same field kind it had when the
   user reviewed it, checked from both directions — over the live page's fields
-  and over the reviewed ones. A mismatch throws pre-click, so the attempt comes
-  out `FAILED` and retryable rather than parked as `NEEDS_RECONCILE`; a browser
-  that never clicked cannot have submitted.
+  and over the reviewed ones. A mismatch throws pre-click, so the refusal costs
+  the visitor nothing: the confirmation token is handed back unspent, the
+  attempt returns to `PENDING_CONFIRMATION`, and the same token confirms again
+  once the page is what was reviewed — rather than the attempt being parked as
+  `NEEDS_RECONCILE`. A browser that never clicked cannot have submitted, and
+  that is the whole warrant for undoing the confirmation: every *ambiguous*
+  outcome still parks for a human with the token spent, because a retry there
+  could produce a second application.
 
   What remains open: a control the user answered that **vanishes** is caught
   only within steps the page has actually rendered. "Rendered steps" is inferred

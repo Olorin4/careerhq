@@ -1,6 +1,6 @@
 # Career HQ
 
-**Live demo: <https://careerhq.nickkalas.dev>** — no signup, fictional data, resets every six hours. What you can and cannot do there is spelled out in [Live demo](#live-demo).
+**Live demo: <https://careerhq.nickkalas.dev>** — no signup, a fictional persona, a live feed of real job listings, resets every six hours. What you can and cannot do there is spelled out in [Live demo](#live-demo).
 **Source: <https://github.com/Olorin4/careerhq>** · [`SECURITY.md`](SECURITY.md) · [MIT licensed](LICENSE)
 
 An AI-assisted, self-hosted job-search workflow platform. It helps a single owner discover suitable roles, prepare grounded application materials from a personal fact bank, submit them through supported channels under an explicit multi-layer safety protocol, and track outcomes on a Kanban-style tracker with a full event history.
@@ -49,7 +49,7 @@ This is a portfolio project built to demonstrate full-stack product engineering 
 - **Demo safety as a runtime mode, not a fork** (P6): one `DEMO_MODE` env plus a `workspaces.kind = "sandbox"` row selects the demo workspace, disables credential setup **server-side** (the UI state is not the enforcement), arms a per-action rate limiter, renders the never-dismissible banner, and schedules a wipe-and-reseed of the sandbox workspace every six hours inside a single advisory-locked transaction. Nothing about the personal-mode code path changes. The reset queue is registered *only* in demo mode, and the worker `unschedule`s it when demo mode is off, so a one-off demo run cannot leave a data-deleting job firing forever.
 - **The demo cannot reach anything real**: `infra/docker-compose.demo.yml` pins both live-submission gates `false` **as literals** — no env file, shell variable or `docker compose` invocation can open them — deletes `OPENROUTER_API_KEY` outright (`!reset`, so it is *absent*, not empty), runs AI in replay against committed fixtures, and publishes only `web`, only on `127.0.0.1`. Postgres, Mailpit and `demo-ats` have no published ports at all.
 - **Bounded for a shared 3.7 GB VPS**: a hard `mem_limit` per service (2756 MB worst case), rotated logs, `shm_size` sized for Chromium's renderer, one headless browser per process with an honest "busy, try again" refusal that holds its slot across a whole confirm so a refusal cannot burn a confirmation token, and disk ceilings a reset gives back — 2 MB per CV and 64 MB/100 files for the demo's CV store, a shared 64 MB/200-file ceiling for auto-apply evidence screenshots reserved *before* the submit click.
-- **The driver refuses to fill a field whose question changed since review**: same id, same field-identity hash (selector *and* the question beside it), same field kind, checked from both the live page's side and the reviewed side, before a single keystroke. A mismatch throws pre-click, so the attempt is `FAILED` and retryable rather than parked — a browser that never clicked cannot have submitted.
+- **The driver refuses to fill a field whose question changed since review**: same id, same field-identity hash (selector *and* the question beside it), same field kind, checked from both the live page's side and the reviewed side, before a single keystroke. A mismatch throws pre-click, and a pre-click refusal costs nothing: the confirmation is handed back unspent and the attempt stays confirmable, rather than being parked for a human — a browser that never clicked cannot have submitted.
 - **Portfolio surface**: [`SECURITY.md`](SECURITY.md), an MIT [`LICENSE`](LICENSE), [`docs/runbook-demo.md`](docs/runbook-demo.md) with real deploy/update/reset/backup/restore/rollback commands, an automated screenshot gallery and walkthrough recording, and a quickstart verified from a clean clone.
 - CI (GitHub Actions): lint, typecheck, dependency-cruiser import-boundary checks, and the test suite against a real Postgres service container, including a Mailpit round-trip e2e suite (`apps/web/src/lib/email-e2e.test.ts`) and a real-Chromium `demo-ats` round-trip e2e suite (`apps/web/src/lib/site-e2e.test.ts`, 8 cases: the full happy path, the checkbox-attestation consent-tick demotion, all five gate refusals, and both blocker kinds) that both skip cleanly with no `TEST_DATABASE_URL` or an unreachable dependency.
 
@@ -57,9 +57,11 @@ Everything past this point — the restricted-source connector (P7) — is **pla
 
 ## Live demo
 
-<https://careerhq.nickkalas.dev> — no signup, nothing to install, and nothing real inside it.
+<https://careerhq.nickkalas.dev> — no signup, nothing to install, and no personal data of anyone inside it.
 
-The persona is the same fictional "Alex Demo" the local seed uses. Every company, job, fact, CV and message is invented; no real person's data has ever been in that database.
+The persona is the same fictional "Alex Demo" the local seed uses. Every application, fact, CV and message is invented; no real person's data has ever been in that database.
+
+**One thing there is real, on purpose: the discovery inbox.** The demo runs the same keyless-public ingestion a self-hosted install does, so `/jobs` fills every six hours with genuine, currently-advertised listings from Remotive, RemoteOK, Arbeitnow, We Work Remotely and The Muse, scored and ranked beside the 30 seeded ones. Watching the scorer rank real postings is the point; a fixture cannot honestly stand in for it. Those are public job advertisements — no applicant or individual's data — fetched with read-only HTTP GETs under an honest `CareerHQ/0.6` user agent, and wiped by the same six-hourly reset. [`SECURITY.md`](SECURITY.md#the-hosted-demo) spells out the boundary.
 
 **What you can do there**
 
@@ -72,11 +74,11 @@ The persona is the same fictional "Alex Demo" the local seed uses. Every company
 
 - **Configure a real mailbox.** `/settings/email` renders an explanatory panel instead of the connection form, and both server actions refuse regardless — the UI is not the enforcement.
 - **Reach a real employer.** Auto-apply can only reach the bundled `demo-ats` service; email can only reach an internal Mailpit sink that accepts mail and never delivers it.
-- **Spend anyone's model tokens.** No provider key is deployed at all; AI runs from committed replay fixtures.
+- **Spend anyone's model tokens.** No provider key is deployed at all; AI runs from committed replay fixtures — a real recorded generation per seeded application, for both the cover letter and the email body. Anything outside that recorded set (a free-text screening question, an application you add yourself) says so in a sentence rather than generating.
 - **Keep your work.** The workspace is wiped and reseeded **every six hours**. Anything you type is temporary by design.
 - **Reach anything but the web app.** Postgres, Mailpit and `demo-ats` publish no ports; only `web` is exposed, and only through the edge proxy.
 
-There is no login on the demo — it is a public exhibit of fictional data with every mutating channel shut, so a password would be a secret to protect that protects nothing. That is a property of *the demo*, not of CareerHQ: a personal install holding real data must have authentication put in front of it. See [`SECURITY.md`](SECURITY.md).
+There is no login on the demo — it is a public exhibit holding no personal data, with every mutating channel shut, so a password would be a secret to protect that protects nothing. That is a property of *the demo*, not of CareerHQ: a personal install holding real data must have authentication put in front of it. See [`SECURITY.md`](SECURITY.md).
 
 ## Quickstart
 
@@ -112,6 +114,8 @@ pnpm --filter @careerhq/web dev   # http://localhost:3000
 ```
 
 Mailpit's web UI is at `http://localhost:8025` — the dev/demo SMTP sink that stands in for a real mail provider from P4 onward.
+
+**Every published port binds to `127.0.0.1`.** Docker publishes to `0.0.0.0` by default and its own firewall rules sit ahead of UFW, so an unqualified publish is reachable from the internet on any box with a public IP — and Mailpit's UI is an unauthenticated view of every message the app "sent". `infra/docker-compose.yml` therefore binds Postgres, Mailpit and `demo-ats` to loopback, and `web` too unless you set `CAREERHQ_WEB_BIND=0.0.0.0` for a LAN demo. Containers reach each other by service name on the compose network, so nothing needs a published port to work.
 
 **If a port is already taken.** Postgres publishes `${CAREERHQ_PG_PORT:-5432}`, so set `CAREERHQ_PG_PORT=5433` (and match it in `.env`'s `DATABASE_URL`) if 5432 is busy. Mailpit's `1025`/`8025` and `demo-ats`'s `3001` are fixed: if you already run something on them — including another copy of this stack — stop that first, since Compose cannot start a second publisher of the same host port.
 

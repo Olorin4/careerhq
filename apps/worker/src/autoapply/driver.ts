@@ -600,7 +600,9 @@ const TICKABLE_KINDS: ReadonlySet<FieldKind> = new Set<FieldKind>(["checkbox", "
  * field whose id MOVED used to be silently not typed, fail HTML5 validation and
  * come back `confirmationId: null` — which apps/web parks NEEDS_RECONCILE,
  * sending a human to reconcile a submission that provably never happened. Both
- * are now `kind: "fill"`: pre-click, honest, and retryable.
+ * are now `kind: "fill"` — which apps/web reads as provably pre-click and
+ * therefore costing the visitor nothing: the confirmation is handed back
+ * unspent and the attempt stays previewable, so "retryable" is literal.
  *
  * What is deliberately NOT required:
  *

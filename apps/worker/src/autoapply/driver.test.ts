@@ -101,12 +101,15 @@ describe("EXTRACT_SCRIPT parity with rawPageFromHtml", () => {
 
 // ---------------------------------------------------------------------------
 // The cross-app contract. `apps/web`'s site orchestrator classifies a driver
-// failure as pre-click (→ FAILED) or ambiguous (→ NEEDS_RECONCILE) by reading
+// failure as pre-click (→ blocked, token returned) or ambiguous
+// (→ NEEDS_RECONCILE) by reading
 // `name` and `kind` off the thrown error STRUCTURALLY — it takes its driver by
 // injection and must not pull `playwright` into its own module graph to run an
 // `instanceof`. These two properties are therefore a published contract, not an
 // implementation detail: renaming either silently downgrades every provably
-// pre-click failure into a human reconciliation task.
+// pre-click failure into a human reconciliation task — and, since the P6 final
+// review, also into a spent confirmation, because pre-click is what buys the
+// token back.
 // ---------------------------------------------------------------------------
 describe("DriverError's cross-app contract", () => {
   it('reports name "DriverError" and a string kind', () => {
@@ -516,9 +519,10 @@ live("driver against demo-ats", () => {
    * under an unchanged snapshot.
    *
    * Two assertions carry this test. `kind: "fill"` is what apps/web reads as
-   * provably pre-click, so the attempt is FAILED and retryable instead of
-   * parked NEEDS_RECONCILE; and the empty submissions list is the proof behind
-   * it — the refusal happened before any click, so the site has nothing.
+   * provably pre-click, so the attempt keeps its confirmation and stays
+   * previewable instead of being parked NEEDS_RECONCILE; and the empty
+   * submissions list is the proof behind it — the refusal happened before any
+   * click, so the site has nothing.
    */
   it("refuses to fill a field whose question changed since review, and submits nothing", async () => {
     const jobId = "consent-drift-1";
@@ -819,7 +823,8 @@ live("driver against a page that mutates between review and submit", () => {
    * validation blocked the submit, and `fillAndSubmit` returned
    * `confirmationId: null` — which apps/web parks as NEEDS_RECONCILE, sending a
    * human to reconcile a submission that provably never happened. `kind: "fill"`
-   * is pre-click and honest, and the attempt is retryable.
+   * is pre-click and honest, and the attempt is genuinely retryable — apps/web
+   * gives the confirmation back rather than spending it on the refusal.
    */
   it("refuses when a required field's id moves, instead of typing nothing and parking a reconcile", async () => {
     const jobId = `consent-id-shift-${RUN}`;

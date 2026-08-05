@@ -1191,28 +1191,108 @@ d("confirmAndSubmitSite", () => {
     expect((attempt?.pendingReceipt as { channel: string }).channel).toBe("company_site");
   });
 
-  // Spec §11: a failure BEFORE the mutation is a plain FAILED with a redacted
-  // reason; only uncertainty AFTER it earns NEEDS_RECONCILE. `DriverError.kind`
-  // already says which side of the click the driver died on.
-  for (const kind of ["navigation", "fill"] as const) {
-    it(`fails (never parks) an attempt whose driver died pre-click — kind ${kind}`, async () => {
-      const calls: SubmitCall[] = [];
-      const prepared = await previewed(`Pre Click ${kind} Co`);
+  // Spec §11 as revised by the P6 final review (BLOCKING 1): a failure BEFORE
+  // the mutation costs the visitor NOTHING — not the attempt and not the
+  // confirmation — while only uncertainty AFTER it earns NEEDS_RECONCILE.
+  // `DriverError.kind` already says which side of the click the driver died on;
+  // what changed is what "before" is worth. It used to be a terminal FAILED
+  // attempt with a burned token that `previewSiteSubmission` then refused,
+  // which is the exact dead end `08eadd5` was written to make unreachable —
+  // reached again, in-driver, by the navigation policy and the field-identity
+  // check.
+  //
+  // The two errors below are the real ones, verbatim: an off-policy redirect
+  // hop (`navigation`) and the identity check finding a relabelled question
+  // (`fill`).
+  const preClickRefusals = [
+    {
+      kind: "navigation" as const,
+      what: "an off-policy redirect",
+      message: "refusing to open https://elsewhere.example.com/moved: it is not an allowed target for this workspace",
+      matches: /not an allowed target/,
+    },
+    {
+      kind: "fill" as const,
+      what: "a relabelled field",
+      message: 'refusing to fill #comments ("Anything else? (250 words max)"): '
+        + "the question under it changed since this form was reviewed",
+      matches: /the question under it changed/,
+    },
+  ];
 
-      const error = new FakeDriverError(`could not ${kind} the page: net::ERR_CONNECTION_REFUSED`, kind);
-      const outcome = await confirmAndSubmitSite(
-        deps({ submit: stubSubmit(calls, { kind: "throws", error }) }),
-        { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
-      );
-      expect(outcome.status).toBe("failed");
-      if (outcome.status !== "failed") return;
-      expect(outcome.reason).toMatch(/ERR_CONNECTION_REFUSED/);
+  for (const refusal of preClickRefusals) {
+    it(
+      `hands the confirmation back after ${refusal.what} — pre-click, so nothing was spent (kind ${refusal.kind})`,
+      async () => {
+        const calls: SubmitCall[] = [];
+        const prepared = await previewed(`Pre Click ${refusal.kind} Co`);
 
-      const attempt = await getAttempt(db, prepared.attemptId);
-      expect(attempt?.status).toBe("FAILED");
-      expect(attempt?.failureReason).toMatch(/ERR_CONNECTION_REFUSED/);
-    });
+        const error = new FakeDriverError(refusal.message, refusal.kind);
+        const outcome = await confirmAndSubmitSite(
+          deps({ submit: stubSubmit(calls, { kind: "throws", error }) }),
+          { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+        );
+        // A refusal that costs nothing reports itself the way every other
+        // refusal that costs nothing does.
+        expect(outcome).toMatchObject({ status: "blocked", code: "driver_refused" });
+        if (outcome.status !== "blocked") return;
+        expect(outcome.reason).toMatch(refusal.matches);
+        expect(outcome.reason).toMatch(/nothing was submitted/);
+        expect(outcome.reason).toMatch(/confirmation has not been used/);
+
+        // The attempt is back where `beginSubmission` found it: no pending
+        // receipt, no failure reason, and previewable again.
+        const attempt = await getAttempt(db, prepared.attemptId);
+        expect(attempt?.status).toBe("PENDING_CONFIRMATION");
+        expect(attempt?.pendingReceipt).toBeNull();
+        expect(attempt?.failureReason).toBeNull();
+        // Unconsumed AND unexpired — `getActiveConfirmation` hides either.
+        expect((await getActiveConfirmation(db, prepared.attemptId))?.consumedAt ?? null).toBeNull();
+
+        // And the SAME token goes through once the page is what it was — no
+        // re-preview, no fresh auto-apply run, nothing re-typed.
+        const retried = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+          workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+        });
+        expect(retried.status).toBe("submitted");
+        // Two `submit` calls, one application: the refused one typed nothing.
+        expect(calls).toHaveLength(2);
+        expect((await getAttempt(db, prepared.attemptId))?.status).toBe("SUBMITTED");
+      },
+    );
   }
+
+  // The guard on the fix above. Only a PROVABLY pre-click kind may be given
+  // back; the moment a click may have landed, handing the token back would
+  // invite a second application, which is the worst thing this system can do.
+  // So the ambiguous kinds keep exactly the behaviour they had: parked for a
+  // human, token spent, attempt not previewable.
+  it("still parks a post-click ambiguity and does NOT return the token", async () => {
+    const calls: SubmitCall[] = [];
+    const prepared = await previewed("Ambiguous Guard Co");
+
+    const error = new FakeDriverError("could not submit http://demo-ats:3001/x: Timeout 45000ms exceeded", "timeout");
+    const outcome = await confirmAndSubmitSite(
+      deps({ submit: stubSubmit(calls, { kind: "throws", error }) }),
+      { workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST },
+    );
+    expect(outcome.status).toBe("needs_reconcile");
+
+    const attempt = await getAttempt(db, prepared.attemptId);
+    expect(attempt?.status).toBe("NEEDS_RECONCILE");
+    // The token stays spent: a click that timed out may still have landed.
+    expect(await getActiveConfirmation(db, prepared.attemptId)).toBeNull();
+    // Refused twice over, and neither refusal is retryable: NEEDS_RECONCILE is
+    // an in-flight status (`hasBlockingAttempt`), so the gate matrix stops the
+    // retry there — and the token underneath it is spent either way.
+    const retried = await confirmAndSubmitSite(deps({ submit: stubSubmit(calls) }), {
+      workspaceId, attemptId: prepared.attemptId, presentedToken: prepared.token, retypedTarget: APPLY_HOST,
+    });
+    expect(retried).toMatchObject({ status: "blocked", code: "attempt_in_flight" });
+    expect(calls).toHaveLength(1);
+    expect(await previewSiteSubmission(deps(), { workspaceId, attemptId: prepared.attemptId }))
+      .toMatchObject({ status: "blocked" });
+  });
 
   it("still parks an attempt whose SUBMIT click itself failed — that one is genuinely ambiguous", async () => {
     const calls: SubmitCall[] = [];
