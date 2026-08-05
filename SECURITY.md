@@ -235,33 +235,58 @@ Stated plainly rather than omitted. Everything here is also carried in
 [`docs/roadmap.md`](docs/roadmap.md) with its reasoning, so nothing is quietly
 dropped between phases.
 
-- **DNS-name SSRF is not fully closed.** The auto-apply capture path refuses
-  non-`http(s)` URLs and literal-IP hosts in the loopback, link-local, private,
-  unspecified, CGNAT, benchmarking and IPv6-translation ranges, and it applies
-  that policy to *every* navigation — the submitted URL and each redirect hop,
-  judged from the `Location` header before the hop is requested. The check is
-  on the *literal* host, so a DNS name that resolves to a private address still
-  passes; `SANDBOX_SITE_ALLOWED_HOST` limits which names a sandbox workspace
-  may use at all, but a personal install can be pointed at any name. Closing it
-  properly requires resolve-then-pin: resolve the name, reject the resolved
-  address, and connect to the pinned IP so it cannot be re-resolved in between.
+- **SSRF: the main-frame capture path is closed by resolve-then-pin; two
+  narrower paths are not.** The auto-apply capture path refuses non-`http(s)`
+  URLs and literal-IP hosts in the loopback, link-local, private, unspecified,
+  CGNAT, benchmarking and IPv6-translation ranges; it resolves every navigation
+  target's hostname and refuses it unless **every** address it answers with
+  passes that same range table; and it applies both to *every* navigation — the
+  submitted URL and each redirect hop, judged from the `Location` header before
+  the hop is requested. For a main-frame `GET` the request is then made over a
+  socket dialled at the addresses that were judged, so the name cannot be
+  re-resolved between the check and the fetch (`packages/autoapply/src/target-policy.ts`,
+  `apps/worker/src/autoapply/pinned-navigation.ts`).
 
-  An earlier version of this entry said the hosted demo was unaffected because
-  its host allow-list is a separate, earlier layer. That was **wrong**: until
-  the redirect fix, one `302` from the allow-listed host to `127.0.0.1` walked
-  straight through the allow-list, and it was proven doing so. The allow-list
-  narrows which *first* host may be visited; it never constrained where that
-  host could send the browser next. It does now, because the same policy is
-  re-applied at each hop rather than once at the door.
+  What that closes, proven rather than argued: `127-0-0-1.nip.io` is a real
+  public hostname whose A record is `127.0.0.1`. Before the fix, a capture of
+  it returned a loopback-only page's contents in `bodyText` — one request
+  reached the loopback server. After it, the navigation is refused with
+  *"resolves to 127.0.0.1, which is on an internal network"* and the loopback
+  server receives **zero** requests, on the first navigation and on a redirect
+  hop alike; `https://example.com/` still captures normally through the pinned
+  fetch. The probe is committed as
+  `apps/worker/src/autoapply/pinned-navigation.test.ts`.
 
-  Two residual gaps in the same area, stated rather than implied:
-  the redirect chain is walked for `GET` navigations only — a non-`GET`
-  navigation (the submit POST) is policy-checked on its target and then
-  backstopped by a landed-URL assertion *after* the click, so an off-policy
-  redirect there is caught before any content is read but after the form was
-  sent; and a sandbox workspace pointed at `localhost` by
-  `SANDBOX_SITE_ALLOWED_HOST` may reach any *port* on that host, since the
-  allow-list names a host and not an origin.
+  What remains, stated rather than implied:
+
+  - **A non-`GET` navigation and every subresource are not pinned.** They are
+    policy-checked and resolution-checked, but Chromium makes those connections
+    itself and resolves the name again to do it, so a rebinding answer landing
+    in that window would not be caught. The submit `POST` is also not
+    chain-walked — it is backstopped by a landed-URL assertion *after* the
+    click. Replaying a multipart POST to close either is the trade this project
+    keeps refusing: it risks submitting an application twice.
+  - **Subresources are not host-checked at all** (they never were): they are
+    not navigations and cannot return a body to the app, so an internal address
+    reached that way is a blind request, not a read.
+
+  An earlier version of this entry said the hosted demo was unaffected by any
+  of this because its host allow-list is a separate, earlier layer. That was
+  **wrong**: until the redirect fix, one `302` from the allow-listed host to
+  `127.0.0.1` walked straight through the allow-list, and it was proven doing
+  so. The allow-list narrows which *first* target may be visited; it never
+  constrained where that target could send the browser next. It does now,
+  because the same policy is re-applied at each hop rather than once at the
+  door.
+- **The sandbox allow-list is now an origin comparison, but its shipped value
+  still names only a host.** `SANDBOX_SITE_ALLOWED_HOST` is compared as scheme
+  + host + port, and accepts `demo-ats`, `demo-ats:3001` or
+  `http://demo-ats:3001`. A value that names a port pins it — the fix for a
+  sandbox pointed at `localhost` being able to reach Postgres, Redis and the
+  app's own port on the same box — and one that names no port still matches any
+  port on that host, which is what `demo-ats` (the default, and the value in
+  both Compose files) does today. Pin the port explicitly for a sandbox on
+  `localhost`; `.env.example` and README's env table now show that spelling.
 - **Live-page re-verification now fails closed — with one hole left.** An
   earlier version of this document said re-verification "is not implemented".
   That is no longer true: before a single keystroke the driver refuses to fill a
