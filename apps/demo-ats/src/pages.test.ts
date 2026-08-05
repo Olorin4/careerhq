@@ -8,6 +8,7 @@ import {
   leverPage,
   loginPage,
   signaturePage,
+  steppedConsentPage,
 } from "./pages.js";
 
 const job = { id: "eng-1", title: "Senior Robotics Engineer", company: "Northwind Robotics" };
@@ -82,6 +83,48 @@ describe("demo-ats pages", () => {
     // No custom widget stands in for it — the point is a control Playwright
     // cannot act on, so uncheck() times out.
     expect(html).toContain('id="btn_submit"');
+  });
+
+  /**
+   * The fixture the identity check had no shape for: every other multi-step
+   * page here renders all of its steps up front, so "later-step controls are
+   * REPLACED rather than revealed" could not be reproduced at all.
+   */
+  it("stepped page renders BOTH steps up front, consent box pre-ticked", () => {
+    const html = steppedConsentPage(job, "all");
+    expect(html).toContain('data-step="1"');
+    expect(html).toContain('data-step="2"');
+    expect(html).toContain(
+      '<input type="checkbox" id="background_check_consent" name="background_check_consent" value="true" checked />',
+    );
+    // No script: this rendering is inert markup, so a capture of it is a
+    // capture of the whole form.
+    expect(html).not.toContain("<script>");
+  });
+
+  it("stepped page in 'replaced' mode ships ONLY the first step in the DOM", () => {
+    const html = steppedConsentPage(job, "replaced");
+    expect(html).toContain('data-step="1"');
+    // Step 2 exists only inside the script that inserts it after "Next" —
+    // nothing that parses the DOM can see the consent box before that click.
+    const beforeScript = html.slice(0, html.indexOf("<script>"));
+    expect(beforeScript).not.toContain('data-step="2"');
+    expect(beforeScript).not.toContain("background_check_consent");
+    expect(html).toContain("background_check_consent");
+    // And the first step is genuinely replaced, not hidden: the wizard's
+    // children are cleared before step 2 goes in.
+    expect(html).toContain('wizard.textContent = ""');
+  });
+
+  it("both stepped renderings post to the same endpoint and share step ids", () => {
+    for (const render of ["all", "replaced"] as const) {
+      const html = steppedConsentPage(job, render);
+      expect(html).toContain('action="/stepped/apply/eng-1"');
+      expect(html).toContain('id="btn_next_1"');
+      expect(html).toContain('id="btn_submit"');
+      const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
   });
 
   it("signature page carries a typed-signature and date attestation, no checkbox", () => {

@@ -343,6 +343,113 @@ export function hiddenConsentPage(job: DemoJob): string {
   return layout(`${job.title} at ${job.company}`, body);
 }
 
+/** How a {@link steppedConsentPage} renders its second step. See that page's docs. */
+export type StepRendering = "all" | "replaced";
+
+/** Step 1 of the replaced-step wizard: identity, always in the DOM. */
+const STEPPED_SECTION_1 = `<section data-step="1">
+      <h2>Your Information</h2>
+      <div class="field">
+        <label for="name">Full Name</label>
+        <input type="text" id="name" name="name" aria-required="true" required />
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" aria-required="true" required />
+      </div>
+    </section>`;
+
+/**
+ * Step 2 of the replaced-step wizard: availability and a PRE-TICKED background
+ * check consent. In `"all"` it is served in the DOM; in `"replaced"` the very
+ * same markup is carried in the page's script and inserted only after "Next".
+ */
+const STEPPED_SECTION_2 = `<section data-step="2">
+      <h2>Availability and Consent</h2>
+      <div class="field">
+        <label for="available_from">Earliest start date</label>
+        <input type="text" id="available_from" name="available_from" />
+      </div>
+      <div class="field">
+        <label for="background_check_consent">
+          <input type="checkbox" id="background_check_consent" name="background_check_consent" value="true" checked />
+          I consent to Northwind Robotics carrying out a background check.
+        </label>
+      </div>
+    </section>`;
+
+/**
+ * Replaced-step fixture: a two-step wizard that can render its later step
+ * either up front (`"all"`) or ONLY after "Next" is clicked, at which point the
+ * first step's controls are REMOVED from the DOM (`"replaced"`).
+ *
+ * Every other multi-step fixture here — `greenhousePage` above — renders all of
+ * its steps up front, and that is precisely why a documented gap in the
+ * driver's live-page re-verification survived unproven: the driver infers which
+ * steps are "rendered" from a single pre-click extraction, and a page that
+ * REPLACES its later-step controls rather than revealing them looks, at that
+ * moment, like a one-step form. A field the user decided about on a later step
+ * is then absent from the extraction, is written off as "a step this page has
+ * not rendered yet", and is not judged at all.
+ *
+ * The two renderings are the same form, and that is the point: a page can be
+ * captured as `"all"` at review time — the user reads the consent statement,
+ * unticks the box — and served as `"replaced"` at submit time, where the driver
+ * cannot see the consent control, cannot untick it, and clicks "Next" into a
+ * step whose box is still ticked. Whatever `/api/submissions` records for that
+ * job is then ground truth about which of the two decisions the employer was
+ * told.
+ *
+ * The `"replaced"` script carries the first step's values forward as hidden
+ * inputs, which is what a real wizard does and what makes the submitted body a
+ * complete application rather than an obviously broken one.
+ */
+export function steppedConsentPage(job: DemoJob, render: StepRendering = "all"): string {
+  const action = `/stepped/apply/${escapeHtml(job.id)}`;
+  const sections = render === "all" ? `${STEPPED_SECTION_1}\n    ${STEPPED_SECTION_2}` : STEPPED_SECTION_1;
+  // No innerHTML for the carried values: they are user-typed strings, and a
+  // fixture that HTML-injects them would be testing the escaping, not the step
+  // rendering. The section markup itself is static, so it is inserted as HTML.
+  const script =
+    render === "replaced"
+      ? `
+  <script>
+  (function () {
+    var wizard = document.getElementById("wizard");
+    var next = document.getElementById("btn_next_1");
+    var step2 = ${JSON.stringify(STEPPED_SECTION_2)};
+    next.addEventListener("click", function () {
+      var carried = [];
+      wizard.querySelectorAll("input, select, textarea").forEach(function (el) {
+        var hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = el.name;
+        hidden.value = el.value;
+        carried.push(hidden);
+      });
+      wizard.textContent = "";
+      carried.forEach(function (el) { wizard.appendChild(el); });
+      wizard.insertAdjacentHTML("beforeend", step2);
+      next.disabled = true;
+    });
+  })();
+  </script>`
+      : "";
+  const body = `<div id="application_form" data-source="greenhouse" data-job-id="${escapeHtml(job.id)}">
+  <h1>${escapeHtml(job.title)} at ${escapeHtml(job.company)}</h1>
+  <form action="${action}" method="post" enctype="multipart/form-data">
+    <div id="wizard">
+    ${sections}
+    </div>
+    <div class="wizard-controls">
+      <button type="button" id="btn_next_1">Next</button>
+      <button type="submit" id="btn_submit">Submit Application</button>
+    </div>
+  </form>${script}
+</div>`;
+  return layout(`${job.title} at ${job.company}`, body);
+}
+
 /**
  * Pause-and-return fixture: a CAPTCHA blocker that auto-apply cannot solve.
  */
