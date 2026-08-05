@@ -278,15 +278,17 @@ dropped between phases.
   constrained where that target could send the browser next. It does now,
   because the same policy is re-applied at each hop rather than once at the
   door.
-- **The sandbox allow-list is now an origin comparison, but its shipped value
-  still names only a host.** `SANDBOX_SITE_ALLOWED_HOST` is compared as scheme
-  + host + port, and accepts `demo-ats`, `demo-ats:3001` or
-  `http://demo-ats:3001`. A value that names a port pins it — the fix for a
-  sandbox pointed at `localhost` being able to reach Postgres, Redis and the
-  app's own port on the same box — and one that names no port still matches any
-  port on that host, which is what `demo-ats` (the default, and the value in
-  both Compose files) does today. Pin the port explicitly for a sandbox on
-  `localhost`; `.env.example` and README's env table now show that spelling.
+- **The sandbox allow-list is an origin comparison, and what ships names an
+  origin — closed.** `SANDBOX_SITE_ALLOWED_HOST` is compared as scheme + host +
+  port, and the defaults now name a full origin: `packages/config`, both
+  Compose files, `.env.example` and README's env table all read
+  `http://demo-ats:3001`. That closes the case where a sandbox pointed at
+  `localhost` could reach Postgres, Redis or the app's own port on the same
+  box. A value naming no port still matches any port on that host, and the bare
+  spelling is still accepted deliberately — rejecting it would break every
+  existing deployment for a hardening an operator can simply write out — but
+  nothing ships loose, and a config test asserts the default parses as an
+  origin carrying a port, so it cannot regress unnoticed.
 - **Live-page re-verification now fails closed — with one hole left.** An
   earlier version of this document said re-verification "is not implemented".
   That is no longer true: before a single keystroke the driver refuses to fill a
@@ -302,46 +304,101 @@ dropped between phases.
   outcome still parks for a human with the token spent, because a retry there
   could produce a second application.
 
-  What remains open: a control the user answered that **vanishes** is caught
-  only within steps the page has actually rendered. "Rendered steps" is inferred
-  from a single pre-click extraction, so a multi-step form whose later fields are
-  *replaced* rather than revealed after "Next" would not be judged at all. The
-  bundled `demo-ats` renders all its steps up front, so no committed test covers
-  that shape — it is the gap most likely to matter against a real Greenhouse or
-  Lever page, and no real ATS was available to probe this against.
-- **Rate limiting is per-process and per-action, not per-visitor.** One
-  aggressive visitor consumes the shared budget for everyone. The browser
-  concurrency cap has the same shape: it is enforced per process, so the `web`
-  and `worker` containers can each hold one Chromium open and the box can see
-  two. A host-wide cap needs a lock outside both processes (a Postgres advisory
-  lock is the obvious candidate — both already connect).
-- **Eleven mutating server actions are still unthrottled**, across
-  `applications/`, `facts/`, `inbox/` and `settings/actions.ts`. None is
-  dangerous on a public URL: they write rows, which the six-hourly reset
-  reclaims — unlike CV upload, which wrote files it did not, and is throttled.
-  The gap is stated rather than papered over because a partial pass is worse
-  than none: throttling one action and not its neighbour in the same file
-  advertises a guarantee that file does not have.
-- **Free-text fields have no length cap.** `notes`, `claim`, `detail` and the
-  scoring textareas are bounded only by Next's server-action body limit — which
-  this repo deliberately raised from 1 MB to 6 MB so the CV caps could be the
-  ones that decide, so that implicit bound is now six times looser than it was.
+  A control the user answered that **vanishes** is now caught on every step. It
+  used to be judged only within steps the page had actually rendered, inferred
+  from a single pre-click extraction — so a wizard that *replaced* its later
+  step instead of revealing it defeated the inference outright. That step test
+  is gone rather than replaced by a larger mechanism: the driver fills from the
+  pre-click extraction and nothing else, so a control missing from it is one it
+  will never touch on **any** step, and for a field the user decided about that
+  means the decision cannot reach the form — the page's default goes instead.
+  Proven against a `demo-ats` fixture built for the shape, the one the bundled
+  site could not express, which is why the gap survived: reviewed with the
+  consent box unticked and served progressively at submit, the driver used to
+  record `background_check_consent: "true"` against a receipt that said
+  declined; it now refuses pre-click and nothing reaches the site.
+
+  What remains is a different question, and not this check's business: a control
+  the review **never showed** and the plan never answered — a pre-ticked box
+  appearing only after "Next" — is still submitted as the page ships it. That is
+  review completeness, not field identity. Relatedly, a progressive form is
+  still submitted at its first step, because the step count comes from the
+  reviewed snapshot. No real ATS was available to probe any of this against —
+  only `demo-ats`.
+- **Rate limiting is per-action and shared, not per-visitor — and that is a
+  decision, not an omission.** There is no authentication and no session here:
+  the demo is one workspace every visitor shares, so a per-visitor budget would
+  have to key on an IP or a cookie, both of which the visitor controls, and
+  neither would give anyone their own data. Behind Cloudflare the origin sees
+  proxy addresses, so it would also mean trusting `X-Forwarded-For` — a header
+  the box's edge overwrites and a `docker compose up` from a clean clone does
+  not — which would make the limiter bypassable *and* turn its bounded map of
+  action names into an unbounded map of attacker-chosen keys. What bounds the
+  expensive paths is a resource, not a rate: the browser cap below, the CV and
+  evidence disk ceilings, the six-hourly reset and the container `mem_limit`s.
+  The roadmap's "Carried beyond P6 → Operational" carries the full reasoning.
+- **The browser concurrency cap is host-wide now, and it is not fenced against
+  a second host.** It used to be per process — `web` and `worker` each holding
+  their own "one Chromium", so the box could see two, against `mem_limit`s
+  sized for a bounded number of browsers. Both now take a session-level
+  `pg_try_advisory_lock` on a dedicated connection before a browser is
+  launched, in addition to the per-process counter. The lock is non-blocking,
+  so a refusal is immediate and honest rather than a queue that could outlive a
+  confirmation token; and Postgres releases every lock a connection held the
+  moment it dies, so an OOM-killed container strands no slot. What it does
+  *not* bound: two hosts pointed at the same database would share these slots —
+  correct for the lock, wrong for a RAM budget — and a lock connection that
+  silently reconnects mid-hold drops its slot, degrading to the per-process cap
+  that shipped before.
+- **Every mutating server action is throttled — closed.** The remaining eleven,
+  across `applications/`, `facts/`, `inbox/` and `settings/actions.ts`, were
+  done in one pass rather than piecemeal, because throttling one action and not
+  its neighbour in the same file advertises a guarantee that file does not
+  have. Throttling applies only in demo mode; a self-hosted install is never
+  throttled.
+- **Free-text fields are length-capped — closed.** `TEXT_LIMITS` in
+  `packages/contracts` bounds every field a person types (note 2 000, detail
+  10 000, prose 50 000 characters, and so on) — roughly 120× tighter than the
+  6 MB server-action body limit this repo raised so the CV caps could be the
+  ones that decide. Rejections render as a message rather than throwing. The
+  email-connection fields are deliberately uncapped: every action in that file
+  refuses before parsing anything in demo mode, so the visitor those caps exist
+  to bound cannot reach them.
 - **The worker's auto-apply queue consumers must not be registered as they
-  stand.** `autoapply.capture` and `autoapply.submit` are deliberately absent
-  from `apps/worker/src/main.ts` (the §11 gate lives in `apps/web`, not in the
-  jobs). Beyond that: in `runSubmitJob` a `writeFile` failure *after* the submit
-  click throws, and pg-boss would retry the job — a second submission of an
-  application that already went through. This is a hard precondition on ever
-  registering those consumers, not a nice-to-have. Double submission is the
-  exact failure the whole gated protocol exists to prevent.
-- **A `NEEDS_RECONCILE` attempt's screenshot can be reclaimed out from under
-  its own message.** The path is persisted to no row, so in demo mode the
-  evidence collector deletes the file about five minutes later while the
-  attempt's reason still tells the user to go and look at it. Demo-only — the
-  collector does not run outside it — but it is evidence for the one outcome
-  that exists because the result was ambiguous, which is when evidence matters
-  most. The fix is to persist the path onto the snapshot's `recovery_state`,
-  which the worker already does elsewhere.
+  stand — for three reasons, none of them the one this entry used to name.**
+  `autoapply.capture` and `autoapply.submit` are deliberately absent from
+  `apps/worker/src/main.ts`.
+
+  The retry hazard this entry described is **closed**: a `writeFile` failure
+  after the submit click used to throw, and pg-boss would have retried the job —
+  reproduced before fixing, one user intent producing three real applications.
+  A marker is now written in the instant *before* the click (the only thing that
+  covers a process killed mid-click), a provably pre-click failure withdraws it
+  so genuine retries still work, and nothing after the click throws.
+
+  What actually blocks registration is larger:
+
+  - **The §11 gate does not run inside the jobs.** `runSubmitJob` enforces the
+    sandbox host allow-list and nothing else — it never reads
+    `SUBMISSIONS_LIVE_COMPANY_SITE`, never touches a confirmation token, never
+    checks a payload fingerprint. Registering the consumers would make anything
+    able to insert a pg-boss row a live-submit path with **no consent check**.
+  - **There is no reader.** Nothing enqueues either queue, and no production
+    `SiteDeps.submit` turns a job's result into an attempt transition, so a
+    registered consumer would strand attempts in `SUBMITTING` and buy nothing.
+  - **No queue-level duplicate or in-flight check.** Two jobs for two different
+    attempts on one application would both click.
+- **A `NEEDS_RECONCILE` attempt's screenshot is kept — closed.** The path used
+  to be persisted to no row, so in demo mode the evidence collector deleted the
+  file about five minutes later while the attempt's reason still told the user
+  to go and look at it — evidence for the one outcome that exists *because* the
+  result was ambiguous, which is when evidence matters most. It is now merged
+  onto the newest snapshot's `recovery_state`, on the same key the collector's
+  keep-set already reads, so a reconcile screenshot is a referenced screenshot
+  in the sense the collector understands. Merged rather than replaced, because
+  that row may be carrying the pre-click submit marker. Proven by driving the
+  outcome: aged past the grace window it survives a later collector pass, while
+  a genuine orphan beside it is reclaimed in the same sweep.
 - **There is no authentication.** CareerHQ assumes a single trusted operator on
   a private deployment. Do not expose an instance holding real data to the
   internet without putting your own authentication in front of it.

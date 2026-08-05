@@ -275,19 +275,32 @@ function isPreClickDriverFailure(err: unknown): boolean {
 }
 
 /**
- * `BrowserBusyError` from apps/worker/src/autoapply/browser-limit.ts — the
- * global one-Chromium-at-a-time cap (spec P6 §3) refusing rather than queueing.
+ * The one-Chromium-at-a-time cap (spec P6 §3) refusing rather than queueing —
+ * either half of it.
+ *
+ * `BrowserBusyError` is the per-process counter in
+ * apps/worker/src/autoapply/browser-limit.ts; `HostBrowserBusyError` is the
+ * host-wide advisory lock in packages/db/src/host-lock.ts, which exists because
+ * `web` and `worker` are two processes and two counters saying "one" is two
+ * Chromiums on a 3.7 GB box. They are one outcome here on purpose: to a
+ * visitor, "another application already has the browser" is the same sentence
+ * and the same remedy whichever container is holding it.
  *
  * Recognised by `name`, for the same reason and by the same convention as
  * `isPreClickDriverFailure`: this orchestrator takes its driver by injection
  * and never imports the browser module's graph.
  *
- * It is categorically different from every `DriverError`: no browser was
- * started, so there is not merely no click — there is no page, no navigation
- * and no process. Both places that classify it below lean on exactly that.
+ * Categorically different from every `DriverError`: no browser was started, so
+ * there is not merely no click — there is no page, no navigation and no
+ * process. Both places that classify it below lean on exactly that.
  */
+const BROWSER_BUSY_ERROR_NAMES: ReadonlySet<string> = new Set([
+  "BrowserBusyError",
+  "HostBrowserBusyError",
+]);
+
 function isBrowserBusyFailure(err: unknown): boolean {
-  return err instanceof Error && err.name === "BrowserBusyError";
+  return err instanceof Error && BROWSER_BUSY_ERROR_NAMES.has(err.name);
 }
 
 /**

@@ -18,11 +18,13 @@ import {
 } from "@careerhq/autoapply/policy";
 import { reserveEvidenceScreenshot } from "@careerhq/core/storage";
 import {
+  acquireHostBrowserSlot,
   cvVariants as cvVariantsTable, getApplicationDetail, getAttempt, getLatestSnapshot,
   listEvidenceScreenshotPaths, updateRecoveryState,
   workspaces as workspacesTable,
   type ApplicationAttempt, type Db, type FormSnapshot,
 } from "@careerhq/db";
+import { acquireBrowserSlot, type BrowserSlot } from "../autoapply/browser-limit.js";
 import { capturePage, fillAndSubmit, openSession } from "../autoapply/driver.js";
 
 export interface CaptureJobData {
@@ -204,6 +206,54 @@ async function loadLatestSnapshot(db: Db, attemptId: string): Promise<FormSnapsh
 }
 
 /**
+ * Both halves of the browser cap, held for exactly one job's browser work.
+ *
+ * `acquireBrowserSlot` bounds this process (spec P6 §3);
+ * `acquireHostBrowserSlot` bounds the HOST, and it is the reason this helper
+ * exists at all — `web` drives a browser in-process from its server actions and
+ * this worker drives its own, so two per-process counters each honestly
+ * reporting "one" is two Chromiums against one `mem_limit` arithmetic. The
+ * inner counter is kept as well: it costs no I/O and it still holds when the
+ * database is briefly unreachable.
+ *
+ * Local first, then host, and released in reverse — the same order as
+ * `apps/web/src/lib/site-driver.ts`, so the two processes cannot deadlock
+ * against each other's ordering. Neither lock ever waits in any case.
+ *
+ * A refusal from either half throws, which in this job means the same thing
+ * every other pre-click refusal here means: no browser started, nothing was
+ * written, and pg-boss may safely retry.
+ */
+interface HeldBrowserSlots {
+  /** Handed to `openSession({ slot })` so the session neither takes nor releases a slot of its own. */
+  slot: BrowserSlot;
+  /** Gives both back, host first. Idempotent. */
+  release: () => Promise<void>;
+}
+
+async function acquireBrowserSlots(config: AppConfig): Promise<HeldBrowserSlots> {
+  const inProcess = acquireBrowserSlot();
+  let host: () => Promise<void>;
+  try {
+    host = await acquireHostBrowserSlot(config.databaseUrl, config.autoapplyMaxConcurrentBrowsers);
+  } catch (err) {
+    // Straight back: holding the local slot after the host refused would make
+    // this process refuse itself for the rest of its life.
+    inProcess();
+    throw err;
+  }
+  let released = false;
+  return {
+    slot: inProcess,
+    release: async () => {
+      if (released) return;
+      released = true;
+      try { await host(); } finally { inProcess(); }
+    },
+  };
+}
+
+/**
  * Step 1 of the queue variant (spec §10): open a session, read the live page
  * exactly once, and hand the raw result to the web orchestrator through the
  * snapshot — never parsed here, so this job stays a pure browser step. A
@@ -238,7 +288,11 @@ export async function runCaptureJob(db: Db, config: AppConfig, data: CaptureJobD
   const refusal = refuseCaptureTarget(data.url, policy);
   if (refusal) throw new Error(`autoapply capture: refusing to open ${data.url}: ${refusal}`);
 
-  const session = await openSession();
+  const slots = await acquireBrowserSlots(config);
+  // The slots go back if the launch itself fails — `openSession`'s own throw
+  // path only ever unwinds a slot IT took, and this one is the caller's.
+  const session = await openSession({ slot: slots.slot })
+    .catch(async (err: unknown) => { await slots.release(); throw err; });
   try {
     const page = await capturePage(session, data.url, {
       timeoutMs: config.autoapplyBrowserTimeoutMs,
@@ -254,7 +308,14 @@ export async function runCaptureJob(db: Db, config: AppConfig, data: CaptureJobD
     const recovery: RawPageRecovery = { kind: "raw_page", page };
     await updateRecoveryState(db, snapshot.id, snapshot.currentStep, recovery);
   } finally {
-    await session.close();
+    // Nested, so a `close()` that rejects — a wedged Chromium past its close
+    // budget — still gives both slots back. A leaked slot is worse than a
+    // leaked browser: the container bounds one and nothing bounds the other.
+    try {
+      await session.close();
+    } finally {
+      await slots.release();
+    }
   }
 }
 
@@ -468,7 +529,9 @@ export async function runSubmitJob(db: Db, config: AppConfig, data: SubmitJobDat
   // throws and is retried like every refusal above it. The marker is written
   // after it for exactly that reason — a browser that never started must not
   // leave a "may have clicked" record behind.
-  const session = await openSession();
+  const slots = await acquireBrowserSlots(config);
+  const session = await openSession({ slot: slots.slot })
+    .catch(async (err: unknown) => { await slots.release(); throw err; });
   try {
     const marker: SubmitInFlightRecovery = { kind: "submit_in_flight", startedAt: new Date().toISOString() };
     await updateRecoveryState(db, snapshot.id, snapshot.currentStep, marker);
@@ -529,6 +592,13 @@ export async function runSubmitJob(db: Db, config: AppConfig, data: SubmitJobDat
     // a real submission with no record of itself at all.
     await updateRecoveryState(db, snapshot.id, snapshot.currentStep, recovery);
   } finally {
-    await session.close();
+    // Nested, so a `close()` that rejects — a wedged Chromium past its close
+    // budget — still gives both slots back. A leaked slot is worse than a
+    // leaked browser: the container bounds one and nothing bounds the other.
+    try {
+      await session.close();
+    } finally {
+      await slots.release();
+    }
   }
 }

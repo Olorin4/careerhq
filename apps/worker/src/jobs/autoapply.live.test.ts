@@ -30,6 +30,7 @@ import {
 } from "@careerhq/db";
 import { capturePage, openSession } from "../autoapply/driver.js";
 import { runSubmitJob } from "./autoapply.js";
+import { configureHostBrowserLockClass, resetHostBrowserSlots } from "@careerhq/db";
 
 const DEMO_ATS_URL = (process.env["DEMO_ATS_URL"] ?? "http://localhost:3001").replace(/\/+$/, "");
 const DEMO_ATS_HOST = new URL(DEMO_ATS_URL).hostname;
@@ -177,9 +178,22 @@ async function plannedAttempt(jobId: string): Promise<PlannedAttempt> {
   return { attemptId: attempt.id, snapshotId: snapshot.id, answers, resumeFieldId };
 }
 
+
+/**
+ * This file's own advisory-lock namespace for the host-wide browser cap
+ * (packages/db/src/host-lock.ts). The cap is host-wide by design, so without
+ * this every browser-driving suite in the monorepo would contend for one slot
+ * against a single shared `TEST_DATABASE_URL` — turbo runs the packages' test
+ * tasks concurrently — and a refusal here could come from another process's
+ * suite rather than from the property under test. Per-file namespaces restore
+ * the independence the per-process counter used to give these tests for free.
+ */
+const hostLockClass = 950_000_000 + Math.floor(Math.random() * 10_000_000);
+
 beforeAll(async () => {
   if (!dbUrl || !demoAtsUp || !browserAvailable) return;
   db = createDb(dbUrl);
+  await configureHostBrowserLockClass(hostLockClass);
   const [ws] = await db.insert(workspaces)
     .values({ name: `t-autoapply-live-${Date.now()}`, kind: "sandbox" }).returning();
   workspaceId = ws!.id;
@@ -189,6 +203,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!dbUrl || !demoAtsUp || !browserAvailable) return;
+  await resetHostBrowserSlots();
   await db.delete(workspaces).where(eq(workspaces.id, workspaceId));
   await db.$client.end();
 });
