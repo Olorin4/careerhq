@@ -148,14 +148,22 @@ card, table row, empty state, countdown, provenance chip, section heading, and t
 
 ## Prerequisite: test hooks
 
-**29 class-based selectors are load-bearing** in `apps/web/src/lib/site-e2e.test.ts`,
-`apps/worker/src/autoapply/driver.test.ts` and `scripts/capture-demo-media.ts` —
-`.board-card`, `.job-row-breakdown`, `.materials-needs-facts`, `.badge-ai-draft`
-and others. There are **zero** `data-testid` attributes in the codebase.
+**Corrected after checking, because the first version of this section was wrong.**
+An earlier draft said the e2e suite was coupled to CareerHQ's CSS classes. It is
+not. `apps/web/src/lib/site-e2e.test.ts` and `apps/worker/src/autoapply/driver.test.ts`
+drive **`apps/demo-ats`** — a different app, whose styling is out of scope — through
+the production seam (`makeSiteCapture` / `makeSiteSubmit`) rather than through
+CareerHQ's own pages. Neither selects a CareerHQ class.
 
-A restyle that removes those classes would break the e2e suite *and* the screenshot
-script — and the screenshot script regenerates the README gallery, so it would break
-the very thing that displays the new design.
+**`scripts/capture-demo-media.ts` is the sole external consumer**, and it depends on
+roughly 30 of them: `.board-card`, `.job-row-breakdown`, `.materials-needs-facts`,
+`.badge-ai-draft`, `.site-field-consent`, `.overview-due-list li` and others. There
+are **zero** `data-testid` attributes in the codebase.
+
+So the blast radius is smaller than first stated: a restyle cannot break the test
+suite. What it breaks is the screenshot gallery — which is exactly the artefact that
+displays the new design in the README, and which fails in the worst way, by
+producing plausible-looking images of the wrong elements rather than erroring.
 
 Therefore, before any visual work: add `data-testid` to the selected elements,
 migrate tests and the capture script onto them, and verify green. The restyle can
@@ -199,9 +207,11 @@ there has still delivered the thing that fixes the first impression.
 
 ## Risks
 
-- **Largest diff in the project's history across the most-tested app.** The
-  `data-testid` prerequisite is what keeps it safe; skipping it converts this from
-  a contained change into a source of mystery failures.
+- **Largest diff in the project's history across the most-tested app** — but the
+  tests assert behaviour and database state, not markup, so they are a weaker
+  safety net here than their count suggests. 1,158 passing tests can stay green
+  through a completely broken redesign. The real verification is driving a real
+  `next start` and inspecting the regenerated gallery.
 - **Tailwind adds a dependency and a build step** to a repo whose CI and Docker
   builds are known-good. The build must be verified in the container, not only on
   the host — five packages already shipped a broken `docker build` that the host
