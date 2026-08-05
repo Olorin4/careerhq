@@ -262,17 +262,18 @@ Full repo, run against `careerhq_dc2`:
 | `pnpm depcruise` | `no dependency violations found (724 modules, 2192 dependencies cruised)` |
 | `pnpm test` | see below |
 
-Tests, per package, forced (no turbo cache): demo-ats 12, contracts 19, config 72, email 37,
+**1158 passed, 0 failed**, forced (no turbo cache): demo-ats 12, contracts 19, config 72, email 37,
 ingest 34, autoapply 256, core 143, ai 116, **db 112** (was 105; +7 host-lock), worker 147,
 **web 210** (was 208; +2 cross-process at the app seam).
 
-Baseline for this branch was 1143 at `b29b335`, re-measured and confirmed before any edit.
+Baseline for this branch was 1143 at `b29b335`, re-measured and confirmed before any edit. The
+other 6 of the 15 added tests are the concurrent agent's (`00d443f`/`feb6434`).
 
-**Three failures are not mine and were not touched:** `apps/worker/src/autoapply/driver.test.ts`'s
-three "wizard whose later step is replaced, not revealed" tests, added by the concurrent agent in
-`00d443f`/`feb6434`, fail with `no raw field named name in …/stepped/jobs/…`. They fail in
-isolation as well as under the full run, so they are not contention with my change. That file is
-in `apps/worker/src/autoapply/`, which I was told to stay out of.
+An earlier run of this gate had three failures in
+`apps/worker/src/autoapply/driver.test.ts` ("wizard whose later step is replaced, not revealed",
+`no raw field named name in …/stepped/jobs/…`). They failed in isolation too, so they were not
+contention with this change; they were the concurrent agent's work-in-progress in a directory I
+was told to stay out of, and they are green in the final run above.
 
 ## Also worth a look
 
