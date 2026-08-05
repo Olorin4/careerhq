@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DEMO_MAX_CV_BYTES, DEMO_MAX_CV_STORE_BYTES, DEMO_MAX_CV_STORE_FILES,
-  MAX_CV_BYTES, ORPHAN_GRACE_MS, reserveCvUpload,
+  cvSizeLimit, MAX_CV_BYTES, ORPHAN_GRACE_MS, reserveCvUpload,
 } from "./cv-storage.js";
 
 let dir: string;
@@ -31,6 +31,34 @@ async function seedFile(name: string, bytes: number, ageMs: number): Promise<str
 async function mkStore(): Promise<void> {
   await mkdir(dir, { recursive: true });
 }
+
+/**
+ * The browser-side half of the CV cap (P6 final review, BLOCKING 2). The upload
+ * form checks `file.size` before it submits, because above the framework's
+ * server-action body limit Next answers 413 before `uploadCvAction` runs and the
+ * visitor gets the "Application error" overlay instead of a sentence. The form
+ * cannot import this module (it reads the filesystem), so it is handed
+ * `cvSizeLimit`'s two fields — and they have to be the cap and the wording the
+ * server would use, or the two halves disagree about what is allowed.
+ */
+describe("cvSizeLimit is the cap reserveCvUpload enforces", () => {
+  for (const demoMode of [false, true]) {
+    it(`refuses one byte over its own cap, with its own words (demoMode: ${demoMode})`, async () => {
+      const limit = cvSizeLimit(demoMode);
+      expect(await reserveCvUpload({
+        dir, incomingBytes: limit.maxBytes, referencedPaths: [], demoMode, now: NOW,
+      })).toBeNull();
+      expect(await reserveCvUpload({
+        dir, incomingBytes: limit.maxBytes + 1, referencedPaths: [], demoMode, now: NOW,
+      })).toBe(limit.reason);
+    });
+  }
+
+  it("is the tighter demo cap in demo mode, and the global one otherwise", () => {
+    expect(cvSizeLimit(true).maxBytes).toBe(DEMO_MAX_CV_BYTES);
+    expect(cvSizeLimit(false).maxBytes).toBe(MAX_CV_BYTES);
+  });
+});
 
 describe("reserveCvUpload outside demo mode", () => {
   it("allows anything under the 5 MB per-file cap and never reads the store", async () => {

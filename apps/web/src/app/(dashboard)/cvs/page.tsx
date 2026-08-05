@@ -1,6 +1,8 @@
 import { listCvVariants } from "@careerhq/db";
 import { CV_FORMATS } from "@careerhq/contracts";
+import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../lib/db.js";
+import { cvSizeLimit } from "../../../lib/cv-storage.js";
 import { getActiveWorkspace } from "../../../lib/workspace.js";
 import { CvUploadForm } from "./cv-upload-form.js";
 
@@ -24,8 +26,14 @@ export default async function CvsPage() {
       <h1>CV variants</h1>
       {/* `humanize` runs here, on the server: a "use client" module's exports
           are client references, so the form takes already-labelled options
-          rather than importing the helper across the boundary. */}
-      <CvUploadForm formats={CV_FORMATS.map((format) => ({ value: format, label: humanize(format) }))} />
+          rather than importing the helper across the boundary. `cvSizeLimit`
+          crosses the same way and for a stronger reason — its module reads the
+          filesystem, so the form takes the resolved cap and its wording, not
+          the function. */}
+      <CvUploadForm
+        formats={CV_FORMATS.map((format) => ({ value: format, label: humanize(format) }))}
+        sizeLimit={cvSizeLimit(loadConfig().demoMode)}
+      />
 
       {variants.length === 0 ? (
         <p className="cv-empty">No CV variants uploaded yet.</p>

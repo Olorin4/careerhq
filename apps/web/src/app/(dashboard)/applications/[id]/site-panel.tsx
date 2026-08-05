@@ -36,6 +36,35 @@ const REQUIRES_FRESH_PREVIEW = new Set([
   "fingerprint_mismatch", "token_expired", "token_consumed", "token_invalid", "token_missing",
 ]);
 
+/**
+ * What a server action THROWING looks like to the visitor (P6 final review, A4).
+ *
+ * Every handler below awaits a server action that answers with an outcome
+ * object, and every failure worth telling a user about arrives that way. But an
+ * action can still throw: `prepareSiteApplication` resolves the application,
+ * captures the page for several seconds and only then inserts the attempt, so a
+ * demo reset committing inside that window makes the insert violate a foreign
+ * key — and an uncaught throw out of a server action reaches the browser as the
+ * full-page "Application error" overlay, which is the same thing an oversized
+ * upload used to do (BLOCKING 2) and tells the visitor nothing.
+ *
+ * The thrown value is deliberately NOT rendered: React replaces a server
+ * action's error with an opaque digest in production, so there is no message to
+ * show, and the raw one would be a stack or a Postgres constraint name.
+ */
+const ACTION_THREW = "Something went wrong on the server. Nothing was submitted — try again in a moment.";
+
+/**
+ * The same accident during the confirm, where "nothing happened" is not a claim
+ * this code is entitled to make: `confirmAndSubmitSite` classifies everything
+ * the driver does itself, so a throw that escapes it comes from around that —
+ * and the honest instruction is to look before confirming again, never to
+ * retry blind. Attempt history below the panel is where the answer is.
+ */
+const CONFIRM_THREW =
+  "The server did not answer this confirmation. Do not confirm again until you have checked the attempt "
+  + "history below — it records whether the submission started.";
+
 /** Brief §10.2.8's exact badge labels, in `ANSWER_SOURCES` order. */
 const SOURCE_LABELS: Record<AnswerSource, string> = {
   fact: "Fact",
@@ -153,10 +182,14 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
       return;
     }
     startTransition(async () => {
-      const outcome = await prepareSiteApplicationAction({ applicationId, url: trimmedUrl, overrideDuplicate });
-      setPrepareOutcome(outcome);
-      setConfirmOutcome(null);
-      if (outcome.status !== "failed") router.refresh();
+      try {
+        const outcome = await prepareSiteApplicationAction({ applicationId, url: trimmedUrl, overrideDuplicate });
+        setPrepareOutcome(outcome);
+        setConfirmOutcome(null);
+        if (outcome.status !== "failed") router.refresh();
+      } catch {
+        setError(ACTION_THREW);
+      }
     });
   }
 
@@ -164,13 +197,17 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
     if (!readyState) return;
     setError(null);
     startTransition(async () => {
-      const outcome = await previewSiteSubmissionAction({ applicationId, attemptId: readyState.attemptId });
-      if (outcome.status === "ok") {
-        setPreview(outcome);
-        setConfirmOutcome(null);
-        setRetypedTarget("");
-      } else {
-        setError(outcome.reason);
+      try {
+        const outcome = await previewSiteSubmissionAction({ applicationId, attemptId: readyState.attemptId });
+        if (outcome.status === "ok") {
+          setPreview(outcome);
+          setConfirmOutcome(null);
+          setRetypedTarget("");
+        } else {
+          setError(outcome.reason);
+        }
+      } catch {
+        setError(ACTION_THREW);
       }
     });
   }
@@ -185,9 +222,18 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
     if (!preview || !readyState) return;
     setError(null);
     startTransition(async () => {
-      const outcome = await confirmAndSubmitSiteAction({
-        applicationId, attemptId: readyState.attemptId, presentedToken: preview.token, retypedTarget,
-      });
+      let outcome;
+      try {
+        outcome = await confirmAndSubmitSiteAction({
+          applicationId, attemptId: readyState.attemptId, presentedToken: preview.token, retypedTarget,
+        });
+      } catch {
+        // Not `setConfirmOutcome`: there IS no outcome, and the panel must not
+        // imply one. The preview stays on screen with the warning above it.
+        setError(CONFIRM_THREW);
+        router.refresh();
+        return;
+      }
       setConfirmOutcome(outcome);
 
       if (outcome.status === "submitted") {
@@ -203,8 +249,10 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
         setPreview(null);
       }
       // Any other blocked code (gate_closed, sandbox_blocked, driver_unavailable, application_not_ready,
-      // review_required, …) leaves the token unconsumed — keep the preview on screen so the user can
-      // retry once the underlying condition is fixed.
+      // review_required, driver_refused, …) leaves the token unconsumed — keep the preview on screen so
+      // the user can retry once the underlying condition is fixed. `driver_refused` is the one that
+      // reaches this branch from AFTER `beginSubmission`: the driver refused before it clicked anything,
+      // so the orchestrator gave the confirmation back and the preview on screen is still redeemable.
     });
   }
 
@@ -386,8 +434,14 @@ function ReviewForm({
       };
     }));
     startTransition(async () => {
-      const result = await updatePlannedAnswerAction({ applicationId, snapshotId, fieldId, value });
-      if (!result.ok) setSaveError(result.reason);
+      try {
+        const result = await updatePlannedAnswerAction({ applicationId, snapshotId, fieldId, value });
+        if (!result.ok) setSaveError(result.reason);
+      } catch {
+        // The row above already shows the new value optimistically, so a silent
+        // throw would leave the user believing an answer was saved that was not.
+        setSaveError(ACTION_THREW);
+      }
     });
   }
 
@@ -894,14 +948,18 @@ function SiteReconcilePane({
   function resolve(resolution: "submitted" | "failed") {
     setError(null);
     startTransition(async () => {
-      const result = await resolveReconcileAction({
-        applicationId, attemptId, resolution, evidenceNote: note.trim() || undefined,
-      });
-      if (result.ok) {
-        onResolved?.();
-        router.refresh();
-      } else {
-        setError(result.reason);
+      try {
+        const result = await resolveReconcileAction({
+          applicationId, attemptId, resolution, evidenceNote: note.trim() || undefined,
+        });
+        if (result.ok) {
+          onResolved?.();
+          router.refresh();
+        } else {
+          setError(result.reason);
+        }
+      } catch {
+        setError(ACTION_THREW);
       }
     });
   }

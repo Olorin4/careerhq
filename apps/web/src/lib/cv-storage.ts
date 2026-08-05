@@ -55,6 +55,34 @@ export const DEMO_MAX_CV_STORE_BYTES = 64 * 1024 * 1024;
  */
 export const DEMO_MAX_CV_STORE_FILES = 100;
 
+/**
+ * The per-file cap this deployment actually enforces, and the sentence it
+ * refuses with — the ONE copy of both, shared by the server check
+ * ({@link reserveCvUpload}, which is authoritative) and the browser-side check
+ * in `cv-upload-form.tsx`, which only exists to say the same thing sooner.
+ *
+ * It has to be a value the form can hold, not a function the form can call:
+ * this module reads the filesystem (`@careerhq/core/storage`), so a client
+ * component cannot import it. `cvs/page.tsx` resolves it on the server and
+ * passes the two fields down — which is also why they are a plain number and a
+ * plain string, both serialisable across that boundary.
+ *
+ * Why the browser check matters at all, given the server refuses anyway
+ * (P6 final review, BLOCKING 2): between the largest file the app refuses in
+ * words (5 MB) and the framework's request bound
+ * (`experimental.serverActions.bodySizeLimit`, 6 MB) there is a band where Next
+ * answers 413 BEFORE `uploadCvAction` runs, and the visitor gets the full-page
+ * "Application error" overlay instead of a sentence — measured with a 7 MB PDF
+ * against a real `next start`. A scanned CV is routinely that size. Checking
+ * `file.size` before the form is submitted covers every size, with or without a
+ * proxy in front, and costs one property read.
+ */
+export function cvSizeLimit(demoMode: boolean): { maxBytes: number; reason: string } {
+  return demoMode
+    ? { maxBytes: DEMO_MAX_CV_BYTES, reason: `the hosted demo accepts PDFs up to ${mb(DEMO_MAX_CV_BYTES)}` }
+    : { maxBytes: MAX_CV_BYTES, reason: `PDF exceeds the ${mb(MAX_CV_BYTES)} limit` };
+}
+
 /** One refusal for both ceilings: which one the visitor hit is not their problem. */
 const STORE_FULL_REASON =
   `the demo's CV storage is full (${mb(DEMO_MAX_CV_STORE_BYTES)} or `
@@ -94,11 +122,14 @@ export interface CvUploadRequest {
  * against holding a lock across a disk write.
  */
 export async function reserveCvUpload(request: CvUploadRequest): Promise<string | null> {
-  if (request.incomingBytes > MAX_CV_BYTES) return `PDF exceeds the ${mb(MAX_CV_BYTES)} limit`;
+  // The global cap is checked first even in demo mode, so an 8 MB file is told
+  // about the 5 MB limit rather than the demo's 2 MB one — the same order, and
+  // the same two sentences, as before {@link cvSizeLimit} collected them.
+  const global = cvSizeLimit(false);
+  if (request.incomingBytes > global.maxBytes) return global.reason;
   if (!request.demoMode) return null;
-  if (request.incomingBytes > DEMO_MAX_CV_BYTES) {
-    return `the hosted demo accepts PDFs up to ${mb(DEMO_MAX_CV_BYTES)}`;
-  }
+  const demo = cvSizeLimit(true);
+  if (request.incomingBytes > demo.maxBytes) return demo.reason;
 
   const used = await pruneAndMeasure(
     [request.dir],
