@@ -1,18 +1,19 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { sensitivitySchema } from "@careerhq/contracts";
+import { sensitivitySchema, TEXT_LIMITS } from "@careerhq/contracts";
 import { classifyQuestionSensitivity } from "@careerhq/core";
 import { approveAnswer, createAnswer, rejectAnswer } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { describeZodIssue } from "../../../../lib/form-state.js";
 import { demoRateLimit } from "../../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import { runGeneration, type GenerationOutcome } from "../../../../lib/generation.js";
 
 const askSchema = z.object({
   applicationId: z.string().uuid(),
-  question: z.string().trim().min(3),
+  question: z.string().trim().min(3).max(TEXT_LIMITS.note),
 });
 
 export interface AskQuestionResult {
@@ -32,7 +33,14 @@ export interface AskQuestionResult {
 export async function askQuestionAction(
   raw: { applicationId: string; question: string },
 ): Promise<AskQuestionResult> {
-  const args = askSchema.parse(raw);
+  // safeParse, not parse: `question` is capped now, and a rejected cap has to
+  // reach the panel as a failed outcome it already renders — not as a throw,
+  // which the visitor would see as the full-page error overlay.
+  const parsed = askSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { outcome: { status: "failed", error: describeZodIssue(parsed.error, "invalid question") } };
+  }
+  const args = parsed.data;
   const limited = demoRateLimit("askQuestion");
   if (limited) return { outcome: { status: "failed", error: limited } };
   const db = getDb();
@@ -53,8 +61,8 @@ export async function askQuestionAction(
 
 const manualAnswerSchema = z.object({
   applicationId: z.string().uuid(),
-  question: z.string().trim().min(3),
-  answer: z.string().trim().min(1),
+  question: z.string().trim().min(3).max(TEXT_LIMITS.note),
+  answer: z.string().trim().min(1).max(TEXT_LIMITS.prose),
   sensitivity: sensitivitySchema.default("normal"),
 });
 
@@ -77,7 +85,16 @@ export async function saveManualAnswerAction(
   _previous: ManualAnswerState,
   formData: FormData,
 ): Promise<ManualAnswerState> {
-  const input = manualAnswerSchema.parse(Object.fromEntries(formData));
+  const entries = Object.fromEntries(formData);
+  const parsed = manualAnswerSchema.safeParse(entries);
+  if (!parsed.success) {
+    const answer = entries.answer;
+    return {
+      reason: describeZodIssue(parsed.error, "invalid answer"),
+      answer: typeof answer === "string" ? answer : "",
+    };
+  }
+  const input = parsed.data;
   const limited = demoRateLimit("saveManualAnswer");
   if (limited) return { reason: limited, answer: input.answer };
   const db = getDb();

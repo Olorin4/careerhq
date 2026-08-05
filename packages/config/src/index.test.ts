@@ -238,8 +238,17 @@ describe("loadConfig", () => {
   // The company-site twin of the SMTP allow-list: it gates a sandbox
   // workspace's auto-apply target by hostname, so it must never come back
   // empty either — an empty value would compare equal to nothing at all.
-  it("defaults sandboxSiteAllowedHost to the compose demo-ats service", () => {
-    expect(loadConfig(BASE).sandboxSiteAllowedHost).toBe("demo-ats");
+  it("defaults sandboxSiteAllowedHost to the compose demo-ats service, pinned to one origin", () => {
+    // Not merely "is the string demo-ats": the default must name a full
+    // ORIGIN. A bare hostname is still accepted — existing deployments spell
+    // it that way and `matchesSandboxAllowList` keeps working — but it allows
+    // ANY PORT on that host, which on a Docker network or a localhost setup is
+    // a wider door than it reads as. What ships must be the closed spelling.
+    const value = loadConfig(BASE).sandboxSiteAllowedHost;
+    expect(value).toBe("http://demo-ats:3001");
+    const asOrigin = new URL(value);
+    expect(asOrigin.protocol).toBe("http:");
+    expect(asOrigin.port).not.toBe("");
   });
   it("takes an explicit SANDBOX_SITE_ALLOWED_HOST", () => {
     expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: "localhost" }).sandboxSiteAllowedHost).toBe("localhost");
@@ -248,8 +257,8 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: " demo-ats " }).sandboxSiteAllowedHost).toBe("demo-ats");
   });
   it("treats an empty SANDBOX_SITE_ALLOWED_HOST as unset, not as an empty host", () => {
-    expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: "" }).sandboxSiteAllowedHost).toBe("demo-ats");
-    expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: "   " }).sandboxSiteAllowedHost).toBe("demo-ats");
+    expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: "" }).sandboxSiteAllowedHost).toBe("http://demo-ats:3001");
+    expect(loadConfig({ ...BASE, SANDBOX_SITE_ALLOWED_HOST: "   " }).sandboxSiteAllowedHost).toBe("http://demo-ats:3001");
   });
 
   // Both submission gates default OFF: an environment that was never told

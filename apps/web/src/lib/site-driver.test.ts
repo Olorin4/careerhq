@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadConfig, type AppConfig } from "@careerhq/config";
 import type { CanonicalForm } from "@careerhq/contracts";
 
@@ -30,12 +30,43 @@ vi.mock("playwright", () => ({
   errors: { TimeoutError: FakeTimeoutError },
 }));
 
+import {
+  configureHostBrowserLockClass, createHostBrowserSlotLock, resetHostBrowserSlots,
+} from "@careerhq/db";
 import type { ReservedSiteDriver } from "./site-driver.js";
 
 const { withSiteBrowserReservation } = await import("./site-driver.js");
 
+/**
+ * A real database, because the cap has two halves now and only one of them
+ * lives in this process: `acquireBothSlots` takes the in-process counter AND a
+ * `pg_try_advisory_lock` on the host (packages/db/src/host-lock.ts). A fake
+ * DATABASE_URL would make every assertion below fail on a connection error
+ * rather than on the property it is about.
+ */
+const url = process.env.TEST_DATABASE_URL;
+const d = describe.skipIf(!url);
+
+// This file's own advisory-lock namespace. The host lock is host-wide by
+// design, which means every browser-driving test file in the monorepo would
+// otherwise contend for one slot against a single shared `TEST_DATABASE_URL` —
+// turbo runs the packages' test tasks concurrently, and a suite proving "the
+// second acquirer is refused" would start passing because a suite in another
+// process happened to be holding the slot. Per-file namespaces restore the
+// independence the per-process counter used to give these tests for free.
+const lockClass = 910_000_000 + Math.floor(Math.random() * 10_000_000);
+
+beforeAll(async () => {
+  if (!url) return;
+  await configureHostBrowserLockClass(lockClass);
+});
+
+afterAll(async () => {
+  await resetHostBrowserSlots();
+});
+
 function config(): AppConfig {
-  return loadConfig({ DATABASE_URL: "postgres://u:p@localhost:5432/careerhq" });
+  return loadConfig({ DATABASE_URL: url ?? "" });
 }
 
 /** Enough of a `SiteSubmitArgs` to reach `openSession`; the page work fails right after. */
@@ -47,7 +78,11 @@ const submitArgs = {
   policy: { workspaceKind: "sandbox" as const, sandboxSiteAllowedHost: "demo-ats" },
 };
 
-const isBusy = (err: unknown): boolean => err instanceof Error && err.name === "BrowserBusyError";
+// Either half of the cap refusing: the in-process counter's `BrowserBusyError`
+// or the host lock's `HostBrowserBusyError`. Which one wins the race is not
+// what these tests are about — that a second confirm is refused is.
+const isBusy = (err: unknown): boolean =>
+  err instanceof Error && (err.name === "BrowserBusyError" || err.name === "HostBrowserBusyError");
 
 /** Whether a second, independent confirm could get a browser right now. */
 async function slotIsFree(): Promise<boolean> {
@@ -62,7 +97,7 @@ async function slotIsFree(): Promise<boolean> {
   });
 }
 
-describe("withSiteBrowserReservation", () => {
+d("withSiteBrowserReservation", () => {
   it("holds the slot from the probe until the reservation ends", async () => {
     let refused: unknown;
     await withSiteBrowserReservation(config(), async (reserved) => {
@@ -107,6 +142,62 @@ describe("withSiteBrowserReservation", () => {
     });
     expect(outcome).toBe("blocked");
     expect(await slotIsFree()).toBe(true);
+  });
+
+  /**
+   * The half the in-process counter cannot see, and the reason the host lock
+   * exists (roadmap, "Carried beyond P6 → Operational"): `worker` is a second
+   * process with its own counter, so before this the box could hold two
+   * Chromiums while both processes honestly reported "one".
+   *
+   * The stand-in for that second process is a second Postgres CONNECTION —
+   * which is exactly what makes it a stand-in and not a mock. `web`'s counter
+   * here is completely free in both directions below; the only thing refusing
+   * is the advisory lock.
+   */
+  it("refuses a confirm when another PROCESS on this host holds the browser", async () => {
+    const worker = createHostBrowserSlotLock(url!, { lockClass });
+    try {
+      const workersBrowser = await worker.acquire(1);
+
+      const refused = await withSiteBrowserReservation(config(), async (reserved) => {
+        try {
+          await reserved.probeDriver();
+          return false;
+        } catch (err) {
+          if (isBusy(err)) return true;
+          throw err;
+        }
+      });
+      // This process's own counter said yes — nothing in it is held. The
+      // refusal came from the host.
+      expect(refused).toBe(true);
+
+      await workersBrowser();
+      // …and the moment the other process is done, this one can proceed.
+      expect(await slotIsFree()).toBe(true);
+    } finally {
+      await worker.close();
+    }
+  });
+
+  it("denies the other process a browser for as long as a confirm is running", async () => {
+    const worker = createHostBrowserSlotLock(url!, { lockClass });
+    try {
+      let workerRefused: unknown;
+      await withSiteBrowserReservation(config(), async (reserved) => {
+        await reserved.probeDriver();
+        workerRefused = await worker.acquire(1).then(() => false, (err: unknown) => err);
+      });
+      expect((workerRefused as Error).name).toBe("HostBrowserBusyError");
+
+      // The reservation has ended, so the slot is genuinely back — a lock the
+      // release forgot would show up here as a permanent refusal.
+      const workersBrowser = await worker.acquire(1);
+      await workersBrowser();
+    } finally {
+      await worker.close();
+    }
   });
 
   it("closes every browser it opens, and releases nothing it never took", async () => {

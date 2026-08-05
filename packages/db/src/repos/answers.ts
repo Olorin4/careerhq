@@ -84,7 +84,7 @@ export async function listAnswers(db: Db, applicationId: string): Promise<Applic
 }
 
 export async function listReusableAnswers(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
 ): Promise<Array<ApplicationAnswer & { staleForReuse: boolean }>> {
   const rows = await db.select({ answer: applicationAnswers })

@@ -141,7 +141,7 @@ Mailpit's web UI is at `http://localhost:8025` — the dev/demo SMTP sink that s
 **Auto-apply env vars:**
 
 - `SUBMISSIONS_LIVE_COMPANY_SITE` — `false` by default (the deterministic-off gate, spec §11, mirroring `SUBMISSIONS_LIVE_EMAIL`). Must be `true` for a confirmed submit to leave `PENDING_CONFIRMATION`; with it off, capture/parse/plan/review/preview all still work end to end, they just cannot reach the gate's final `allowed` decision.
-- `SANDBOX_SITE_ALLOWED_HOST` — the only site hostname a `sandbox`-kind workspace may auto-apply to. Defaults to `demo-ats` (the Compose service name); set to `localhost` when running a host `pnpm dev` process against the Compose `demo-ats`'s exposed port. **If you set it to `localhost`, set `SANDBOX_FORCE_SAFE=true` too.** `localhost` is a loopback name, and the capture policy's exemption that lets the allowed host be a loopback name applies only to sandbox-effective workspaces — a personal workspace gets no exemption, on purpose, because it has no allow-list pinning it to one host and would otherwise be able to open every port on the box.
+- `SANDBOX_SITE_ALLOWED_HOST` — the only site **origin** a `sandbox`-kind workspace may auto-apply to. Compared as scheme + host + port, and accepts three spellings: `demo-ats` (host only), `demo-ats:3001`, or `http://demo-ats:3001`. Defaults to `demo-ats` (the Compose service name); use `http://localhost:3001` when running a host `pnpm dev` process against the Compose `demo-ats`'s exposed port. **Name the port.** A value with no port matches *any* port on that host — the legacy spelling, kept working because it is the shipped default — which for a sandbox on `localhost` means Postgres, Redis and the app's own port are all inside the allow-list. **If you point it at `localhost`, set `SANDBOX_FORCE_SAFE=true` too.** `localhost` is a loopback name, and the capture policy's exemption that lets the allowed target be a loopback one applies only to sandbox-effective workspaces — a personal workspace gets no exemption, on purpose, because it has no allow-list pinning it to one origin and would otherwise be able to open every port on the box.
 - `DEMO_ATS_URL` — the base URL of the fictional ATS (`apps/demo-ats`), the only auto-apply destination in CI or any local demo. Defaults to `http://demo-ats:3001` (the Compose service); set to `http://localhost:3001` when running `demo-ats` directly on the host.
 - `AUTOAPPLY_BROWSER_TIMEOUT_MS` — per-action budget for the Playwright driver (one navigation, one field action, the post-submit wait) — not the whole attempt. Defaults to `45000`.
 - `AUTOAPPLY_MAX_CONCURRENT_BROWSERS` — how many headless Chromium instances **one process** may hold open at once. Defaults to `1`. Read by both `web` and `worker`, and enforced per process, so a Compose stack running both can have two browsers alive on the box — size RAM for `web + worker × this number`. A refused acquirer is told "busy, try again" immediately rather than queued, so nothing hangs; the slot is held across a whole confirm, so a refusal can never burn a confirmation token.
@@ -169,7 +169,7 @@ then set, in `.env`:
 
 ```bash
 SUBMISSIONS_LIVE_COMPANY_SITE=true
-SANDBOX_SITE_ALLOWED_HOST=localhost
+SANDBOX_SITE_ALLOWED_HOST=http://localhost:3001
 SANDBOX_FORCE_SAFE=true
 DEMO_ATS_URL=http://localhost:3001
 ```

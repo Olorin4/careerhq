@@ -29,13 +29,14 @@ import {
   getApplicationDetail, getAttempt, getLatestConfirmation, getLatestSnapshot, hasBlockingAttempt, isFactStale,
   listAnswers, listCvVariants, listEvidenceScreenshotPaths, listFacts, listReusableAnswers,
   markAttemptBlocked, markAttemptReady,
-  markNeedsReconcile, recordPreview, saveFormSnapshot, updateSnapshotAnswers, workspaces as workspacesTable,
+  markNeedsReconcile, recordPreview, recordRecoveryScreenshot, saveFormSnapshot, updateSnapshotAnswers,
+  workspaces as workspacesTable,
   type ApplicationAttempt, type CandidateFact, type CvVariant, type Db, type FormSnapshot,
 } from "@careerhq/db";
 import { redactError } from "@careerhq/email";
 import { stripHtml } from "@careerhq/ingest";
 import {
-  effectiveWorkspaceKind, refuseCaptureTarget, type CaptureTargetPolicy,
+  effectiveWorkspaceKind, matchesSandboxAllowList, refuseCaptureTarget, type CaptureTargetPolicy,
 } from "@careerhq/autoapply/policy";
 
 /** What the driver hands back after the one submit click (worker `fillAndSubmit`, adapted). */
@@ -274,19 +275,32 @@ function isPreClickDriverFailure(err: unknown): boolean {
 }
 
 /**
- * `BrowserBusyError` from apps/worker/src/autoapply/browser-limit.ts — the
- * global one-Chromium-at-a-time cap (spec P6 §3) refusing rather than queueing.
+ * The one-Chromium-at-a-time cap (spec P6 §3) refusing rather than queueing —
+ * either half of it.
+ *
+ * `BrowserBusyError` is the per-process counter in
+ * apps/worker/src/autoapply/browser-limit.ts; `HostBrowserBusyError` is the
+ * host-wide advisory lock in packages/db/src/host-lock.ts, which exists because
+ * `web` and `worker` are two processes and two counters saying "one" is two
+ * Chromiums on a 3.7 GB box. They are one outcome here on purpose: to a
+ * visitor, "another application already has the browser" is the same sentence
+ * and the same remedy whichever container is holding it.
  *
  * Recognised by `name`, for the same reason and by the same convention as
  * `isPreClickDriverFailure`: this orchestrator takes its driver by injection
  * and never imports the browser module's graph.
  *
- * It is categorically different from every `DriverError`: no browser was
- * started, so there is not merely no click — there is no page, no navigation
- * and no process. Both places that classify it below lean on exactly that.
+ * Categorically different from every `DriverError`: no browser was started, so
+ * there is not merely no click — there is no page, no navigation and no
+ * process. Both places that classify it below lean on exactly that.
  */
+const BROWSER_BUSY_ERROR_NAMES: ReadonlySet<string> = new Set([
+  "BrowserBusyError",
+  "HostBrowserBusyError",
+]);
+
 function isBrowserBusyFailure(err: unknown): boolean {
-  return err instanceof Error && err.name === "BrowserBusyError";
+  return err instanceof Error && BROWSER_BUSY_ERROR_NAMES.has(err.name);
 }
 
 /**
@@ -1032,7 +1046,7 @@ export async function confirmAndSubmitSite(
   });
   if (!loaded.ok) return { status: "blocked", code: loaded.code, reason: loaded.reason };
   const {
-    attempt, applicationId, applicationState, form, answers, files, payload, fingerprint,
+    attempt, applicationId, applicationState, snapshot, form, answers, files, payload, fingerprint,
   } = loaded.value;
 
   const [workspace] = await db.select().from(workspacesTable)
@@ -1062,8 +1076,15 @@ export async function confirmAndSubmitSite(
     // its own hard-safety switch. Shared with the prepare-time layer through
     // `effectiveWorkspaceKind` so the two can never derive it differently.
     workspaceKind: policy.workspaceKind,
-    // Only consulted for sandbox workspaces; a sandbox may reach exactly one host.
-    sandboxTargetAllowed: payload.host === config.sandboxSiteAllowedHost,
+    // Only consulted for sandbox workspaces; a sandbox may reach exactly one
+    // ORIGIN. Judged from `payload.url` and not from `payload.host`, because a
+    // host comparison cannot see a port: with the documented outside-compose
+    // setting (`SANDBOX_SITE_ALLOWED_HOST=localhost`) every port on the box
+    // satisfied this gate. `matchesSandboxAllowList` is the same predicate
+    // `refuseCaptureTarget` uses, so the confirm-time gate and the capture-time
+    // one agree by construction. (`payload.host` still backs the RETYPED
+    // target below — a human retypes a hostname, not an origin.)
+    sandboxTargetAllowed: matchesSandboxAllowList(payload.url, config.sandboxSiteAllowedHost),
     tokenRecord: confirmation
       ? {
           tokenHash: confirmation.tokenHash,
@@ -1271,6 +1292,7 @@ export async function confirmAndSubmitSite(
     // error looks the same from here) and it is not evidence of failure either.
     const reason = "the submit click landed but the page showed no confirmation id — "
       + `check ${result.finalUrl} and the saved screenshot, then resolve this attempt`;
+    await keepReconcileEvidence(db, snapshot, result.screenshotPath);
     await markNeedsReconcileSafely(deps, attempt.id, reason);
     return { status: "needs_reconcile", reason };
   }
@@ -1295,6 +1317,7 @@ export async function confirmAndSubmitSite(
     // index, a rejected application transition) must never be reported as a
     // failure — that would lose a real submission. Park it with the evidence.
     const reason = `submitted as ${result.confirmationId} but the receipt was refused: ${completed.reason}`;
+    await keepReconcileEvidence(db, snapshot, result.screenshotPath);
     await markNeedsReconcileSafely(deps, attempt.id, reason);
     return { status: "needs_reconcile", reason };
   }
@@ -1320,6 +1343,38 @@ async function markNeedsReconcileSafely(deps: SiteDeps, attemptId: string, reaso
     console.error(
       `[site-submission] attempt ${attemptId} needs reconciling (${reason}) but could not be marked: `
       + errorMessage(err),
+    );
+  }
+}
+
+/**
+ * Makes the screenshot a NEEDS_RECONCILE reason points at survive.
+ *
+ * A reconciled attempt has no confirmed receipt — that is what NEEDS_RECONCILE
+ * MEANS: the click landed and nobody can say what came of it — so the path the
+ * driver just wrote was persisted to no row at all, and in demo mode the
+ * evidence collector reclaimed the file five minutes later while the reason
+ * still told the reader to go and look at it. The app pointed at evidence that
+ * no longer existed, on the one outcome where a human most needs it.
+ *
+ * `recordRecoveryScreenshot` merges the path onto the SAME
+ * `recovery_state->>'screenshotPath'` key the worker's `submit_result` uses,
+ * which is the key `listEvidenceScreenshotPaths` feeds the collector's
+ * keep-set — so this is a reference in exactly the sense the collector already
+ * understands, not a second mechanism. It merges rather than replaces so that
+ * a `submit_in_flight` marker underneath it survives too.
+ *
+ * Post-click, so it never throws, for the same reason
+ * `markNeedsReconcileSafely` does not: losing the file is bad, and losing the
+ * attempt's explanation on the way to complaining about it is worse.
+ */
+async function keepReconcileEvidence(db: Db, snapshot: FormSnapshot, screenshotPath: string): Promise<void> {
+  try {
+    await recordRecoveryScreenshot(db, snapshot.id, screenshotPath);
+  } catch (err) {
+    console.error(
+      `[site-submission] snapshot ${snapshot.id}: the confirmation screenshot ${screenshotPath} could not be `
+      + `referenced, so the demo's collector may reclaim it: ${errorMessage(err)}`,
     );
   }
 }

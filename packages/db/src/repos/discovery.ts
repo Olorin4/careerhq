@@ -159,7 +159,7 @@ export async function listIngestRuns(
     .limit(limit);
 }
 
-export async function listInboxJobs(db: Db, workspaceId: string): Promise<Job[]> {
+export async function listInboxJobs(db: DbOrTx, workspaceId: string): Promise<Job[]> {
   const canonical = alias(jobs, "canonical_job");
   return db.select().from(jobs).where(and(
     eq(jobs.workspaceId, workspaceId),
@@ -188,7 +188,7 @@ export async function listInboxJobs(db: Db, workspaceId: string): Promise<Job[]>
   )).orderBy(sql`${jobs.llmScore} DESC NULLS LAST`, desc(jobs.keywordScore), asc(jobs.id));
 }
 
-export async function countInboxDuplicates(db: Db, workspaceId: string): Promise<number> {
+export async function countInboxDuplicates(db: DbOrTx, workspaceId: string): Promise<number> {
   const rows = await db.select({ id: jobs.id }).from(jobs).where(and(
     eq(jobs.workspaceId, workspaceId),
     eq(jobs.status, "inbox"),
@@ -232,7 +232,7 @@ export async function applyRerank(
   return count;
 }
 
-export async function getScoringProfile(db: Db, workspaceId: string): Promise<ScoringProfile> {
+export async function getScoringProfile(db: DbOrTx, workspaceId: string): Promise<ScoringProfile> {
   const [row] = await db.select().from(scoringProfiles).where(eq(scoringProfiles.workspaceId, workspaceId));
   if (!row) return DEFAULT_SCORING_PROFILE;
   const parsed = scoringProfileSchema.safeParse(row.profile);
@@ -247,7 +247,7 @@ export async function saveScoringProfile(db: DbOrTx, workspaceId: string, profil
     });
 }
 
-export async function listWatchlist(db: Db, workspaceId: string): Promise<WatchlistCompany[]> {
+export async function listWatchlist(db: DbOrTx, workspaceId: string): Promise<WatchlistCompany[]> {
   return db.select().from(watchlistCompanies)
     .where(eq(watchlistCompanies.workspaceId, workspaceId))
     .orderBy(asc(watchlistCompanies.createdAt), asc(watchlistCompanies.id));

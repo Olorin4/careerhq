@@ -10,6 +10,7 @@ import {
   leverPage,
   loginPage,
   signaturePage,
+  steppedConsentPage,
   type DemoJob,
 } from "./pages.js";
 import { addSubmission, clearSubmissions, listSubmissions, type StoredFile } from "./store.js";
@@ -36,6 +37,14 @@ app.get("/login/jobs/:id", (c) => c.html(loginPage(jobFor(c.req.param("id")))));
 app.get("/signature/jobs/:id", (c) => c.html(signaturePage(jobFor(c.req.param("id")))));
 app.get("/consent/jobs/:id", (c) => c.html(consentPage(jobFor(c.req.param("id")))));
 app.get("/hidden-consent/jobs/:id", (c) => c.html(hiddenConsentPage(jobFor(c.req.param("id")))));
+// The same two-step form under two renderings, on two paths rather than one
+// path with a query flag: a driver captures and re-opens the SAME url, so the
+// two must be separately addressable for a test to review one and submit the
+// other (and for the progressive one to be reviewed and submitted as itself).
+app.get("/stepped/jobs/:id", (c) => c.html(steppedConsentPage(jobFor(c.req.param("id")), "all")));
+app.get("/stepped-progressive/jobs/:id", (c) =>
+  c.html(steppedConsentPage(jobFor(c.req.param("id")), "replaced")),
+);
 
 async function handleApply(source: "greenhouse" | "lever", jobId: string, body: unknown) {
   const fields: Record<string, string> = {};
@@ -74,6 +83,14 @@ app.post("/signature/apply/:id", async (c) => {
 app.post("/consent/apply/:id", async (c) => {
   const body = await c.req.parseBody({ all: true });
   const submission = await handleApply("lever", c.req.param("id"), body);
+  return c.html(confirmationPage(submission.id));
+});
+
+// Both renderings of the stepped fixture post here, so `/api/submissions` says
+// what the browser sent regardless of which one it was driven against.
+app.post("/stepped/apply/:id", async (c) => {
+  const body = await c.req.parseBody({ all: true });
+  const submission = await handleApply("greenhouse", c.req.param("id"), body);
   return c.html(confirmationPage(submission.id));
 });
 

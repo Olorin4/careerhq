@@ -66,6 +66,7 @@ import {
   confirmAndSubmitSite, prepareSiteApplication, previewSiteSubmission, updatePlannedAnswer, type SiteDeps,
 } from "./site-submission.js";
 import { makeSiteCapture, makeSiteSubmit } from "./site-driver.js";
+import { configureHostBrowserLockClass, resetHostBrowserSlots } from "@careerhq/db";
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -143,7 +144,13 @@ function config(over: Record<string, string> = {}): AppConfig {
   return loadConfig({
     DATABASE_URL: url ?? "postgres://u:p@localhost:5432/careerhq",
     SUBMISSIONS_LIVE_COMPANY_SITE: "true",
-    SANDBOX_SITE_ALLOWED_HOST: HOST,
+    // The ORIGIN spelling, not the bare host: `SANDBOX_SITE_ALLOWED_HOST` is
+    // compared as scheme + host + port, and a sandbox pointed at a bare
+    // `localhost` could reach every other port on the box (carried out of P6).
+    // This suite runs the spelling README now recommends, so the origin
+    // comparison is exercised by the full-stack path and not only by
+    // target-policy.test.ts.
+    SANDBOX_SITE_ALLOWED_HOST: DEMO_ATS_URL,
     // This suite drives a demo-ats on `localhost`, which is a loopback name,
     // and the capture policy's exemption for the configured sandbox host is
     // scoped to sandbox-EFFECTIVE workspaces (fix-wave review A3 — honouring
@@ -281,9 +288,22 @@ async function submissionsFor(jobId: string): Promise<DemoSubmission[]> {
   return (await getSubmissions()).filter((submission) => submission.jobId === jobId);
 }
 
+
+/**
+ * This file's own advisory-lock namespace for the host-wide browser cap
+ * (packages/db/src/host-lock.ts). The cap is host-wide by design, so without
+ * this every browser-driving suite in the monorepo would contend for one slot
+ * against a single shared `TEST_DATABASE_URL` — turbo runs the packages' test
+ * tasks concurrently — and a refusal here could come from another process's
+ * suite rather than from the property under test. Per-file namespaces restore
+ * the independence the per-process counter used to give these tests for free.
+ */
+const hostLockClass = 930_000_000 + Math.floor(Math.random() * 10_000_000);
+
 beforeAll(async () => {
   if (!url || !demoAtsUp || !browserAvailable) return;
   db = createDb(url);
+  await configureHostBrowserLockClass(hostLockClass);
 
   const dir = mkdtempSync(path.join(tmpdir(), "careerhq-site-e2e-cv-"));
   cvPath = path.join(dir, "alex-cv.pdf");
@@ -309,6 +329,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!url || !demoAtsUp || !browserAvailable) return;
+  await resetHostBrowserSlots();
   // Deliberately no `DELETE /api/submissions`: see `submissionsFor`. The store
   // is in-memory and dies with the demo-ats process anyway.
   await db.delete(workspaces).where(eq(workspaces.id, workspaceId));

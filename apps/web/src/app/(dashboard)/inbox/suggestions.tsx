@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicationState, ReplyClassification } from "@careerhq/contracts";
+import { formatTimestamp } from "../../../lib/time.js";
 import { acceptSuggestionAction, dismissSuggestionAction } from "./actions.js";
 
 export interface SuggestionListItem {
@@ -78,7 +79,7 @@ function SuggestionRow({ suggestion }: { suggestion: SuggestionListItem }) {
         <strong>{suggestion.subject || "(no subject)"}</strong>
       </p>
       <p className="inbox-row-meta">
-        From {suggestion.fromAddr} — {new Date(suggestion.receivedAt).toLocaleString()}
+        From {suggestion.fromAddr} — {formatTimestamp(suggestion.receivedAt)}
       </p>
       <p className="inbox-row-snippet">{suggestion.snippet}</p>
 

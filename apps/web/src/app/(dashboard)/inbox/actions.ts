@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { emailMessages, setSuggestionState, transitionApplication } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
+import { demoRateLimit } from "../../../lib/rate-limit.js";
 
 const messageIdSchema = z.object({ messageId: z.string().uuid() });
 
@@ -22,6 +23,8 @@ export async function acceptSuggestionAction(
   raw: { messageId: string },
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const { messageId } = messageIdSchema.parse(raw);
+  const limited = demoRateLimit("acceptSuggestion");
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
 
   const [message] = await db.select().from(emailMessages).where(eq(emailMessages.id, messageId));
@@ -48,6 +51,8 @@ export async function dismissSuggestionAction(
   raw: { messageId: string },
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const { messageId } = messageIdSchema.parse(raw);
+  const limited = demoRateLimit("dismissSuggestion");
+  if (limited) return { ok: false, reason: limited };
   const db = getDb();
   await setSuggestionState(db, messageId, "dismissed");
   revalidatePath("/inbox");

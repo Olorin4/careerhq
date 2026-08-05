@@ -1,8 +1,10 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { TEXT_LIMITS } from "@careerhq/contracts";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { describeZodIssue } from "../../../../lib/form-state.js";
 import { demoRateLimit } from "../../../../lib/rate-limit.js";
 import { makeSiteCapture, withSiteBrowserReservation } from "../../../../lib/site-driver.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
@@ -56,12 +58,16 @@ async function withSiteDeps<T>(use: (deps: SiteDeps) => Promise<T>): Promise<T> 
 
 const prepareInputSchema = z.object({
   applicationId: z.string().uuid(),
-  url: z.string().url(),
+  url: z.string().url().max(TEXT_LIMITS.url),
   overrideDuplicate: z.boolean().optional(),
 });
 
 export async function prepareSiteApplicationAction(raw: unknown): Promise<PrepareOutcome> {
-  const { applicationId, url, overrideDuplicate } = prepareInputSchema.parse(raw);
+  const parsedInput = prepareInputSchema.safeParse(raw);
+  if (!parsedInput.success) {
+    return { status: "failed", reason: describeZodIssue(parsedInput.error, "invalid application URL") };
+  }
+  const { applicationId, url, overrideDuplicate } = parsedInput.data;
   // Ahead of `withSiteDeps`, so a throttled prepare never launches Chromium.
   const limited = demoRateLimit("prepareSiteApplication");
   if (limited) return { status: "failed", reason: limited };
@@ -78,14 +84,20 @@ export async function prepareSiteApplicationAction(raw: unknown): Promise<Prepar
 const updateAnswerInputSchema = z.object({
   applicationId: z.string().uuid(),
   snapshotId: z.string().uuid(),
-  fieldId: z.string().min(1),
-  value: z.string(),
+  fieldId: z.string().min(1).max(TEXT_LIMITS.name),
+  // What the visitor typed into one of the ATS form's fields. A single answer,
+  // not a document — even a long "why this company" box fits inside `detail`.
+  value: z.string().max(TEXT_LIMITS.detail),
 });
 
 export type UpdatePlannedAnswerResult = { ok: true } | { ok: false; reason: string };
 
 export async function updatePlannedAnswerAction(raw: unknown): Promise<UpdatePlannedAnswerResult> {
-  const { applicationId, snapshotId, fieldId, value } = updateAnswerInputSchema.parse(raw);
+  const parsedInput = updateAnswerInputSchema.safeParse(raw);
+  if (!parsedInput.success) {
+    return { ok: false, reason: describeZodIssue(parsedInput.error, "invalid answer") };
+  }
+  const { applicationId, snapshotId, fieldId, value } = parsedInput.data;
   const limited = demoRateLimit("updatePlannedAnswer");
   if (limited) return { ok: false, reason: limited };
   const db = getDb();
@@ -113,12 +125,21 @@ export async function previewSiteSubmissionAction(raw: unknown): Promise<SitePre
 const confirmInputSchema = z.object({
   applicationId: z.string().uuid(),
   attemptId: z.string().uuid(),
-  presentedToken: z.string().min(1),
-  retypedTarget: z.string(),
+  presentedToken: z.string().min(1).max(TEXT_LIMITS.name),
+  // Both are typed by hand into the confirmation box; the target is a URL here.
+  retypedTarget: z.string().max(TEXT_LIMITS.url),
 });
 
 export async function confirmAndSubmitSiteAction(raw: unknown): Promise<SiteConfirmOutcome> {
-  const { applicationId, attemptId, presentedToken, retypedTarget } = confirmInputSchema.parse(raw);
+  const parsedInput = confirmInputSchema.safeParse(raw);
+  if (!parsedInput.success) {
+    return {
+      status: "blocked",
+      code: "invalid_input",
+      reason: describeZodIssue(parsedInput.error, "invalid confirmation"),
+    };
+  }
+  const { applicationId, attemptId, presentedToken, retypedTarget } = parsedInput.data;
   // Before `confirmAndSubmitSite` and therefore before the token is burned,
   // before `beginSubmission` and before the driver is ever asked for a browser.
   const limited = demoRateLimit("confirmAndSubmitSite");

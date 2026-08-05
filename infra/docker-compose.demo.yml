@@ -149,7 +149,7 @@ services:
       SUBMISSIONS_LIVE_EMAIL: "false"
       SUBMISSIONS_LIVE_COMPANY_SITE: "false"
       SANDBOX_SMTP_ALLOWED_HOST: mailpit
-      SANDBOX_SITE_ALLOWED_HOST: demo-ats
+      SANDBOX_SITE_ALLOWED_HOST: http://demo-ats:3001
 
       # --- AI: replay only, and no key to spend ------------------------------
       # AI_MODE=replay serves the committed fixtures under
@@ -217,7 +217,7 @@ services:
       SUBMISSIONS_LIVE_EMAIL: "false"
       SUBMISSIONS_LIVE_COMPANY_SITE: "false"
       SANDBOX_SMTP_ALLOWED_HOST: mailpit
-      SANDBOX_SITE_ALLOWED_HOST: demo-ats
+      SANDBOX_SITE_ALLOWED_HOST: http://demo-ats:3001
 
       # The base file leaves AI_MODE off the worker because only `web`
       # generates materials. Here it is LOAD-BEARING, not a fail-safe: the

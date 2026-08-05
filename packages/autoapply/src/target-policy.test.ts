@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  allowsCaptureTarget, effectiveWorkspaceKind, isInternalHostname, refuseCaptureTarget,
+  allowsCaptureTarget, allowsResolvedAddress, effectiveWorkspaceKind, isInternalAddress,
+  isInternalHostname, matchesSandboxAllowList, refuseCaptureTarget,
 } from "./target-policy.js";
 
 const SANDBOX_HOST = "demo-ats";
@@ -98,6 +99,129 @@ describe("isInternalHostname", () => {
   });
 });
 
+/**
+ * The resolved-address half of resolve-then-pin. Every row of both tables above
+ * is re-run through it deliberately: the point of `isInternalAddress` is that
+ * it is the SAME table, so an address the literal check refuses must be refused
+ * when a resolver hands it over, and one the literal check allows must still be
+ * allowed. A table that answered differently for the same address would be the
+ * second copy this module exists to prevent.
+ */
+describe("isInternalAddress", () => {
+  const literals = (rows: Array<[string, string]>): Array<[string, string]> =>
+    rows.filter(([host]) => host !== "" && !/^[a-z.-]+$/i.test(host))
+      .map(([host, why]) => [host.replace(/^\[|\]$/g, ""), why]);
+
+  it.each(literals(INTERNAL_HOSTS))("refuses %s (%s)", (address) => {
+    expect(isInternalAddress(address)).toBe(true);
+  });
+
+  it.each(literals(EXTERNAL_HOSTS))("allows %s (%s)", (address) => {
+    expect(isInternalAddress(address)).toBe(false);
+  });
+
+  // The difference from `isInternalHostname`, and the only one: a resolver
+  // answer that is not an address at all cannot be judged, so it is refused.
+  it.each([
+    ["", "an empty answer"],
+    ["careers.northwind.example", "a name where an address was expected"],
+    ["999.1.1.1", "an octet out of range"],
+    ["not-an-address", "anything else"],
+  ])("fails closed on %j (%s)", (answer) => {
+    expect(isInternalAddress(answer)).toBe(true);
+  });
+
+  it("judges a link-local answer that carries a zone id", () => {
+    // getaddrinfo can answer `fe80::1%eth0`; the `%` must not make it
+    // unparseable-and-therefore-refused for the wrong reason, nor parseable
+    // and allowed.
+    expect(isInternalAddress("fe80::1%eth0")).toBe(true);
+    expect(isInternalAddress("2001:db8::1%eth0")).toBe(false);
+  });
+});
+
+describe("matchesSandboxAllowList", () => {
+  it("matches a bare host on any port or http(s) scheme — the shipped legacy spelling", () => {
+    expect(matchesSandboxAllowList("http://demo-ats:3001/apply", "demo-ats")).toBe(true);
+    expect(matchesSandboxAllowList("https://demo-ats/apply", "demo-ats")).toBe(true);
+    expect(matchesSandboxAllowList("http://demo-ats:9999/apply", "demo-ats")).toBe(true);
+    expect(matchesSandboxAllowList("http://other:3001/apply", "demo-ats")).toBe(false);
+  });
+
+  // The carried gap: the allow-list named a host, so it constrained only the
+  // host, and a sandbox pointed at `localhost` could reach every port on the box.
+  it("pins the port when the configured value names one", () => {
+    expect(matchesSandboxAllowList("http://localhost:3001/apply", "localhost:3001")).toBe(true);
+    expect(matchesSandboxAllowList("http://localhost:5432/", "localhost:3001")).toBe(false);
+    expect(matchesSandboxAllowList("http://localhost:6379/", "localhost:3001")).toBe(false);
+    expect(matchesSandboxAllowList("http://localhost/", "localhost:3001")).toBe(false);
+  });
+
+  it("pins the scheme and the port when the configured value is a full origin", () => {
+    expect(matchesSandboxAllowList("http://demo-ats:3001/apply", "http://demo-ats:3001")).toBe(true);
+    expect(matchesSandboxAllowList("http://demo-ats:3001/apply", "http://demo-ats:3001/")).toBe(true);
+    expect(matchesSandboxAllowList("https://demo-ats:3001/apply", "http://demo-ats:3001")).toBe(false);
+    expect(matchesSandboxAllowList("http://demo-ats:3002/apply", "http://demo-ats:3001")).toBe(false);
+  });
+
+  it("resolves a scheme's default port rather than reading URL.port's empty string", () => {
+    expect(matchesSandboxAllowList("https://ats.example/apply", "https://ats.example:443")).toBe(true);
+    expect(matchesSandboxAllowList("http://ats.example/apply", "http://ats.example:80")).toBe(true);
+    expect(matchesSandboxAllowList("http://ats.example/apply", "http://ats.example:443")).toBe(false);
+  });
+
+  it("is not defeated by case, a trailing dot, userinfo or a lookalike", () => {
+    expect(matchesSandboxAllowList("http://DEMO-ATS:3001/", "demo-ats:3001")).toBe(true);
+    expect(matchesSandboxAllowList("http://demo-ats.:3001/", "demo-ats:3001")).toBe(true);
+    expect(matchesSandboxAllowList("http://demo-ats@evil.example/", "demo-ats")).toBe(false);
+    expect(matchesSandboxAllowList("http://demo-ats.evil.example/", "demo-ats")).toBe(false);
+    expect(matchesSandboxAllowList("http://evil.example/?h=demo-ats", "demo-ats")).toBe(false);
+  });
+
+  it("matches nothing at all when the configured value is unusable", () => {
+    for (const configured of ["", "   ", "http://", "a b c", "demo-ats:99999999"]) {
+      expect(matchesSandboxAllowList("http://demo-ats:3001/", configured)).toBe(false);
+    }
+  });
+});
+
+describe("allowsResolvedAddress", () => {
+  const personal = { workspaceKind: "personal", sandboxSiteAllowedHost: SANDBOX_HOST } as const;
+  const sandbox = { workspaceKind: "sandbox", sandboxSiteAllowedHost: SANDBOX_HOST } as const;
+
+  // THE bug being closed: the literal host is an ordinary public name, so every
+  // literal layer passes it; what it resolves to is the metadata endpoint.
+  it("refuses a public name that resolves to an internal address", () => {
+    expect(allowsResolvedAddress("http://evil.example/", "169.254.169.254", personal)).toBe(false);
+    expect(allowsResolvedAddress("http://127-0-0-1.nip.io/", "127.0.0.1", personal)).toBe(false);
+    expect(allowsResolvedAddress("http://evil.example/", "::1", personal)).toBe(false);
+    expect(allowsResolvedAddress("http://evil.example/", "::ffff:169.254.169.254", personal)).toBe(false);
+  });
+
+  it("allows a public name that resolves publicly", () => {
+    expect(allowsResolvedAddress("https://careers.northwind.example/", "93.184.216.34", personal)).toBe(true);
+    expect(allowsResolvedAddress("https://careers.northwind.example/", "2606:4700::1", personal)).toBe(true);
+  });
+
+  // The demo's own shape: `demo-ats` is a Compose service name whose address is
+  // private BY DESIGN, and `localhost` outside Compose. A sandbox workspace is
+  // pinned to that one origin by layer 3, so no caller-supplied name reaches
+  // this check — the exemption is the same one the literal check already makes.
+  it("exempts the sandbox workspace's own allow-listed origin", () => {
+    expect(allowsResolvedAddress(`http://${SANDBOX_HOST}:3001/apply`, "172.18.0.5", sandbox)).toBe(true);
+    const local = { workspaceKind: "sandbox", sandboxSiteAllowedHost: "localhost:3001" } as const;
+    expect(allowsResolvedAddress("http://localhost:3001/apply", "127.0.0.1", local)).toBe(true);
+    // …and only that origin: another port on the same box is not the exemption.
+    expect(allowsResolvedAddress("http://localhost:5432/", "127.0.0.1", local)).toBe(false);
+  });
+
+  it("does not extend the exemption to a personal workspace", () => {
+    const local = { workspaceKind: "personal", sandboxSiteAllowedHost: "localhost" } as const;
+    expect(allowsResolvedAddress("http://localhost:3001/apply", "127.0.0.1", local)).toBe(false);
+    expect(allowsResolvedAddress(`http://${SANDBOX_HOST}/apply`, "172.18.0.5", personal)).toBe(false);
+  });
+});
+
 describe("refuseCaptureTarget — protocol layer", () => {
   const personal = { workspaceKind: "personal", sandboxSiteAllowedHost: SANDBOX_HOST } as const;
 
@@ -181,6 +305,22 @@ describe("refuseCaptureTarget — sandbox allow-list layer", () => {
       .toBe(`this workspace can only apply through ${SANDBOX_HOST}`);
   });
 
+  // Carried out of P6: the allow-list named a host, not an origin, so a sandbox
+  // pointed at `localhost` reached every port on the box — including the app's
+  // own, Postgres's and Redis's. A configured value that names a port now pins
+  // it, and the loopback exemption travels with it rather than with the host.
+  it("pins the port when the configured value names one, exemption included", () => {
+    const local = { workspaceKind: "sandbox", sandboxSiteAllowedHost: "localhost:3001" } as const;
+    expect(refuseCaptureTarget("http://localhost:3001/greenhouse/jobs/eng-1", local)).toBeNull();
+    expect(refuseCaptureTarget("http://localhost:5432/", local)).toMatch(/internal network/);
+    expect(refuseCaptureTarget("http://localhost:3000/", local)).toMatch(/internal network/);
+
+    const origin = { workspaceKind: "sandbox", sandboxSiteAllowedHost: "http://demo-ats:3001" } as const;
+    expect(refuseCaptureTarget("http://demo-ats:3001/greenhouse/jobs/eng-1", origin)).toBeNull();
+    expect(refuseCaptureTarget("http://demo-ats:9999/", origin)).toMatch(/can only apply through/);
+    expect(refuseCaptureTarget("https://demo-ats:3001/", origin)).toMatch(/can only apply through/);
+  });
+
   it("is not defeated by a lookalike host", () => {
     expect(refuseCaptureTarget(`http://${SANDBOX_HOST}.evil.example/`, sandbox)).not.toBeNull();
     expect(refuseCaptureTarget(`http://evil.example/?h=${SANDBOX_HOST}`, sandbox)).not.toBeNull();
@@ -235,10 +375,13 @@ describe("one policy, one copy", () => {
   /** The definitions that ARE the policy — each may exist exactly once, here. */
   const DEFINITIONS = [
     /function\s+isInternalHostname\s*\(/,
+    /function\s+isInternalAddress\s*\(/,
     /function\s+isInternalIpv4\s*\(/,
     /function\s+isInternalIpv6\s*\(/,
     /function\s+ipv6Hextets\s*\(/,
     /function\s+refuseCaptureTarget\s*\(/,
+    /function\s+allowsResolvedAddress\s*\(/,
+    /function\s+matchesSandboxAllowList\s*\(/,
     /function\s+effectiveWorkspaceKind\s*\(/,
     /function\s+safeExternalHref\s*\(/,
   ];

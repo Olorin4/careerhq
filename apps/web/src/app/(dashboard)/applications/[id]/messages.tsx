@@ -1,4 +1,5 @@
 import type { EmailMessage } from "@careerhq/db";
+import { formatTimestamp } from "../../../../lib/time.js";
 
 function humanize(s: string): string {
   return s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");
@@ -30,7 +31,7 @@ export function Messages({ messages }: { messages: EmailMessage[] }) {
                   {message.direction === "inbound" ? "Received" : "Sent"}
                 </span>
                 {message.classification && <span className="badge">{humanize(message.classification)}</span>}
-                <span className="messages-row-date">{message.receivedAt.toLocaleString()}</span>
+                <span className="messages-row-date">{formatTimestamp(message.receivedAt)}</span>
               </div>
               <p className="messages-row-subject">
                 <strong>{message.subject || "(no subject)"}</strong>

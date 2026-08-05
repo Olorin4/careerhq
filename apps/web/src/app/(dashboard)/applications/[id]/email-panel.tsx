@@ -8,6 +8,7 @@ import type {
   ApplicationAttempt, CvVariant, EmailConnection, GeneratedDocument,
 } from "@careerhq/db";
 import type { ConfirmOutcome, PreviewOutcome } from "../../../../lib/email-submission.js";
+import { formatTimestamp } from "../../../../lib/time.js";
 import {
   confirmAndSendAction, createEmailAttemptAction, previewSubmissionAction,
   resolveReconcileAction, updateEmailDraftAction,
@@ -462,9 +463,9 @@ function AttemptRow({ applicationId, attempt }: { applicationId: string; attempt
     <li className={highlighted ? "email-attempt-row email-attempt-row-reconcile" : "email-attempt-row"}>
       <div className="email-attempt-meta">
         <span className={statusBadgeClass(attempt.status)}>{humanizeStatus(attempt.status)}</span>
-        <span className="email-attempt-date">{attempt.startedAt.toLocaleString()}</span>
+        <span className="email-attempt-date">{formatTimestamp(attempt.startedAt)}</span>
         {messageId && <span className="email-attempt-message-id">Message-ID: {messageId}</span>}
-        {receiptAt && <span className="email-attempt-date">receipt: {new Date(receiptAt).toLocaleString()}</span>}
+        {receiptAt && <span className="email-attempt-date">receipt: {formatTimestamp(receiptAt)}</span>}
       </div>
       {attempt.failureReason && <p className="email-error">{attempt.failureReason}</p>}
       {highlighted && (

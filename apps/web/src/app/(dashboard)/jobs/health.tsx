@@ -9,6 +9,11 @@ interface ErrorItem {
 export async function IngestHealth({ workspaceId }: { workspaceId: string }) {
   const db = getDb();
   const runs = await listIngestRuns(db, workspaceId);
+  // One reading for the whole table, so every row's age is measured against
+  // the same instant and two rows a millisecond apart cannot land in different
+  // buckets. This is a server component — it never hydrates — so unlike the
+  // email settings table it needs no prop, only a single decision.
+  const now = Date.now();
 
   if (runs.length === 0) {
     return (
@@ -44,7 +49,7 @@ export async function IngestHealth({ workspaceId }: { workspaceId: string }) {
           return (
             <tr key={run.id}>
               <td>{run.source}</td>
-              <td>{timeAgo(run.startedAt)}</td>
+              <td>{timeAgo(run.startedAt, now)}</td>
               <td>{duration}</td>
               <td>{run.fetched}</td>
               <td>{run.inserted}</td>

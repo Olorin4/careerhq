@@ -1,7 +1,7 @@
 import { listApplications, jobs as jobsTable, companies as companiesTable } from "@careerhq/db";
 import { inArray } from "drizzle-orm";
 import { getDb } from "../../../lib/db.js";
-import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { Board } from "./board.js";
 import { NewApplicationForm } from "./new-application-form.js";
 
@@ -12,16 +12,20 @@ import { NewApplicationForm } from "./new-application-form.js";
 export const dynamic = "force-dynamic";
 
 export default async function ApplicationsPage() {
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
-  const apps = await listApplications(db, ws.id);
-  const jobRows = apps.length
-    ? await db.select().from(jobsTable).where(inArray(jobsTable.id, apps.map((a) => a.jobId)))
-    : [];
-  const companyRows = jobRows.length
-    ? await db.select().from(companiesTable)
-        .where(inArray(companiesTable.id, jobRows.map((j) => j.companyId!).filter(Boolean)))
-    : [];
+  // One snapshot for the whole board: resolving the workspace and listing its
+  // applications are two statements, and the demo reset's commit used to be
+  // able to land between them and empty the board.
+  const { apps, jobRows, companyRows } = await readWorkspaceSnapshot(getDb(), async (tx, ws) => {
+    const rows = await listApplications(tx, ws.id);
+    const jobs = rows.length
+      ? await tx.select().from(jobsTable).where(inArray(jobsTable.id, rows.map((a) => a.jobId)))
+      : [];
+    const companies = jobs.length
+      ? await tx.select().from(companiesTable)
+          .where(inArray(companiesTable.id, jobs.map((j) => j.companyId!).filter(Boolean)))
+      : [];
+    return { apps: rows, jobRows: jobs, companyRows: companies };
+  });
   const cards = apps.map((a) => {
     const job = jobRows.find((j) => j.id === a.jobId);
     const company = companyRows.find((c) => c.id === job?.companyId);

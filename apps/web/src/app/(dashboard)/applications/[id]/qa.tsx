@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { ApplicationAnswer } from "@careerhq/db";
 import { ProvenanceChips } from "../../../../components/provenance-chips.js";
 import { REPLAY_MISS, replayMissMessage } from "../../../../lib/replay-miss.js";
+import { formatTimestamp } from "../../../../lib/time.js";
 import {
   approveAnswerAction, askQuestionAction, rejectAnswerAction, saveManualAnswerAction,
   type AskQuestionResult,
@@ -145,7 +146,7 @@ function AnswerRow({
         {answer.sensitivity === "sensitive" && (
           <span className="badge badge-sensitivity">Sensitive</span>
         )}
-        <span className="qa-answer-date">{answer.createdAt.toLocaleString()}</span>
+        <span className="qa-answer-date">{formatTimestamp(answer.createdAt)}</span>
       </div>
       {answer.origin === "ai" && (
         <ProvenanceChips factIds={answer.sourceFactIds} factClaims={factClaims} />

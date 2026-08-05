@@ -1,10 +1,11 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { documentKindSchema } from "@careerhq/contracts";
+import { documentKindSchema, TEXT_LIMITS } from "@careerhq/contracts";
 import { createDocument, setDocumentApproval } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
+import { describeZodIssue } from "../../../../lib/form-state.js";
 import { demoRateLimit } from "../../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../../lib/workspace.js";
 import { runGeneration, type GenerationOutcome } from "../../../../lib/generation.js";
@@ -78,7 +79,7 @@ export async function rejectDocumentAction(raw: { id: string }): Promise<Approva
 const manualDocumentSchema = z.object({
   applicationId: z.string().uuid(),
   kind: documentKindSchema,
-  content: z.string().trim().min(1),
+  content: z.string().trim().min(1).max(TEXT_LIMITS.prose),
 });
 
 /**
@@ -105,7 +106,16 @@ export async function createManualDocumentAction(
   _previous: ManualDocumentState,
   formData: FormData,
 ): Promise<ManualDocumentState> {
-  const input = manualDocumentSchema.parse(Object.fromEntries(formData));
+  const entries = Object.fromEntries(formData);
+  const parsed = manualDocumentSchema.safeParse(entries);
+  if (!parsed.success) {
+    const content = entries.content;
+    return {
+      reason: describeZodIssue(parsed.error, "invalid draft"),
+      content: typeof content === "string" ? content : "",
+    };
+  }
+  const input = parsed.data;
   const limited = demoRateLimit("createManualDocument");
   if (limited) return { reason: limited, content: input.content };
   const db = getDb();

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { CanonicalForm, PlannedAnswer } from "@careerhq/contracts";
 import type { Db, DbOrTx } from "../client.js";
 import { applicationAttempts, applications, formSnapshots } from "../schema/index.js";
@@ -66,6 +66,43 @@ export async function updateRecoveryState(
 ): Promise<void> {
   await db.update(formSnapshots)
     .set({ currentStep, recoveryState })
+    .where(eq(formSnapshots.id, snapshotId));
+}
+
+/**
+ * Records the evidence screenshot for a submission whose outcome nobody could
+ * confirm, onto the newest snapshot's `recovery_state`.
+ *
+ * The key is `screenshotPath`, at the top level, because that is where
+ * `runSubmitJob`'s `submit_result` already puts it and it is the ONE key
+ * `listEvidenceScreenshotPaths` reads for this table — one shape, so a
+ * referenced screenshot is a referenced screenshot no matter which path
+ * produced it. Without this, `apps/web`'s NEEDS_RECONCILE outcomes persisted
+ * their path to no row at all: the receipt is only written by
+ * `completeSubmission`, which by definition did not run, so in demo mode the
+ * evidence collector reclaimed the file five minutes later while the attempt's
+ * reason still told the reader to go and check it.
+ *
+ * MERGED into whatever is already on the row (`||`), never replacing it. The
+ * row can be carrying `runSubmitJob`'s `submit_in_flight` marker — the single
+ * durable record that a submit click may already have happened, and the one
+ * thing standing between a retried queue job and a second application at the
+ * employer. Writing a fresh object here would erase it. A non-object
+ * `recovery_state` (nothing writes one today) is treated as absent rather than
+ * concatenated, since `jsonb || jsonb` on an array means something else
+ * entirely.
+ */
+export async function recordRecoveryScreenshot(
+  db: DbOrTx,
+  snapshotId: string,
+  screenshotPath: string,
+): Promise<void> {
+  await db.update(formSnapshots)
+    .set({
+      recoveryState: sql`case when jsonb_typeof(${formSnapshots.recoveryState}) = 'object'
+        then ${formSnapshots.recoveryState} else '{}'::jsonb end
+        || jsonb_build_object('screenshotPath', ${screenshotPath}::text)`,
+    })
     .where(eq(formSnapshots.id, snapshotId));
 }
 

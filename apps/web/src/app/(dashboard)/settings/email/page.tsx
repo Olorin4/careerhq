@@ -1,7 +1,7 @@
 import { listEmailConnections } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
-import { getActiveWorkspace } from "../../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../../lib/workspace.js";
 import { ConnectionForm, ConnectionsTable } from "./connection-form.js";
 
 // Every render reads the database, so there is nothing to prerender: without
@@ -28,9 +28,9 @@ export default async function EmailSettingsPage() {
     );
   }
 
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
-  const connections = await listEmailConnections(db, ws.id);
+  // One snapshot for the workspace and its connections (see
+  // `readWorkspaceSnapshot`).
+  const connections = await readWorkspaceSnapshot(getDb(), (tx, ws) => listEmailConnections(tx, ws.id));
 
   return (
     <main>
@@ -41,7 +41,7 @@ export default async function EmailSettingsPage() {
         {connections.length === 0 ? (
           <p className="settings-empty">No mailbox connections yet.</p>
         ) : (
-          <ConnectionsTable connections={connections} />
+          <ConnectionsTable connections={connections} now={Date.now()} />
         )}
       </section>
 

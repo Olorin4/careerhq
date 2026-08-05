@@ -36,9 +36,18 @@ export { safeExternalHref } from "./safe-url.js";
  *      sandbox host, which is `localhost` outside compose) applies only to
  *      sandbox-effective workspaces — see `refuseCaptureTarget`;
  *   3. sandbox allow-list — when the effective workspace kind is sandbox, the
- *      one configured host and nothing else. This is an *additional, earlier*
- *      layer; the confirm-time gate in `evaluateSubmissionGates` is unchanged
- *      and still the authority at submit time.
+ *      one configured ORIGIN (scheme, host and port — see
+ *      `matchesSandboxAllowList`) and nothing else. This is an *additional,
+ *      earlier* layer; the confirm-time gate in `evaluateSubmissionGates` is
+ *      unchanged and still the authority at submit time;
+ *   4. resolved address — every address the host resolves to, judged by layer
+ *      2's own table (`isInternalAddress`, via `allowsResolvedAddress`), so a
+ *      DNS name pointing at a private address is refused rather than followed.
+ *      This one is NOT decided here, because a decision about a resolved
+ *      address is worthless unless the connection is then pinned to the address
+ *      that was judged; it lives with the code that opens the socket, in
+ *      `apps/worker/src/autoapply/pinned-navigation.ts`. What lives here is the
+ *      predicate it judges with — one table, four layers.
  *
  * A URL is judged the same way at EVERY navigation, not just the first one:
  * `apps/worker/src/autoapply/driver.ts` evaluates `allowsCaptureTarget` against
@@ -165,18 +174,48 @@ function isInternalIpv6(hextets: number[]): boolean {
 }
 
 /**
+ * Whether a LITERAL IP address — one a resolver just answered with, or one
+ * written straight into the URL — is on this machine or this private network.
+ *
+ * This is the resolved-address half of resolve-then-pin, and it deliberately
+ * goes through the SAME two range tables `isInternalHostname` uses. There is
+ * one table: a second copy of these ranges, judging resolver answers instead of
+ * literal hosts, is how the next hole gets opened, so the only thing this
+ * function adds is what to do with an input that is not an address at all.
+ *
+ * Which is: refuse it. Unlike `isInternalHostname` — where "not an IP literal"
+ * means "an ordinary DNS name", the normal case — anything here that does not
+ * parse as an address is a resolver answer we cannot judge, and an answer we
+ * cannot judge is not one we may connect to. Fails CLOSED.
+ *
+ * A zone/scope id (`fe80::1%eth0`, which getaddrinfo can return for a
+ * link-local answer) is stripped before parsing: it names an interface, not an
+ * address. Without that, the `%` would fail the hextet parse and — before the
+ * fail-closed default below — a link-local answer would have read as "not an
+ * address" rather than as the link-local address it is.
+ */
+export function isInternalAddress(literal: string): boolean {
+  const bare = (literal.trim().toLowerCase().split("%")[0] ?? "").replace(/^\[|\]$/g, "");
+  const octets = ipv4Octets(bare);
+  if (octets) return isInternalIpv4(octets);
+  const hextets = ipv6Hextets(bare);
+  if (hextets) return isInternalIpv6(hextets);
+  return true;
+}
+
+/**
  * Whether a URL's `hostname` names something on this machine or this private
  * network. Case- and trailing-dot-insensitive; IPv6 hostnames arrive bracketed.
  *
- * KNOWN LIMITATION — this checks the LITERAL host only. A DNS name that
- * resolves to a private address (`metadata.google.internal`, a `*.nip.io`
- * wildcard, an attacker-controlled record, or a DNS-rebinding answer that
- * changes between our check and Chromium's own lookup) still passes. Closing
- * that needs resolve-then-pin: resolve the name here, refuse the result by the
- * same table, and hand the browser the pinned IP with a Host header. That is
- * deliberately NOT attempted here — it is a separate change with its own
- * failure modes (multi-A records, IPv6 fallback, per-request DNS caching) and
- * is on the roadmap, not in this fix.
+ * This checks the LITERAL host, and only the literal host — a DNS name that
+ * resolves to a private address passes it, by design. The resolved half is
+ * `isInternalAddress` above, applied to every address the name resolves to by
+ * the one component that can also PIN the connection to those addresses:
+ * apps/worker/src/autoapply/pinned-navigation.ts, called from the driver's
+ * per-navigation guard. Checking a resolved address anywhere the connection is
+ * not then pinned to it would be a TOCTOU window (DNS rebinding) wearing the
+ * costume of a fix, which is why this module — which cannot open a socket —
+ * still answers only the literal question.
  */
 export function isInternalHostname(raw: string): boolean {
   const hostname = raw.trim().toLowerCase().replace(/\.$/, "");
@@ -212,7 +251,79 @@ export function effectiveWorkspaceKind(
  */
 export interface CaptureTargetPolicy {
   workspaceKind: WorkspaceKind;
+  /**
+   * `SANDBOX_SITE_ALLOWED_HOST`. Read as an ORIGIN, not merely a host: the
+   * accepted spellings are `demo-ats`, `demo-ats:3001` and
+   * `http://demo-ats:3001`, and whatever the value pins is what a sandbox
+   * workspace may reach — see `matchesSandboxAllowList`.
+   */
   sandboxSiteAllowedHost: string;
+}
+
+/** `scheme://host:port`, `host:port` or bare `host`; an IPv6 host arrives bracketed. */
+const ALLOWED_TARGET_RE =
+  /^(?:([a-z][a-z0-9+.-]*):\/\/)?(\[[0-9a-f:.]+\]|[^/?#:[\]]+)(?::(\d{1,5}))?\/?$/i;
+
+interface AllowedTarget {
+  /** null when the configured value named no scheme — then any http(s) scheme matches. */
+  protocol: string | null;
+  hostname: string;
+  /** null when the configured value named no port — then any port matches. */
+  port: string | null;
+}
+
+function parseAllowedTarget(configured: string): AllowedTarget | null {
+  const match = ALLOWED_TARGET_RE.exec(configured.trim());
+  if (!match) return null;
+  const hostname = match[2]!.toLowerCase().replace(/\.$/, "");
+  if (hostname === "") return null;
+  return {
+    protocol: match[1] ? `${match[1].toLowerCase()}:` : null,
+    hostname,
+    port: match[3] ?? null,
+  };
+}
+
+/** The port a URL really uses, with the scheme's default filled in — `URL.port` is "" for it. */
+function effectivePort(url: URL): string {
+  if (url.port !== "") return url.port;
+  return url.protocol === "https:" ? "443" : "80";
+}
+
+/**
+ * Whether `rawUrl` is the one target a sandbox workspace may reach.
+ *
+ * This is an ORIGIN comparison — scheme, host AND port — where it used to be
+ * `url.hostname === configured`. The gap that closes (carried out of P6): with
+ * the documented outside-compose setting `SANDBOX_SITE_ALLOWED_HOST=localhost`,
+ * a sandbox workspace could reach `http://localhost:5432/`, `:6379`, `:3000`
+ * and every other port on the box — the allow-list named a host, so it
+ * constrained only the host.
+ *
+ * A value that names no port still matches any port, and one that names no
+ * scheme still matches either http(s). That is not laziness — it is the whole
+ * installed base: `demo-ats` is the shipped default and the value in both
+ * Compose files, `.env.example`, `demo.env.example` and README's env table, and
+ * `packages/config` parses this variable as a plain string. Rejecting the bare
+ * form would have broken every existing deployment for a hardening that the
+ * operator can now simply spell out. What ships is the pinned spelling
+ * (`http://demo-ats:3001`); the bare one is accepted, documented as the loose
+ * one, and left working.
+ */
+export function matchesSandboxAllowList(rawUrl: string, configured: string): boolean {
+  const allowed = parseAllowedTarget(configured);
+  if (!allowed) return false;
+
+  let url: URL;
+  try {
+    url = new URL(rawUrl.trim());
+  } catch {
+    return false;
+  }
+  if (url.hostname.toLowerCase().replace(/\.$/, "") !== allowed.hostname) return false;
+  if (allowed.protocol !== null && url.protocol !== allowed.protocol) return false;
+  if (allowed.port !== null && effectivePort(url) !== allowed.port) return false;
+  return true;
 }
 
 /**
@@ -245,16 +356,48 @@ export function refuseCaptureTarget(rawUrl: string, policy: CaptureTargetPolicy)
   // the browser at `http://localhost:<any port>/` — every service on the box.
   // A personal workspace has no allow-list to be made unreachable by the
   // private-range table, so it needs no exemption from it.
-  const exempt = policy.workspaceKind === "sandbox" && hostname === policy.sandboxSiteAllowedHost;
+  const onAllowList = matchesSandboxAllowList(rawUrl, policy.sandboxSiteAllowedHost);
+  const exempt = policy.workspaceKind === "sandbox" && onAllowList;
   if (!exempt && isInternalHostname(hostname)) {
     return "that address is on an internal network and cannot be opened";
   }
 
-  if (policy.workspaceKind === "sandbox" && hostname !== policy.sandboxSiteAllowedHost) {
+  if (policy.workspaceKind === "sandbox" && !onAllowList) {
     return `this workspace can only apply through ${policy.sandboxSiteAllowedHost}`;
   }
 
   return null;
+}
+
+/**
+ * Layer 2 again, this time against an address a RESOLVER answered with rather
+ * than the literal host — the second half of resolve-then-pin, and the reason
+ * `evil.example` with an A record of `169.254.169.254` no longer reaches the
+ * metadata endpoint.
+ *
+ * It is the same table (`isInternalAddress` → `isInternalIpv4`/`isInternalIpv6`)
+ * and the same exemption, deliberately: a target exempt from the literal
+ * internal-network rule is exempt from the resolved one, because it is exempt
+ * for a reason that has nothing to do with DNS. In a sandbox workspace the one
+ * allow-listed origin is an operator's configured value — `demo-ats`, which is
+ * a Docker service name resolving to a private address, or `localhost` outside
+ * compose — and layer 3 has already pinned every navigation and every redirect
+ * hop to it, so no caller-supplied name reaches this check at all. In a
+ * personal workspace, where the host IS caller-supplied and there is no
+ * allow-list, every resolved address is judged.
+ *
+ * Callers pass this to the driver as `DriverDeps.isResolvedAddressAllowed`; the
+ * driver then connects to the addresses it judged and nothing else.
+ */
+export function allowsResolvedAddress(
+  rawUrl: string,
+  address: string,
+  policy: CaptureTargetPolicy,
+): boolean {
+  if (policy.workspaceKind === "sandbox" && matchesSandboxAllowList(rawUrl, policy.sandboxSiteAllowedHost)) {
+    return true;
+  }
+  return !isInternalAddress(address);
 }
 
 /**

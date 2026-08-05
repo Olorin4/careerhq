@@ -1,9 +1,11 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { atsTypeSchema, scoringProfileSchema } from "@careerhq/contracts";
+import { atsTypeSchema, scoringProfileSchema, TEXT_LIMITS } from "@careerhq/contracts";
 import { addWatchlistEntry, removeWatchlistEntry, saveScoringProfile } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
+import { describeZodIssue } from "../../../lib/form-state.js";
+import { demoRateLimit } from "../../../lib/rate-limit.js";
 import { getActiveWorkspace } from "../../../lib/workspace.js";
 
 /**
@@ -36,10 +38,10 @@ export async function saveScoringProfileAction(
   };
   const parsed = scoringProfileSchema.safeParse(raw);
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    const field = issue?.path.join(".");
-    return { ok: false, reason: issue ? `${field ? `${field}: ` : ""}${issue.message}` : "invalid scoring profile" };
+    return { ok: false, reason: describeZodIssue(parsed.error, "invalid scoring profile") };
   }
+  const limited = demoRateLimit("saveScoringProfile");
+  if (limited) return { ok: false, reason: limited };
 
   const db = getDb();
   const ws = await getActiveWorkspace(db);
@@ -49,11 +51,12 @@ export async function saveScoringProfileAction(
 }
 
 const watchlistEntrySchema = z.object({
-  companyName: z.string().trim().min(1),
+  companyName: z.string().trim().min(1).max(TEXT_LIMITS.name),
   atsType: atsTypeSchema,
   // The slug is interpolated straight into the ATS board URL by the fetchers,
-  // so anything outside this set could reshape the request path.
-  boardSlug: z.string().trim().min(1).regex(/^[A-Za-z0-9._-]+$/, {
+  // so anything outside this set could reshape the request path. The regex
+  // bounds the alphabet; the length cap bounds how much of it.
+  boardSlug: z.string().trim().min(1).max(TEXT_LIMITS.term).regex(/^[A-Za-z0-9._-]+$/, {
     message: "board slug: letters, digits, dots, dashes, underscores only",
   }),
 });
@@ -80,6 +83,8 @@ export async function addWatchlistEntryAction(
   if (!parsed.success) {
     return { ok: false, reason: parsed.error.issues[0]?.message ?? "invalid watchlist entry" };
   }
+  const limited = demoRateLimit("addWatchlistEntry");
+  if (limited) return { ok: false, reason: limited };
 
   const db = getDb();
   const ws = await getActiveWorkspace(db);
@@ -95,8 +100,25 @@ export async function addWatchlistEntryAction(
 
 const watchlistIdSchema = z.object({ id: z.string().uuid() });
 
-export async function removeWatchlistEntryAction(formData: FormData): Promise<void> {
-  const { id } = watchlistIdSchema.parse(Object.fromEntries(formData));
-  await removeWatchlistEntry(getDb(), id);
+/**
+ * Why the row was not removed; `null` means removed. This action returned
+ * `void` and its form was a plain `<form action={…}>` in the server-rendered
+ * table, so a demo rate-limit refusal had nowhere to go but an exception —
+ * i.e. the full-page error overlay. `WatchlistRemoveForm` drives it through
+ * `useActionState` now and renders the reason in the row.
+ */
+export type WatchlistRemoveState = { reason: string } | null;
+
+export async function removeWatchlistEntryAction(
+  _previous: WatchlistRemoveState,
+  formData: FormData,
+): Promise<WatchlistRemoveState> {
+  const parsed = watchlistIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { reason: describeZodIssue(parsed.error, "invalid watchlist entry") };
+  const limited = demoRateLimit("removeWatchlistEntry");
+  if (limited) return { reason: limited };
+
+  await removeWatchlistEntry(getDb(), parsed.data.id);
   revalidatePath("/settings");
+  return null;
 }

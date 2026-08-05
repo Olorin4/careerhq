@@ -18,7 +18,10 @@ import {
   acquireBrowserSlot, capturePage, configureBrowserLimit, fillAndSubmit, openSession,
   type BrowserSlot,
 } from "@careerhq/worker/autoapply";
-import { allowsCaptureTarget, type CaptureTargetPolicy } from "@careerhq/autoapply/policy";
+import {
+  allowsCaptureTarget, allowsResolvedAddress, type CaptureTargetPolicy,
+} from "@careerhq/autoapply/policy";
+import { acquireHostBrowserSlot, type HostBrowserSlot } from "@careerhq/db";
 import { safeExternalHref } from "./safe-url.js";
 import type { SiteSubmitArgs, SiteSubmitResult } from "./site-submission.js";
 
@@ -34,6 +37,71 @@ import type { SiteSubmitArgs, SiteSubmitResult } from "./site-submission.js";
  */
 function applyBrowserLimit(config: AppConfig): void {
   configureBrowserLimit(config.autoapplyMaxConcurrentBrowsers);
+}
+
+/**
+ * Both halves of the cap, in the order that costs least (roadmap, "Carried
+ * beyond P6 → Operational").
+ *
+ * `acquireBrowserSlot` bounds this PROCESS; `acquireHostBrowserSlot`
+ * (packages/db/src/host-lock.ts) bounds the HOST, because `web` and `worker`
+ * are two processes with two counters and the demo box's RAM budget was sized
+ * against a bounded number of Chromiums, not a bounded number per container.
+ * The inner one is kept, not replaced: it costs no I/O, and it is the one that
+ * still holds if the database is briefly unreachable.
+ *
+ * Local first, then host: a process that is already busy should not spend a
+ * database round trip, nor deny the other container a host slot for the
+ * microseconds before it discovers it has no room of its own. Neither lock ever
+ * waits — `pg_try_advisory_lock` returns false rather than queueing, exactly as
+ * the in-process counter throws rather than queueing — so taking them in this
+ * order (and releasing in the reverse) cannot deadlock against a caller doing
+ * the opposite.
+ *
+ * A refusal from either half is thrown, unwrapped: `site-submission.ts`
+ * recognises `BrowserBusyError` and `HostBrowserBusyError` structurally by
+ * `name` and maps both to the same pre-token "busy, try again" refusal.
+ */
+async function acquireBothSlots(config: AppConfig): Promise<HeldSlots> {
+  const inProcess = acquireBrowserSlot();
+  let host: HostBrowserSlot;
+  try {
+    host = await acquireHostBrowserSlot(config.databaseUrl, config.autoapplyMaxConcurrentBrowsers);
+  } catch (err) {
+    // The local slot goes straight back: holding it after the host refused
+    // would make this process refuse ITSELF for the rest of its life.
+    inProcess();
+    throw err;
+  }
+  let released = false;
+  return {
+    slot: inProcess,
+    release: async () => {
+      if (released) return;
+      released = true;
+      // Nested, so a host release that rejects — the lock connection dropped —
+      // still gives the in-process slot back. A leaked in-process slot refuses
+      // every later visitor for the lifetime of the container.
+      try { await host(); } finally { inProcess(); }
+    },
+  };
+}
+
+interface HeldSlots {
+  /** The in-process slot, to hand to `openSession({ slot })` so it neither takes nor releases its own. */
+  slot: BrowserSlot;
+  /** Gives both back, host first. Idempotent, because both halves are. */
+  release: () => Promise<void>;
+}
+
+/** The scoped form, for the callers whose browser use is exactly one function call. */
+async function withBothSlots<T>(config: AppConfig, use: (slot: BrowserSlot) => Promise<T>): Promise<T> {
+  const held = await acquireBothSlots(config);
+  try {
+    return await use(held.slot);
+  } finally {
+    await held.release();
+  }
 }
 
 /**
@@ -59,17 +127,26 @@ export function makeSiteCapture(
     if (safeExternalHref(url) === null) {
       throw new Error("refusing to open a non-http(s) URL");
     }
-    const session = await openSession();
-    try {
-      return await capturePage(session, url, {
-        timeoutMs: config.autoapplyBrowserTimeoutMs,
-        // The orchestrator's policy, carried down to where the redirects
-        // happen: the same object it judged `url` with judges every hop.
-        isNavigationAllowed: (target) => allowsCaptureTarget(target, policy),
-      });
-    } finally {
-      await session.close();
-    }
+    return withBothSlots(config, async (slot) => {
+      const session = await openSession({ slot });
+      try {
+        return await capturePage(session, url, {
+          timeoutMs: config.autoapplyBrowserTimeoutMs,
+          // The orchestrator's policy, carried down to where the redirects
+          // happen: the same object it judged `url` with judges every hop.
+          isNavigationAllowed: (target) => allowsCaptureTarget(target, policy),
+          // …and the same object judges what each hop's host RESOLVES to, so a
+          // name pointing at a private address is refused and the connection is
+          // pinned to the addresses that were judged. Passed explicitly because
+          // the driver's default cannot know that this workspace's allow-listed
+          // target is a Docker service name whose private address is the point
+          // (`demo-ats`) — see `defaultAddressPolicy`.
+          isResolvedAddressAllowed: (target, address) => allowsResolvedAddress(target, address, policy),
+        });
+      } finally {
+        await session.close();
+      }
+    });
   };
 }
 
@@ -121,18 +198,18 @@ export async function withSiteBrowserReservation<T>(
   try {
     return await use(reservation);
   } finally {
-    reservation.release();
+    await reservation.release();
   }
 }
 
 interface SiteBrowserReservation extends ReservedSiteDriver {
-  /** Gives the slot back. Idempotent, and a no-op when nothing was ever acquired. */
-  release: () => void;
+  /** Gives both slots back. Idempotent, and a no-op when nothing was ever acquired. */
+  release: () => Promise<void>;
 }
 
 function siteBrowserReservation(config: AppConfig): SiteBrowserReservation {
   applyBrowserLimit(config);
-  let slot: BrowserSlot | null = null;
+  let held: HeldSlots | null = null;
   return {
     /**
      * A launch/close round trip that touches no page and no network, so
@@ -141,24 +218,39 @@ function siteBrowserReservation(config: AppConfig): SiteBrowserReservation {
      * refuses honestly instead of throwing inside `submit` and parking the
      * attempt for a click that never happened.
      *
-     * `acquireBrowserSlot` answers the other half — "is there ROOM?" — and its
-     * `BrowserBusyError` leaves here unwrapped, which is what
+     * `acquireBothSlots` answers the other half — "is there ROOM?", in this
+     * process AND on this host — and its `BrowserBusyError` /
+     * `HostBrowserBusyError` leaves here unwrapped, which is what
      * `confirmAndSubmitSite` maps to a pre-token refusal. Cheap by browser
      * standards, and paid once per confirm: a human-initiated action, not a hot
      * path.
+     *
+     * Both halves are taken HERE, at the probe, for the reason the whole
+     * reservation exists: a refusal must land before `beginSubmission`. A host
+     * slot taken later — inside `submit` — would put a `worker` container's
+     * Chromium in a position to refuse a confirm whose token was already spent.
      */
     probeDriver: async () => {
-      // `??=`: a second probe on the same reservation reuses the slot rather
-      // than deadlocking against itself.
-      slot ??= acquireBrowserSlot();
-      const session = await openSession({ slot });
+      // A second probe on the same reservation reuses the slots rather than
+      // deadlocking against itself (the host lock is re-entrant per connection,
+      // so a second acquire would take a SECOND slot and never give it back).
+      held ??= await acquireBothSlots(config);
+      const session = await openSession({ slot: held.slot });
       await session.close();
     },
-    submit: (args) => runSiteSubmit(config, args, slot),
-    release: () => {
-      const held = slot;
-      slot = null;
-      held?.();
+    // A caller that wires `submit` without ever probing still gets both halves
+    // of the cap — taken for this call and given back after it. Without this
+    // branch that path would fall through to the per-process counter alone,
+    // which is precisely the gap the host lock exists to close.
+    submit: (args) => (
+      held
+        ? runSiteSubmit(config, args, held.slot)
+        : withBothSlots(config, (slot) => runSiteSubmit(config, args, slot))
+    ),
+    release: async () => {
+      const reserved = held;
+      held = null;
+      await reserved?.release();
     },
   };
 }
@@ -174,16 +266,19 @@ function siteBrowserReservation(config: AppConfig): SiteBrowserReservation {
  */
 export function makeSiteSubmit(config: AppConfig): (args: SiteSubmitArgs) => Promise<SiteSubmitResult> {
   applyBrowserLimit(config);
-  return (args: SiteSubmitArgs) => runSiteSubmit(config, args, null);
+  // Takes both halves of the cap for exactly this call: with no reservation
+  // above it there is no confirmation token in flight, so a busy refusal here
+  // costs nothing and the scoped form is the right shape.
+  return (args: SiteSubmitArgs) => withBothSlots(config, (slot) => runSiteSubmit(config, args, slot));
 }
 
-/** `slot` non-null → drive the browser on the caller's reservation and leave releasing it to them. */
+/** Drives the browser on the caller's slot, and leaves releasing it — both halves — to them. */
 async function runSiteSubmit(
   config: AppConfig,
   args: SiteSubmitArgs,
-  slot: BrowserSlot | null,
+  slot: BrowserSlot,
 ): Promise<SiteSubmitResult> {
-  const session = await openSession(slot ? { slot } : {});
+  const session = await openSession({ slot });
   try {
     const result = await fillAndSubmit(session, {
       url: args.url,
@@ -193,6 +288,7 @@ async function runSiteSubmit(
       deps: {
         timeoutMs: config.autoapplyBrowserTimeoutMs,
         isNavigationAllowed: (target) => allowsCaptureTarget(target, args.policy),
+        isResolvedAddressAllowed: (target, address) => allowsResolvedAddress(target, address, args.policy),
       },
     });
 

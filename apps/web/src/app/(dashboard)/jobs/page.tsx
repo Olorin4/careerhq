@@ -3,7 +3,7 @@ import {
   companies as companiesTable, countInboxDuplicates, listInboxJobs, type Job,
 } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
-import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { JobRow, type JobRowData, type ScoreBreakdownRow } from "./job-row.js";
 import { IngestHealth } from "./health.js";
 
@@ -39,15 +39,21 @@ function toRowData(job: Job, company: string): JobRowData {
 }
 
 export default async function JobsPage() {
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
-  const inbox = await listInboxJobs(db, ws.id);
-  const duplicateCount = await countInboxDuplicates(db, ws.id);
-
-  const companyIds = [...new Set(inbox.map((j) => j.companyId).filter((id): id is string => Boolean(id)))];
-  const companyRows = companyIds.length
-    ? await db.select().from(companiesTable).where(inArray(companiesTable.id, companyIds))
-    : [];
+  // One snapshot: the inbox, the duplicate count reported beside it and the
+  // companies those jobs name are one workspace generation, never a mix of two
+  // across a demo reset (see `readWorkspaceSnapshot`).
+  const { workspaceId, inbox, duplicateCount, companyRows } = await readWorkspaceSnapshot(
+    getDb(),
+    async (tx, ws) => {
+      const jobs = await listInboxJobs(tx, ws.id);
+      const duplicates = await countInboxDuplicates(tx, ws.id);
+      const companyIds = [...new Set(jobs.map((j) => j.companyId).filter((id): id is string => Boolean(id)))];
+      const companies = companyIds.length
+        ? await tx.select().from(companiesTable).where(inArray(companiesTable.id, companyIds))
+        : [];
+      return { workspaceId: ws.id, inbox: jobs, duplicateCount: duplicates, companyRows: companies };
+    },
+  );
   const companyName = (id: string | null) => companyRows.find((c) => c.id === id)?.name ?? "?";
 
   // Re-ranking/filtering annotates rather than deletes (spec §5.4): jobs that
@@ -75,7 +81,7 @@ export default async function JobsPage() {
 
       <details className="ingest-health-details">
         <summary>Pipeline health</summary>
-        <IngestHealth workspaceId={ws.id} />
+        <IngestHealth workspaceId={workspaceId} />
       </details>
 
       {ranked.length === 0 ? (

@@ -2,6 +2,7 @@
 
 import type { ApplicationState } from "@careerhq/contracts";
 import { APPLICATION_STATES } from "@careerhq/contracts";
+import { formatDate } from "../../../lib/time.js";
 import { TransitionButtons } from "./transition-buttons.js";
 
 export interface ApplicationCard {
@@ -60,7 +61,7 @@ function Card({ card }: { card: ApplicationCard }) {
       {card.nextAction && (
         <p className="board-card-next">
           {card.nextAction}
-          {card.nextActionDue ? ` — due ${new Date(card.nextActionDue).toLocaleDateString()}` : ""}
+          {card.nextActionDue ? ` — due ${formatDate(card.nextActionDue)}` : ""}
         </p>
       )}
       <TransitionButtons applicationId={card.id} state={card.state} />

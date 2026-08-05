@@ -1,9 +1,9 @@
 import { getScoringProfile, listWatchlist, type WatchlistCompany } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
-import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { ProfileForm } from "./profile-form.js";
 import { WatchlistForm } from "./watchlist-form.js";
-import { removeWatchlistEntryAction } from "./actions.js";
+import { WatchlistRemoveForm } from "./watchlist-remove-form.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -12,10 +12,12 @@ import { removeWatchlistEntryAction } from "./actions.js";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
-  const profile = await getScoringProfile(db, ws.id);
-  const watchlist = await listWatchlist(db, ws.id);
+  // One snapshot: the profile and the watchlist shown together belong to the
+  // same workspace generation (see `readWorkspaceSnapshot`).
+  const { profile, watchlist } = await readWorkspaceSnapshot(getDb(), async (tx, ws) => ({
+    profile: await getScoringProfile(tx, ws.id),
+    watchlist: await listWatchlist(tx, ws.id),
+  }));
 
   return (
     <main>
@@ -70,10 +72,7 @@ function WatchlistRow({ entry }: { entry: WatchlistCompany }) {
         <code>{entry.boardSlug}</code>
       </td>
       <td>
-        <form action={removeWatchlistEntryAction}>
-          <input type="hidden" name="id" value={entry.id} />
-          <button type="submit">Remove</button>
-        </form>
+        <WatchlistRemoveForm entryId={entry.id} />
       </td>
     </tr>
   );

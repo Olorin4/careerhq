@@ -1,10 +1,11 @@
 import { listFacts, isFactStale, type CandidateFact } from "@careerhq/db";
 import { FACT_CATEGORIES } from "@careerhq/contracts";
 import { getDb } from "../../../lib/db.js";
-import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { safeExternalHref } from "../../../lib/safe-url.js";
+import { formatDate } from "../../../lib/time.js";
 import { FactForm } from "./fact-form.js";
-import { reverifyFactAction, archiveFactAction } from "./actions.js";
+import { FactRowActions } from "./fact-row-actions.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -23,9 +24,9 @@ function defaultReviewBy(): string {
 }
 
 export default async function FactsPage() {
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
-  const facts = await listFacts(db, ws.id);
+  // Resolving the workspace and reading its facts are two statements; one
+  // snapshot is what stops a demo reset committing between them.
+  const facts = await readWorkspaceSnapshot(getDb(), (tx, ws) => listFacts(tx, ws.id));
   const now = new Date();
   const reviewByDefault = defaultReviewBy();
 
@@ -90,20 +91,10 @@ function FactRow({
         )
       )}
       <p className="fact-row-dates">
-        Verified {fact.verifiedAt.toLocaleDateString()} · Review by{" "}
-        {fact.reviewBy.toLocaleDateString()}
+        Verified {formatDate(fact.verifiedAt)} · Review by{" "}
+        {formatDate(fact.reviewBy)}
       </p>
-      <div className="fact-row-actions">
-        <form action={reverifyFactAction} className="fact-reverify-form">
-          <input type="hidden" name="id" value={fact.id} />
-          <input type="date" name="reviewBy" defaultValue={reviewByDefault} required />
-          <button type="submit">Re-verify</button>
-        </form>
-        <form action={archiveFactAction}>
-          <input type="hidden" name="id" value={fact.id} />
-          <button type="submit">Archive</button>
-        </form>
-      </div>
+      <FactRowActions factId={fact.id} reviewByDefault={reviewByDefault} />
     </li>
   );
 }

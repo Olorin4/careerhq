@@ -91,7 +91,14 @@ export async function transitionApplicationTx(tx: Tx, args: TransitionArgs): Pro
   return { ok: true, application: updated! };
 }
 
-export async function listApplications(db: Db, workspaceId: string): Promise<Application[]> {
+/**
+ * `DbOrTx`, as every list/count helper a dashboard page calls now is:
+ * `apps/web`'s `readWorkspaceSnapshot` runs a page's reads inside one
+ * REPEATABLE READ transaction, so that resolving the workspace and counting
+ * what belongs to it cannot straddle the demo reset's commit. A helper that
+ * takes only `Db` cannot join that snapshot.
+ */
+export async function listApplications(db: DbOrTx, workspaceId: string): Promise<Application[]> {
   return db.select().from(applications)
     .where(eq(applications.workspaceId, workspaceId))
     // `id` last so equal-timestamped rows cannot swap places between renders.
