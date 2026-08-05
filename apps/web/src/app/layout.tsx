@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
+import { Inter } from "next/font/google";
 import { loadConfig } from "@careerhq/config";
+import "./tokens.css";
 import "./globals.css";
+
+const inter = Inter({ subsets: ["latin"], display: "swap", variable: "--font-sans" });
 
 export const metadata = {
   title: "CareerHQ",
@@ -25,7 +29,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   const { demoMode } = loadConfig();
 
   return (
-    <html lang="en">
+    <html lang="en" className={inter.variable}>
       <body>
         {demoMode && (
           <div className="demo-banner" data-testid="demo-banner" role="status">

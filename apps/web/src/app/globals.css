@@ -1,3 +1,6 @@
+@import "tailwindcss";
+@config "../../tailwind.config.ts";
+
 :root {
   color-scheme: light dark;
 }
