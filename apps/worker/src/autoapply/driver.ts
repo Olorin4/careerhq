@@ -7,9 +7,13 @@
 // into keystrokes, one submit click, and the evidence of what happened.
 import type { CanonicalForm, FieldKind, PlannedAnswer } from "@careerhq/contracts";
 import { fieldIdentityHash, fieldKindFor, rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
+import { isInternalAddress, isInternalHostname } from "@careerhq/autoapply/policy";
 import { chromium, errors, type Browser, type Page } from "playwright";
 import { acquireBrowserSlot, type BrowserSlot } from "./browser-limit.js";
 import { BUTTON_STEPS_SCRIPT, deriveTotalSteps, EXTRACT_SCRIPT, type ExtractedPage } from "./extract.js";
+import {
+  pinnedFetch, resolveNavigationTarget, type ResolvedAddressPolicy,
+} from "./pinned-navigation.js";
 
 export type DriverErrorKind = "navigation" | "timeout" | "fill" | "submit" | "advance";
 
@@ -45,6 +49,61 @@ export interface DriverDeps {
    * and the guard can never disagree about a URL.
    */
   isNavigationAllowed: (url: string) => boolean;
+  /**
+   * Whether a resolved ADDRESS may be connected to for a URL — the second half
+   * of the pair above, asked once per address per navigation, and applied by
+   * pinning the connection to the addresses it approved
+   * (./pinned-navigation.ts). `allowsResolvedAddress` from
+   * `@careerhq/autoapply/policy`, bound to the same workspace policy, is what
+   * real callers pass.
+   *
+   * Optional where `isNavigationAllowed` is required, and the difference is not
+   * carelessness: a caller who says nothing here gets `defaultAddressPolicy`
+   * below, which refuses every internal address outright. Saying nothing is
+   * therefore the STRICT direction, and the only thing a caller gains by
+   * speaking up is its own workspace's exemption — the reverse of
+   * `isNavigationAllowed`, where silence would have meant no host policy at
+   * all.
+   */
+  isResolvedAddressAllowed?: ResolvedAddressPolicy;
+}
+
+/**
+ * What a caller that passed no `isResolvedAddressAllowed` gets: no resolved
+ * address on an internal network, unless the caller's own host predicate has
+ * already said that address is fine — which it can say in exactly two ways,
+ * both derived from `isNavigationAllowed` rather than assumed:
+ *
+ *   - it allows the URL with the RESOLVED ADDRESS written in place of the host,
+ *     i.e. it would have allowed a navigation straight there; or
+ *   - the literal host is itself internal (`localhost`) and allowed anyway,
+ *     which is a policy allow-listing an internal host on purpose — the
+ *     outside-Compose demo, whose resolved `127.0.0.1` is that same exemption.
+ *
+ * Where the literal host is an ordinary NAME and the predicate refuses its
+ * address — the shape of the attack — no exemption can be derived, so the
+ * address decides. That is the whole point.
+ *
+ * A caller whose allow-listed target is a NAME that resolves privately (the
+ * Compose demo's `demo-ats`, whose private address IS the arrangement) has to
+ * pass the real policy, or be refused. Refusing is the right way round for a
+ * default to be wrong.
+ */
+function defaultAddressPolicy(deps: DriverDeps): ResolvedAddressPolicy {
+  return (url, address) => {
+    if (!isInternalAddress(address)) return true;
+    let asAddress: URL;
+    try {
+      asAddress = new URL(url);
+    } catch {
+      return false;
+    }
+    const hostname = asAddress.hostname;
+    // `URL.hostname` wants an IPv6 literal bracketed; an IPv4 one plain.
+    asAddress.hostname = address.includes(":") ? `[${address}]` : address;
+    if (deps.isNavigationAllowed(asAddress.toString())) return true;
+    return isInternalHostname(hostname) && deps.isNavigationAllowed(url);
+  };
 }
 
 export interface SubmitResult {
@@ -238,6 +297,8 @@ const MAX_REDIRECT_HOPS = 20;
 interface NavigationGuard {
   /** The off-policy URL the guard refused, if it refused one. */
   refused: string | null;
+  /** Why it was refused — appended to the refusal, so a DNS refusal does not read as a host one. */
+  refusedBecause: string | null;
   /** The next, already-policy-checked hop `gotoGuarded` should navigate to. */
   redirectTo: string | null;
 }
@@ -266,7 +327,7 @@ interface NavigationGuard {
  * not assumed.
  *
  * So for main-frame GET navigations the guard takes the redirect chain away
- * from the browser: it fetches with `maxRedirects: 0`, reads `Location`,
+ * from the browser: it fetches one hop at a time, reads `Location`,
  * judges the next hop, and — if allowed — hands it back to `gotoGuarded` to
  * navigate to explicitly, which re-enters this handler and re-judges. Off
  * policy, nothing is fetched: the refusal happens on the Location HEADER, so
@@ -274,6 +335,11 @@ interface NavigationGuard {
  * the probe's internal server). Exactly one request per hop is made, the same
  * ones the browser would have made, and `page.url()` stays truthful because
  * the browser really does navigate to each hop.
+ *
+ * That own-fetch is also where the pin goes (./pinned-navigation.ts): it was
+ * `route.fetch`, which runs in the Playwright driver process where this
+ * process's resolver cannot be substituted, and is now an in-process request
+ * over a socket dialled at the addresses this guard just judged.
  *
  * Non-GET navigations are policy-checked but NOT chain-walked: replaying a
  * multipart POST through `route.fetch` to inspect its redirect is a good way
@@ -283,7 +349,14 @@ interface NavigationGuard {
  * silent.
  */
 async function installNavigationGuard(page: Page, deps: DriverDeps): Promise<NavigationGuard> {
-  const guard: NavigationGuard = { refused: null, redirectTo: null };
+  const guard: NavigationGuard = { refused: null, refusedBecause: null, redirectTo: null };
+  const isAddressAllowed = deps.isResolvedAddressAllowed ?? defaultAddressPolicy(deps);
+
+  const refuse = async (url: string, because: string, route: { abort: (code: string) => Promise<void> }): Promise<void> => {
+    guard.refused = url;
+    guard.refusedBecause = because;
+    await route.abort("blockedbyclient");
+  };
 
   await page.route("**/*", async (route) => {
     const request = route.request();
@@ -296,19 +369,40 @@ async function installNavigationGuard(page: Page, deps: DriverDeps): Promise<Nav
 
     const url = request.url();
     if (!deps.isNavigationAllowed(url)) {
-      guard.refused = url;
-      await route.abort("blockedbyclient");
+      await refuse(url, "it is not an allowed target for this workspace", route);
+      return;
+    }
+
+    // Resolve-then-pin, on the initial navigation and on every hop — the same
+    // places the literal check runs. A name is judged by what it ANSWERS with,
+    // and the answer is then what gets connected to.
+    const resolved = await resolveNavigationTarget(url, isAddressAllowed);
+    if (resolved.kind === "refused") {
+      await refuse(url, `it resolves to ${resolved.address}, which is on an internal network`, route);
+      return;
+    }
+    if (resolved.kind === "unresolved") {
+      // Not a policy answer: a name that does not resolve is the browser's
+      // error to report, exactly like an unreachable host below.
+      await route.abort();
       return;
     }
 
     if (request.method() !== "GET" || request.frame() !== page.mainFrame()) {
+      // Checked and resolution-checked, but Chromium makes this connection
+      // itself and resolves the name again to do it — see the module header of
+      // ./pinned-navigation.ts for why replaying a POST here is worse.
       await route.continue();
       return;
     }
 
     let response;
     try {
-      response = await route.fetch({ maxRedirects: 0 });
+      response = await pinnedFetch(url, {
+        headers: request.headers(),
+        addresses: resolved.addresses,
+        timeoutMs: deps.timeoutMs,
+      });
     } catch {
       // Unreachable host, TLS failure, aborted route: let the browser produce
       // its own error for `goto` to report, rather than inventing one here.
@@ -316,10 +410,10 @@ async function installNavigationGuard(page: Page, deps: DriverDeps): Promise<Nav
       return;
     }
 
-    const status = response.status();
-    const location = response.headers()["location"];
+    const status = response.status;
+    const location = response.headers["location"];
     if (status < 300 || status > 399 || location === undefined) {
-      await route.fulfill({ response });
+      await route.fulfill({ status, headers: response.headers, body: response.body });
       return;
     }
 
@@ -327,13 +421,11 @@ async function installNavigationGuard(page: Page, deps: DriverDeps): Promise<Nav
     try {
       next = new URL(location, url).toString();
     } catch {
-      guard.refused = location;
-      await route.abort("blockedbyclient");
+      await refuse(location, "it is not an allowed target for this workspace", route);
       return;
     }
     if (!deps.isNavigationAllowed(next)) {
-      guard.refused = next;
-      await route.abort("blockedbyclient");
+      await refuse(next, "it is not an allowed target for this workspace", route);
       return;
     }
 
@@ -358,6 +450,7 @@ async function gotoOrThrow(page: Page, url: string, deps: DriverDeps): Promise<v
 
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
     guard.refused = null;
+    guard.refusedBecause = null;
     guard.redirectTo = null;
 
     let cause: unknown = null;
@@ -372,7 +465,7 @@ async function gotoOrThrow(page: Page, url: string, deps: DriverDeps): Promise<v
     // `net::ERR_BLOCKED_BY_CLIENT`.
     if (guard.refused !== null) {
       throw new DriverError(
-        `refusing to open ${guard.refused}: it is not an allowed target for this workspace`,
+        `refusing to open ${guard.refused}: ${guard.refusedBecause ?? "it is not an allowed target for this workspace"}`,
         "navigation",
       );
     }

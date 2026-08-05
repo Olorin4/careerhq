@@ -143,7 +143,13 @@ function config(over: Record<string, string> = {}): AppConfig {
   return loadConfig({
     DATABASE_URL: url ?? "postgres://u:p@localhost:5432/careerhq",
     SUBMISSIONS_LIVE_COMPANY_SITE: "true",
-    SANDBOX_SITE_ALLOWED_HOST: HOST,
+    // The ORIGIN spelling, not the bare host: `SANDBOX_SITE_ALLOWED_HOST` is
+    // compared as scheme + host + port, and a sandbox pointed at a bare
+    // `localhost` could reach every other port on the box (carried out of P6).
+    // This suite runs the spelling README now recommends, so the origin
+    // comparison is exercised by the full-stack path and not only by
+    // target-policy.test.ts.
+    SANDBOX_SITE_ALLOWED_HOST: DEMO_ATS_URL,
     // This suite drives a demo-ats on `localhost`, which is a loopback name,
     // and the capture policy's exemption for the configured sandbox host is
     // scoped to sandbox-EFFECTIVE workspaces (fix-wave review A3 — honouring

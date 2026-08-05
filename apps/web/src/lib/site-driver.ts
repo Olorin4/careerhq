@@ -18,7 +18,9 @@ import {
   acquireBrowserSlot, capturePage, configureBrowserLimit, fillAndSubmit, openSession,
   type BrowserSlot,
 } from "@careerhq/worker/autoapply";
-import { allowsCaptureTarget, type CaptureTargetPolicy } from "@careerhq/autoapply/policy";
+import {
+  allowsCaptureTarget, allowsResolvedAddress, type CaptureTargetPolicy,
+} from "@careerhq/autoapply/policy";
 import { safeExternalHref } from "./safe-url.js";
 import type { SiteSubmitArgs, SiteSubmitResult } from "./site-submission.js";
 
@@ -66,6 +68,13 @@ export function makeSiteCapture(
         // The orchestrator's policy, carried down to where the redirects
         // happen: the same object it judged `url` with judges every hop.
         isNavigationAllowed: (target) => allowsCaptureTarget(target, policy),
+        // …and the same object judges what each hop's host RESOLVES to, so a
+        // name pointing at a private address is refused and the connection is
+        // pinned to the addresses that were judged. Passed explicitly because
+        // the driver's default cannot know that this workspace's allow-listed
+        // target is a Docker service name whose private address is the point
+        // (`demo-ats`) — see `defaultAddressPolicy`.
+        isResolvedAddressAllowed: (target, address) => allowsResolvedAddress(target, address, policy),
       });
     } finally {
       await session.close();
@@ -193,6 +202,7 @@ async function runSiteSubmit(
       deps: {
         timeoutMs: config.autoapplyBrowserTimeoutMs,
         isNavigationAllowed: (target) => allowsCaptureTarget(target, args.policy),
+        isResolvedAddressAllowed: (target, address) => allowsResolvedAddress(target, address, args.policy),
       },
     });
 

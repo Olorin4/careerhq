@@ -35,7 +35,7 @@ import {
 import { redactError } from "@careerhq/email";
 import { stripHtml } from "@careerhq/ingest";
 import {
-  effectiveWorkspaceKind, refuseCaptureTarget, type CaptureTargetPolicy,
+  effectiveWorkspaceKind, matchesSandboxAllowList, refuseCaptureTarget, type CaptureTargetPolicy,
 } from "@careerhq/autoapply/policy";
 
 /** What the driver hands back after the one submit click (worker `fillAndSubmit`, adapted). */
@@ -1062,8 +1062,15 @@ export async function confirmAndSubmitSite(
     // its own hard-safety switch. Shared with the prepare-time layer through
     // `effectiveWorkspaceKind` so the two can never derive it differently.
     workspaceKind: policy.workspaceKind,
-    // Only consulted for sandbox workspaces; a sandbox may reach exactly one host.
-    sandboxTargetAllowed: payload.host === config.sandboxSiteAllowedHost,
+    // Only consulted for sandbox workspaces; a sandbox may reach exactly one
+    // ORIGIN. Judged from `payload.url` and not from `payload.host`, because a
+    // host comparison cannot see a port: with the documented outside-compose
+    // setting (`SANDBOX_SITE_ALLOWED_HOST=localhost`) every port on the box
+    // satisfied this gate. `matchesSandboxAllowList` is the same predicate
+    // `refuseCaptureTarget` uses, so the confirm-time gate and the capture-time
+    // one agree by construction. (`payload.host` still backs the RETYPED
+    // target below — a human retypes a hostname, not an origin.)
+    sandboxTargetAllowed: matchesSandboxAllowList(payload.url, config.sandboxSiteAllowedHost),
     tokenRecord: confirmation
       ? {
           tokenHash: confirmation.tokenHash,
