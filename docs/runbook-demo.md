@@ -238,9 +238,12 @@ tar tzf "$B/careerhq-files-$STAMP.tar.gz" | head
 ```
 
 For the hosted demo specifically, a backup is a convenience, not a safety net —
-everything in it is fictional and regenerated every six hours. It matters for a
-**self-hosted personal install**, where the same two commands (minus the demo
-overlay) are the whole backup story.
+everything in it is either fictional or re-fetchable, and all of it is
+regenerated every six hours. (The discovery inbox holds real public job
+listings, not seeded ones — see [`SECURITY.md`](../SECURITY.md#the-hosted-demo)
+— but `discovery.ingest` re-pulls them from the feeds on the next cron, so a
+lost copy costs nothing.) It matters for a **self-hosted personal install**,
+where the same two commands (minus the demo overlay) are the whole backup story.
 
 ## 6. Restore
 
@@ -386,7 +389,19 @@ worst case on a 3.7 GB box. Do not raise a `mem_limit` without redoing that
 arithmetic against `free -h`.
 
 **Disk filling.** The demo's own ceilings (64 MB of CVs, 64 MB of screenshots)
-are enforced in the app, so growth is almost always images:
+are enforced in the app, so growth is almost always images. Discovery is not a
+third source of growth despite inserting hundreds of rows a cycle: ingested
+listings land in the demo workspace, and the reset deletes that workspace row,
+cascading to `jobs`, `companies` and `ingest_runs`. Measured against the real
+feeds — 39 job rows after a reset, 466 after one ingest run inserted 427, 39
+after the next. If you want to see it on the box:
+
+```bash
+dc exec -T postgres psql -U careerhq -d careerhq \
+  -c "select count(*) from jobs" -c "select pg_size_pretty(pg_database_size('careerhq'))"
+```
+
+
 
 ```bash
 docker system df
