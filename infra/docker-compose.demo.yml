@@ -27,8 +27,15 @@
 # unreachable from the internet even for the seconds between `up` and the
 # vhost being in place. Postgres, Mailpit and demo-ats lose their published
 # ports entirely (`!reset`): they are reachable only by service name on the
-# compose network. Mailpit's UI in particular would otherwise be an open,
-# unauthenticated mail viewer on a public IP.
+# compose network.
+#
+# That `!reset` is now the SECOND line of defence rather than the only one: the
+# base file binds all three to `127.0.0.1` (see its header), so the exposure
+# this file used to be solely responsible for preventing — Mailpit's
+# unauthenticated mail viewer on a public IP — cannot happen even to someone who
+# applies the base and edge files without this one. Removing the publish
+# entirely is still right: a port bound to the demo box's loopback is a port the
+# demo has no use for at all.
 services:
   postgres:
     # Not published: the demo's database is reachable only from `web`/`worker`
@@ -149,15 +156,20 @@ services:
       # packages/ai/fixtures/replay. A fixture miss falls through to the
       # deterministic floor; it never reaches a provider.
       AI_MODE: replay
-      # Set EXPLICITLY, and it has to be. The base file passes
-      # `AI_REPLAY_DIR: ${AI_REPLAY_DIR:-}`, i.e. the empty string, and unlike
-      # SANDBOX_*_ALLOWED_HOST and DEMO_ATS_URL (which both `.trim() || default`
-      # for exactly this reason) `packages/config`'s AI_REPLAY_DIR has only a
-      # zod `.default()` — which fires on `undefined`, never on `""`. An empty
-      # value therefore resolves to the repo root, `/app`, and every fixture
-      # lookup misses in silence: no error, just a demo that quietly falls back
-      # to the deterministic floor for every draft. Naming the absolute path
-      # here is immune to that regardless of how config is fixed later.
+      # Set EXPLICITLY. The base file passes `AI_REPLAY_DIR: ${AI_REPLAY_DIR:-}`,
+      # i.e. the empty string for anyone who never set it, and an empty value
+      # used to resolve to the repo root `/app`, where no fixture lives — every
+      # lookup missing in silence, and a demo quietly falling back to the
+      # deterministic floor for every draft. `96fe13a` closed that in the
+      # config layer (`blankableDefault`: the documented default now applies to
+      # "" as well as to an absent value, like SANDBOX_*_ALLOWED_HOST and
+      # DEMO_ATS_URL already did), so this line is no longer what stands
+      # between the demo and a silent miss.
+      #
+      # It stays because the value it names is not the default: the fixtures
+      # live at an absolute path inside the image, this is the file an auditor
+      # reads to find out where, and naming it keeps both services provably on
+      # the same directory rather than on the same accident.
       AI_REPLAY_DIR: /app/packages/ai/fixtures/replay
       # `!reset` DELETES the key the base file passes through, rather than
       # setting it empty: the demo must be auditable with `docker compose exec
@@ -208,18 +220,25 @@ services:
       SANDBOX_SITE_ALLOWED_HOST: demo-ats
 
       # The base file leaves AI_MODE off the worker because only `web`
-      # generates materials. Set here anyway, and honestly labelled: the
-      # worker's one AI pass (discovery re-rank) short-circuits to
-      # `skipped_no_key` before it ever consults the mode, so today this is
-      # inert. It is here as a fail-safe, not a feature — the day anything in
-      # the worker does reach the AI client, replay is what it must find, and a
-      # process that inherits `live` by omission on a public box is exactly the
-      # accident this variable exists to prevent.
+      # generates materials. Here it is LOAD-BEARING, not a fail-safe: the
+      # worker's one AI pass (the discovery re-rank) used to short-circuit to
+      # `skipped_no_key` before it consulted the mode, and `a13274e` changed
+      # that — `apps/worker/src/jobs/rerank.ts` now reads
+      # `if (!apiKey && config.aiMode !== "replay")`, because replay reads a
+      # committed fixture and never opens a socket, so it is the one mode that
+      # works with no key. Measured on the deployed demo with no key present:
+      # `{ status: 'ok', reranked: 20 }`. Delete this line and the demo's
+      # discovery re-rank silently returns to `skipped_no_key` — the inbox
+      # keeps its keyword order and the LLM column goes empty.
+      #
+      # It is still also the fail-safe it was written as: a process that
+      # inherits `live` by omission on a public box is exactly the accident
+      # this variable prevents.
       AI_MODE: replay
       # The base file does not pass AI_REPLAY_DIR to the worker at all, so the
-      # zod default would apply cleanly here — set anyway, so the two services
+      # zod default applies cleanly here — set anyway, so the two services
       # provably read the same directory and neither depends on the other's
-      # accident. See the note on web for why "" would not have worked.
+      # accident.
       AI_REPLAY_DIR: /app/packages/ai/fixtures/replay
       OPENROUTER_API_KEY: !reset null
 

@@ -1,3 +1,23 @@
+# The base stack: everything the app needs, wired for a laptop.
+#
+# Every published port below is bound to `127.0.0.1` DELIBERATELY, and that is a
+# safety property, not a preference. Docker publishes to `0.0.0.0` by default
+# and inserts its own DOCKER chain rules ahead of the host firewall, so an
+# unqualified `"8025:8025"` is reachable from the internet on any box with a
+# public IP — UFW included. The demo overlay removes these publishes outright
+# (`ports: !reset []`), but the overlays are opt-in: applying the base file with
+# only `docker-compose.edge.yml` (which joins `web` to a public-facing proxy
+# network) used to leave Mailpit's UNAUTHENTICATED mail viewer, the fictional
+# ATS and Postgres itself on a public interface, guarded by nothing but a
+# sentence in a comment. Loopback here means a missing overlay cannot expose
+# them, and nothing is lost: every consumer of these ports (the e2e suites,
+# `psql`, a browser on the box) is on the box already, and a container reaches
+# its neighbours by service name on the compose network, never through a
+# published port.
+#
+# `web` is the one service that is meant to be reachable, and it is the one the
+# operator decides about: `CAREERHQ_WEB_BIND` defaults to loopback here too, and
+# a LAN demo sets it to `0.0.0.0` explicitly.
 name: careerhq
 services:
   postgres:
@@ -6,7 +26,7 @@ services:
       POSTGRES_USER: careerhq
       POSTGRES_PASSWORD: careerhq
       POSTGRES_DB: careerhq
-    ports: ["${CAREERHQ_PG_PORT:-5432}:5432"]
+    ports: ["127.0.0.1:${CAREERHQ_PG_PORT:-5432}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U careerhq"]
@@ -15,13 +35,15 @@ services:
       retries: 10
   mailpit:
     image: axllent/mailpit:latest
-    ports: ["1025:1025", "8025:8025"]
+    # 8025 is an unauthenticated web mail viewer showing every message the app
+    # "sent". Loopback-only, always — see the header note.
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
   # Fictional ATS used as the e2e target and only auto-apply destination for
   # demos (spec P5). No dependencies, present by default (not behind a
   # profile) since the e2e suite needs it the same way it needs mailpit.
   demo-ats:
     build: { context: .., dockerfile: infra/Dockerfile.demo-ats }
-    ports: ["3001:3001"]
+    ports: ["127.0.0.1:3001:3001"]
   web:
     build: { context: .., dockerfile: infra/Dockerfile.web }
     environment:
@@ -68,7 +90,10 @@ services:
       # INGEST_CRON, EMAIL_SYNC_CRON and DEMO_RESET_CRON are read only by the
       # worker's jobs and schedules.
       # Every other variable `packages/config` parses is set above.
-    ports: ["3000:3000"]
+    # The only service anyone is meant to reach, and the only bind address an
+    # operator chooses: `CAREERHQ_WEB_BIND=0.0.0.0` for a LAN demo, which is a
+    # decision made on purpose rather than a default nobody noticed.
+    ports: ["${CAREERHQ_WEB_BIND:-127.0.0.1}:3000:3000"]
     volumes: [files:/app/var/files]
     depends_on:
       postgres: { condition: service_healthy }
