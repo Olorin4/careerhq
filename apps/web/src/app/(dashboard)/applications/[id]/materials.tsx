@@ -6,6 +6,7 @@ import { DOCUMENT_KINDS, type DocumentKind } from "@careerhq/contracts";
 import type { GeneratedDocument } from "@careerhq/db";
 import { ProvenanceChips } from "../../../../components/provenance-chips.js";
 import type { GenerationOutcome } from "../../../../lib/generation.js";
+import { REPLAY_MISS, replayMissMessage } from "../../../../lib/replay-miss.js";
 import {
   approveDocumentAction, createManualDocumentAction, generateDocumentAction, rejectDocumentAction,
 } from "./materials-actions.js";
@@ -31,9 +32,13 @@ interface MaterialsProps {
   factClaims: Record<string, string>;
   /** Whether an OpenRouter key is configured — precomputed server-side so the manual-mode note shows immediately, with no wasted click. */
   aiAvailable: boolean;
+  /** Whether this deployment is the hosted demo answering from recorded AI output — decides how a `replay_miss` is worded. */
+  replayDemo: boolean;
 }
 
-export function Materials({ applicationId, documents, factClaims, aiAvailable }: MaterialsProps) {
+export function Materials({
+  applicationId, documents, factClaims, aiAvailable, replayDemo,
+}: MaterialsProps) {
   return (
     <section className="materials">
       <h2>Materials</h2>
@@ -47,13 +52,14 @@ export function Materials({ applicationId, documents, factClaims, aiAvailable }:
           document={documents.find((d) => d.kind === kind) ?? null}
           factClaims={factClaims}
           aiAvailable={aiAvailable}
+          replayDemo={replayDemo}
         />
       ))}
     </section>
   );
 }
 
-function OutcomePane({ outcome }: { outcome: GenerationOutcome }) {
+function OutcomePane({ outcome, replayDemo }: { outcome: GenerationOutcome; replayDemo: boolean }) {
   switch (outcome.status) {
     case "ok":
       // Handled by the caller (triggers a router.refresh() instead of ever
@@ -83,6 +89,12 @@ function OutcomePane({ outcome }: { outcome: GenerationOutcome }) {
     case "ai_unavailable":
       return <p className="materials-manual-note">AI is not configured — write a manual draft below.</p>;
     case "failed":
+      // `replay_miss` is an internal token, not something to put in front of a
+      // stranger: on the hosted demo it is the expected answer for a prompt
+      // nobody recorded, so it is explained rather than printed.
+      if (replayDemo && outcome.error === REPLAY_MISS) {
+        return <p className="materials-manual-note">{replayMissMessage("document")}</p>;
+      }
       return <p className="materials-error">Generation failed: {outcome.error}</p>;
   }
 }
@@ -93,12 +105,14 @@ function MaterialSection({
   document,
   factClaims,
   aiAvailable,
+  replayDemo,
 }: {
   applicationId: string;
   kind: DocumentKind;
   document: GeneratedDocument | null;
   factClaims: Record<string, string>;
   aiAvailable: boolean;
+  replayDemo: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -261,7 +275,7 @@ function MaterialSection({
                 <pre>{streamText || "Waiting for model…"}</pre>
               </div>
             )}
-            {outcome && <OutcomePane outcome={outcome} />}
+            {outcome && <OutcomePane outcome={outcome} replayDemo={replayDemo} />}
           </>
         ) : (
           <p className="materials-manual-note">

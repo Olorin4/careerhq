@@ -63,6 +63,10 @@ export default async function ApplicationDetailPage({
   // from the UI. `prepareGeneration` enforces the same rule server-side.
   const aiConfig = loadConfig();
   const aiAvailable = aiConfig.openrouterApiKey !== null || aiConfig.aiMode === "replay";
+  // The hosted demo (and only it) answers strangers from committed fixtures, so
+  // it is the one deployment where an unrecorded prompt needs explaining rather
+  // than reporting — see `lib/replay-miss.ts`.
+  const replayDemo = aiConfig.demoMode && aiConfig.aiMode === "replay";
   const answers = await listAnswers(db, application.id);
   const cvVariants = await listCvVariants(db, application.workspaceId);
   const emailConnections = await listEmailConnections(db, application.workspaceId);
@@ -122,9 +126,15 @@ export default async function ApplicationDetailPage({
         documents={documents}
         factClaims={factClaims}
         aiAvailable={aiAvailable}
+        replayDemo={replayDemo}
       />
 
-      <QaPanel applicationId={application.id} answers={answers} factClaims={factClaims} />
+      <QaPanel
+        applicationId={application.id}
+        answers={answers}
+        factClaims={factClaims}
+        replayDemo={replayDemo}
+      />
 
       <EmailPanel
         applicationId={application.id}

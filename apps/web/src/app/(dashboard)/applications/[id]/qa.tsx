@@ -4,6 +4,7 @@ import { useActionState, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicationAnswer } from "@careerhq/db";
 import { ProvenanceChips } from "../../../../components/provenance-chips.js";
+import { REPLAY_MISS, replayMissMessage } from "../../../../lib/replay-miss.js";
 import {
   approveAnswerAction, askQuestionAction, rejectAnswerAction, saveManualAnswerAction,
   type AskQuestionResult,
@@ -18,9 +19,11 @@ interface QaPanelProps {
   answers: ApplicationAnswer[];
   /** Every fact claim in the workspace (including archived), keyed by id, for provenance chip labels. */
   factClaims: Record<string, string>;
+  /** Whether this deployment is the hosted demo answering from recorded AI output — decides how a `replay_miss` is worded. */
+  replayDemo: boolean;
 }
 
-function OutcomePane({ result }: { result: AskQuestionResult }) {
+function OutcomePane({ result, replayDemo }: { result: AskQuestionResult; replayDemo: boolean }) {
   const { outcome } = result;
   switch (outcome.status) {
     case "ok":
@@ -62,6 +65,12 @@ function OutcomePane({ result }: { result: AskQuestionResult }) {
         </>
       );
     case "failed":
+      // The Q&A box takes free text, so on the hosted demo a miss is the
+      // *normal* outcome for anything but the recorded question — see
+      // `lib/replay-miss.ts`.
+      if (replayDemo && outcome.error === REPLAY_MISS) {
+        return <p className="qa-manual-note">{replayMissMessage("question")}</p>;
+      }
       return <p className="qa-error">Could not answer: {outcome.error}</p>;
   }
 }
@@ -163,7 +172,7 @@ function AnswerRow({
   );
 }
 
-export function QaPanel({ applicationId, answers, factClaims }: QaPanelProps) {
+export function QaPanel({ applicationId, answers, factClaims, replayDemo }: QaPanelProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [question, setQuestion] = useState("");
@@ -230,7 +239,7 @@ export function QaPanel({ applicationId, answers, factClaims }: QaPanelProps) {
       </form>
 
       {error && <p className="qa-error">{error}</p>}
-      {result && <OutcomePane result={result} />}
+      {result && <OutcomePane result={result} replayDemo={replayDemo} />}
 
       <ManualAnswerForm
         applicationId={applicationId}

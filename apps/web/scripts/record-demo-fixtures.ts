@@ -1,7 +1,15 @@
 /**
  * Records the hosted demo's *generation* replay fixtures (spec P6 §3, Task 8):
- * a cover letter, an email body and a screening-question answer, each against
- * the demo seed's exact prompt.
+ * a cover letter and an email body for **every** seeded application, plus a
+ * screening-question answer, each against the demo seed's exact prompt.
+ *
+ * Task 8 recorded only the walkthrough path (Wexford's cover letter,
+ * Silvermark's email body). Task 12 then found the consequence on the live
+ * demo: "Generate with AI" answered `replay_miss` on ten of the eleven other
+ * applications, which is the first button a stranger presses. The case list is
+ * now derived from the seeded applications themselves rather than hand-listed,
+ * so a new seeded application gets a fixture on the next recording run instead
+ * of silently becoming another miss.
  *
  * The demo deploys with `AI_MODE=replay` and no `OPENROUTER_API_KEY`, so every
  * AI answer a visitor sees comes out of `packages/ai/fixtures/replay/`. A
@@ -58,24 +66,36 @@ if (!demoWorkspace || demoWorkspace.id !== workspaceId) {
   throw new Error("demo workspace missing after seed");
 }
 
-/** The seeded application for `companyName`, found the way a visitor would. */
-async function applicationFor(companyName: string): Promise<string> {
-  const rows = await db.select({ id: applications.id })
+/**
+ * Every seeded application, in the order `/applications` lists them
+ * (`listApplications` sorts on `created_at`), with the company name the UI
+ * shows. Derived, not hand-listed: the demo's twelve applications come from
+ * three different code paths in the seed (promoted discovery listings,
+ * `createApplication`, the site-submission story), and a hand-list would drift.
+ */
+async function seededApplications(): Promise<Array<{ id: string; company: string }>> {
+  const rows = await db.select({ id: applications.id, company: companies.name })
     .from(applications)
     .innerJoin(jobs, eq(applications.jobId, jobs.id))
     .innerJoin(companies, eq(jobs.companyId, companies.id))
-    .where(and(eq(applications.workspaceId, workspaceId), eq(companies.name, companyName)));
-  const id = rows[0]?.id;
-  if (!id) throw new Error(`no seeded application for ${companyName}`);
-  return id;
+    .where(eq(applications.workspaceId, workspaceId))
+    .orderBy(applications.createdAt, applications.id);
+  if (rows.length === 0) throw new Error("no seeded applications");
+  return rows;
 }
 
-const wexford = await applicationFor("Wexford Health");
-const silvermark = await applicationFor("Silvermark Labs");
+const seeded = await seededApplications();
+const wexford = seeded.find((a) => a.company === "Wexford Health")?.id;
+if (!wexford) throw new Error("no seeded application for Wexford Health");
 
 const cases: Array<{ label: string; args: GenerationArgs }> = [
-  { label: "cover letter", args: { workspaceId, applicationId: wexford, kind: "cover_letter" } },
-  { label: "email body", args: { workspaceId, applicationId: silvermark, kind: "email_body" } },
+  // Both document kinds on every application: the materials panel offers
+  // "Generate with AI" for each, so any pair left unrecorded is a `replay_miss`
+  // a visitor can reach in one click.
+  ...seeded.flatMap(({ id, company }): Array<{ label: string; args: GenerationArgs }> => [
+    { label: `cover letter — ${company}`, args: { workspaceId, applicationId: id, kind: "cover_letter" } },
+    { label: `email body — ${company}`, args: { workspaceId, applicationId: id, kind: "email_body" } },
+  ]),
   {
     label: "screening question",
     args: {

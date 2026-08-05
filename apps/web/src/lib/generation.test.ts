@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { FallbackOptions, GenerateInput } from "@careerhq/ai";
 import type { GenerationResult } from "@careerhq/contracts";
 import { loadConfig, type AppConfig } from "@careerhq/config";
@@ -409,24 +409,25 @@ d("the hosted demo's keyless replay path", () => {
     })).rejects.toBe(ROLLBACK);
   }
 
-  /** The seeded application at `companyName`, found the way the app would. */
-  async function demoApplicationId(
-    tx: Db, demoWorkspaceId: string, companyName: string,
-  ): Promise<string> {
-    const rows = await tx.select({ id: applications.id })
+  /**
+   * Every seeded application with its company name, in `/applications`' order.
+   * Enumerated rather than named one by one: the point of this test is that a
+   * visitor's *first* click succeeds whichever row they open, so a new seeded
+   * application must fail here until it has a fixture, not surface as a
+   * `replay_miss` on the live demo (Task 12, C1).
+   */
+  async function demoApplications(
+    tx: Db, demoWorkspaceId: string,
+  ): Promise<Array<{ id: string; company: string }>> {
+    return tx.select({ id: applications.id, company: companiesTable.name })
       .from(applications)
       .innerJoin(jobsTable, eq(applications.jobId, jobsTable.id))
       .innerJoin(companiesTable, eq(jobsTable.companyId, companiesTable.id))
-      .where(and(
-        eq(applications.workspaceId, demoWorkspaceId),
-        eq(companiesTable.name, companyName),
-      ));
-    const id = rows[0]?.id;
-    if (!id) throw new Error(`no seeded application for ${companyName}`);
-    return id;
+      .where(eq(applications.workspaceId, demoWorkspaceId))
+      .orderBy(applications.createdAt, applications.id);
   }
 
-  it("answers the demo's three generation flows from committed fixtures with no api key", async () => {
+  it("answers every seeded application's generation flows from committed fixtures with no api key", async () => {
     // Exactly the demo's AI environment: replay mode, no key, and the
     // repo's committed fixture directory (AI_REPLAY_DIR's default).
     const replayConfig = loadConfig({ DATABASE_URL: BASE_ENV.DATABASE_URL, AI_MODE: "replay" });
@@ -440,12 +441,16 @@ d("the hosted demo's keyless replay path", () => {
     });
 
     await inSeededDemoWorkspace(async (tx, demoWorkspaceId) => {
-      const wexford = await demoApplicationId(tx, demoWorkspaceId, "Wexford Health");
-      const silvermark = await demoApplicationId(tx, demoWorkspaceId, "Silvermark Labs");
+      const seeded = await demoApplications(tx, demoWorkspaceId);
+      expect(seeded.length).toBeGreaterThan(0);
+      const wexford = seeded.find((a) => a.company === "Wexford Health")?.id;
+      if (!wexford) throw new Error("no seeded application for Wexford Health");
 
       const cases: Array<{ label: string; args: GenerationArgs }> = [
-        { label: "cover letter", args: { workspaceId: demoWorkspaceId, applicationId: wexford, kind: "cover_letter" } },
-        { label: "email body", args: { workspaceId: demoWorkspaceId, applicationId: silvermark, kind: "email_body" } },
+        ...seeded.flatMap(({ id, company }): Array<{ label: string; args: GenerationArgs }> => [
+          { label: `cover letter — ${company}`, args: { workspaceId: demoWorkspaceId, applicationId: id, kind: "cover_letter" } },
+          { label: `email body — ${company}`, args: { workspaceId: demoWorkspaceId, applicationId: id, kind: "email_body" } },
+        ]),
         {
           label: "screening question",
           args: {
@@ -473,5 +478,5 @@ d("the hosted demo's keyless replay path", () => {
       expect(generate).not.toHaveBeenCalled();
       expect(classifySensitive).not.toHaveBeenCalled();
     });
-  }, 60_000);
+  }, 120_000);
 });
