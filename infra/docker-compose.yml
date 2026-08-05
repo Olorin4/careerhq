@@ -68,7 +68,7 @@ services:
       SUBMISSIONS_LIVE_EMAIL: ${SUBMISSIONS_LIVE_EMAIL:-false}
       SUBMISSIONS_LIVE_COMPANY_SITE: ${SUBMISSIONS_LIVE_COMPANY_SITE:-false}
       SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
-      SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-demo-ats}
+      SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-http://demo-ats:3001}
       # Demo mode (spec P6 §3), and the per-action call budget it applies. Both
       # default to the plain-checkout behaviour: no demo, no throttling. The
       # images carry no .env, so without these passthroughs the demo compose
@@ -126,7 +126,7 @@ services:
       SUBMISSIONS_LIVE_EMAIL: ${SUBMISSIONS_LIVE_EMAIL:-false}
       SUBMISSIONS_LIVE_COMPANY_SITE: ${SUBMISSIONS_LIVE_COMPANY_SITE:-false}
       SANDBOX_SMTP_ALLOWED_HOST: ${SANDBOX_SMTP_ALLOWED_HOST:-mailpit}
-      SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-demo-ats}
+      SANDBOX_SITE_ALLOWED_HOST: ${SANDBOX_SITE_ALLOWED_HOST:-http://demo-ats:3001}
       # Same two demo switches as web: the worker resolves the same workspace
       # (apps/worker/src/lib/workspace.ts) and shares the hard-safety gate.
       # DEMO_RATE_LIMIT_PER_MIN is deliberately absent — nothing in the worker

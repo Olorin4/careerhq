@@ -118,11 +118,26 @@ async function siteAttempt(companyName: string): Promise<{ applicationId: string
  * redirect hop. Asserting only that a function was passed would pass for
  * `() => true`, which is the exact regression worth catching.
  */
-function expectPolicyPredicate(deps: { isNavigationAllowed: (url: string) => boolean }): void {
+function expectPolicyPredicate(deps: {
+  isNavigationAllowed: (url: string) => boolean;
+  isResolvedAddressAllowed?: (url: string, address: string) => boolean;
+}): void {
   expect(deps.isNavigationAllowed("https://acme.example/jobs/1/apply")).toBe(true);
   expect(deps.isNavigationAllowed("http://169.254.169.254/latest/meta-data/")).toBe(false);
   expect(deps.isNavigationAllowed("http://127.0.0.1:9100/secret")).toBe(false);
   expect(deps.isNavigationAllowed("file:///etc/passwd")).toBe(false);
+
+  // BOTH predicates, or neither works. Passing only `isNavigationAllowed`
+  // leaves the driver on `defaultAddressPolicy`, which refuses every private
+  // address — and under Compose the sandbox's own allow-listed `demo-ats`
+  // resolves to exactly that, so the job would refuse its only legal target.
+  // Omitting it is silent: the shape still typechecks and every unit test that
+  // only inspected `isNavigationAllowed` still passed. Assert it is here AND
+  // that it is the real policy rather than a `() => true` placeholder.
+  expect(deps.isResolvedAddressAllowed).toBeTypeOf("function");
+  expect(deps.isResolvedAddressAllowed?.("https://acme.example/jobs/1/apply", "93.184.216.34")).toBe(true);
+  expect(deps.isResolvedAddressAllowed?.("https://acme.example/jobs/1/apply", "127.0.0.1")).toBe(false);
+  expect(deps.isResolvedAddressAllowed?.("https://acme.example/jobs/1/apply", "169.254.169.254")).toBe(false);
 }
 
 /**
@@ -194,6 +209,7 @@ d("runCaptureJob", () => {
     expect(capturePageMock).toHaveBeenCalledWith(fakeSession, "https://acme.example/jobs/1/apply", {
       timeoutMs: 1_000,
       isNavigationAllowed: expect.any(Function) as unknown as (url: string) => boolean,
+      isResolvedAddressAllowed: expect.any(Function) as unknown as (url: string, address: string) => boolean,
     });
     expect(sessionCloseMock).toHaveBeenCalledTimes(1);
     expectPolicyPredicate(capturePageMock.mock.calls[0]?.[2] as { isNavigationAllowed: (u: string) => boolean });
@@ -323,6 +339,7 @@ d("runSubmitJob", () => {
       deps: {
         timeoutMs: 1_000,
         isNavigationAllowed: expect.any(Function) as unknown as (url: string) => boolean,
+        isResolvedAddressAllowed: expect.any(Function) as unknown as (url: string, address: string) => boolean,
       },
     });
     expect(sessionCloseMock).toHaveBeenCalledTimes(1);

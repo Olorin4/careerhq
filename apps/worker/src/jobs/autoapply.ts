@@ -14,7 +14,7 @@ import type { AppConfig } from "@careerhq/config";
 import { canonicalFormSchema, plannedAnswerSchema, type CanonicalForm, type PlannedAnswer } from "@careerhq/contracts";
 import type { RawFormPage } from "@careerhq/autoapply";
 import {
-  allowsCaptureTarget, effectiveWorkspaceKind, refuseCaptureTarget, type CaptureTargetPolicy,
+  allowsCaptureTarget, allowsResolvedAddress, effectiveWorkspaceKind, refuseCaptureTarget, type CaptureTargetPolicy,
 } from "@careerhq/autoapply/policy";
 import { reserveEvidenceScreenshot } from "@careerhq/core/storage";
 import {
@@ -243,6 +243,13 @@ export async function runCaptureJob(db: Db, config: AppConfig, data: CaptureJobD
     const page = await capturePage(session, data.url, {
       timeoutMs: config.autoapplyBrowserTimeoutMs,
       isNavigationAllowed: (target) => allowsCaptureTarget(target, policy),
+      // Both predicates, or neither works. Omitting this one leaves the driver
+      // on `defaultAddressPolicy`, which refuses every private address — and
+      // under Compose `demo-ats` resolves to exactly that. The allow-listed
+      // target's private address IS the point for a sandbox workspace, which
+      // only this policy object knows. `apps/web/src/lib/site-driver.ts` passes
+      // the pair for the same reason.
+      isResolvedAddressAllowed: (target, address) => allowsResolvedAddress(target, address, policy),
     });
     const recovery: RawPageRecovery = { kind: "raw_page", page };
     await updateRecoveryState(db, snapshot.id, snapshot.currentStep, recovery);
@@ -476,6 +483,10 @@ export async function runSubmitJob(db: Db, config: AppConfig, data: SubmitJobDat
         deps: {
           timeoutMs: config.autoapplyBrowserTimeoutMs,
           isNavigationAllowed: (target) => allowsCaptureTarget(target, policy),
+          // See the pair in `runCaptureJob` above: without this the driver
+          // falls back to `defaultAddressPolicy` and refuses the sandbox's own
+          // allow-listed target, because its address is private by design.
+          isResolvedAddressAllowed: (target, address) => allowsResolvedAddress(target, address, policy),
         },
       });
     } catch (err) {

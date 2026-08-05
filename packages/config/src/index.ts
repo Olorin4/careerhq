@@ -120,14 +120,20 @@ const DEFAULT_SANDBOX_SMTP_HOST = "mailpit";
 const DEFAULT_DEMO_ATS_URL = "http://demo-ats:3001";
 
 /**
- * The compose service name of the fictional ATS, as a bare hostname. A sandbox
- * workspace may only auto-apply to this host (spec §11's `sandbox_blocked`
- * gate for the company-site channel), so — like the SMTP allow-list — the
- * default has to name something that cannot reach a real employer. Compared
- * against the target URL's `hostname`, which carries no port: the port is not
- * a safety boundary, and the user retypes the host, not "demo-ats:3001".
+ * The fictional ATS as a full ORIGIN. A sandbox workspace may only auto-apply
+ * here (spec §11's `sandbox_blocked` gate for the company-site channel), so —
+ * like the SMTP allow-list — the default has to name something that cannot
+ * reach a real employer.
+ *
+ * Pinned to scheme+host+port rather than the bare `demo-ats` this used to be.
+ * `matchesSandboxAllowList` still accepts a bare hostname, because rejecting it
+ * would break existing deployments for a hardening the operator can simply
+ * spell out — but a bare host allows *any port* on that host, which on a
+ * Docker network or a `localhost` setup is a wider door than it looks
+ * (P6 carried item, "the sandbox allow-list names a host, not an origin").
+ * The default ships closed; the loose spelling stays available.
  */
-const DEFAULT_SANDBOX_SITE_HOST = "demo-ats";
+const DEFAULT_SANDBOX_SITE_HOST = "http://demo-ats:3001";
 
 const envSchema = z.object({
   DATABASE_URL: z
