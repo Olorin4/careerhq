@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Inter } from "next/font/google";
 import { loadConfig } from "@careerhq/config";
+import { Sidebar } from "../components/sidebar.js";
+import { DemoBanner } from "../components/demo-banner.js";
 import "./tokens.css";
 import "./globals.css";
 
@@ -10,12 +12,6 @@ export const metadata = {
   title: "CareerHQ",
   description: "Job application tracker and workspace",
 };
-
-// The source repository. This is the one place in the repo that wants the repo:
-// `INGEST_USER_AGENT` and the AI client's `HTTP-Referer` both point at the
-// hosted demo instead, because a board operator or a model provider wanting to
-// know who is calling is better served by a running page than by a README.
-const REPO_URL = "https://github.com/Olorin4/careerhq";
 
 // The layout now reads loadConfig() (for demoMode) on every render. Several
 // leaf pages already force dynamic rendering because DATABASE_URL isn't
@@ -28,30 +24,32 @@ export const dynamic = "force-dynamic";
 export default function RootLayout({ children }: { children: ReactNode }) {
   const { demoMode } = loadConfig();
 
+  // The shell fetches nothing itself — `counts` is empty until Task 5 wires a
+  // page's own data in. `Sidebar` already omits every undefined/zero count,
+  // so an empty object here renders the same destinations with no badges,
+  // not a broken one.
   return (
     <html lang="en" className={inter.variable}>
-      <body>
-        {demoMode && (
-          <div className="demo-banner" data-testid="demo-banner" role="status">
-            <span>
-              Demo — data resets every 6 hours. Sending is disabled; nothing leaves this server.
-            </span>
-            <a href={REPO_URL} target="_blank" rel="noopener noreferrer">
-              View the source on GitHub
-            </a>
-          </div>
-        )}
-        <nav className="app-nav">
-          <a href="/overview">Overview</a>
-          <a href="/jobs">Discovery</a>
-          <a href="/applications">Applications</a>
-          <a href="/inbox">Mail</a>
-          <a href="/facts">Facts</a>
-          <a href="/answers">Answers</a>
-          <a href="/cvs">CVs</a>
-          <a href="/settings">Settings</a>
-        </nav>
-        <main className="app-main" data-testid="app-main">{children}</main>
+      <body className="bg-canvas font-sans text-ink">
+        {demoMode && <DemoBanner />}
+        {/*
+          `items-start` (not the flex default `stretch`) matters here: `Sidebar`
+          sets its own `min-h-screen` so the rail always reads as a persistent
+          shell even on a short page, but `main` must NOT be stretched to match
+          it. `scripts/capture-demo-media.ts`'s `shot()` reads `app-main`'s
+          `getBoundingClientRect().bottom` to find where a page's content
+          actually ends — a stretched `main` would report ~900px on every
+          short page (the viewport height, not the content height), silently
+          reframing the gallery to the same number `shot()` would have picked
+          had the `app-main` testid gone missing entirely (see layout.tsx's
+          git history / task-4-report.md for how this was caught).
+        */}
+        <div className="flex items-start">
+          <Sidebar counts={{}} />
+          <main className="flex-1 overflow-x-auto p-6" data-testid="app-main">
+            {children}
+          </main>
+        </div>
       </body>
     </html>
   );
