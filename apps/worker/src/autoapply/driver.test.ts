@@ -7,7 +7,9 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { parseHTML } from "linkedom";
 import { chromium, errors } from "playwright";
-import { consentPage, greenhousePage, hiddenConsentPage, leverPage, type DemoJob } from "@careerhq/demo-ats";
+import {
+  consentPage, greenhousePage, hiddenConsentPage, leverPage, steppedConsentPage, type DemoJob,
+} from "@careerhq/demo-ats";
 import { rawPageFromHtml } from "@careerhq/autoapply/testing";
 import { allowsCaptureTarget } from "@careerhq/autoapply/policy";
 import { detectBlockers, fieldIdentityHash, parseForm, rawFieldId, type RawField, type RawFormPage } from "@careerhq/autoapply";
@@ -822,6 +824,7 @@ live("driver against a page that mutates between review and submit", () => {
       .toEqual({ refused: "fill", confirmationId: null, recorded: [] });
     // Names the question the user answered, since the control itself is gone.
     expect(outcome.message).toContain("carrying out a background check");
+    expect(outcome.message).toContain("is no longer on the page");
   }, 60_000);
 
   /**
@@ -861,6 +864,233 @@ live("driver against a page that mutates between review and submit", () => {
       email: "ada@example.com",
       legal_attestation: "true",
       talent_pool_opt_in: "true",
+    }]);
+  }, 60_000);
+});
+
+
+// ---------------------------------------------------------------------------
+// A wizard whose later step is REPLACED rather than revealed (the carried
+// "per-step presence" gap).
+//
+// The presence half of the identity check used to be scoped to the steps a
+// single pre-click extraction had rendered — and that inference is exactly what
+// a replaced-step wizard defeats. Reviewed as `/stepped/jobs/…` (both steps in
+// the DOM, consent box readable and unticked by the user), served at submit
+// time as the progressive rendering (`steppedConsentPage(job, "replaced")`),
+// the consent control is simply not in the extraction, its step is written off
+// as "not rendered yet", and the driver clicks Next into a step whose box is
+// still ticked.
+//
+// No other fixture in demo-ats can express that: every multi-step page there
+// renders all of its steps up front, which is precisely why this gap survived
+// with no test. `/api/submissions` is the ground truth in every case below —
+// before the fix it recorded `background_check_consent: "true"` against a
+// receipt that said the user declined.
+// ---------------------------------------------------------------------------
+live("driver against a wizard whose later step is replaced, not revealed", () => {
+  const RUN = randomUUID().slice(0, 8);
+  const deps = { timeoutMs: 30_000, isNavigationAllowed: ALLOW_ANY };
+  let session: BrowserSession;
+  let proxy: Server;
+  let proxyPort = 0;
+  /** Armed AFTER the capture, so review and submit genuinely see different HTML. */
+  let mutate: ((html: string) => string) | null = null;
+
+  beforeAll(async () => {
+    session = await openSession();
+    proxy = createServer((req, res) => {
+      void (async () => {
+        const target = `${DEMO_ATS_URL}${req.url ?? "/"}`;
+        if (req.method === "POST") {
+          // Forwarded verbatim, so the fields demo-ats records are the fields
+          // the browser posted — including the ones the page carried forward
+          // in hidden inputs when it replaced its first step.
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(chunk as Buffer);
+          const upstream = await fetch(target, {
+            method: "POST",
+            headers: { "content-type": req.headers["content-type"] ?? "" },
+            body: Buffer.concat(chunks),
+          });
+          const forwarded = await upstream.text();
+          res.writeHead(upstream.status, { "content-type": "text/html" });
+          res.end(forwarded);
+          return;
+        }
+        const upstream = await fetch(target);
+        const html = await upstream.text();
+        res.writeHead(upstream.status, { "content-type": "text/html" });
+        res.end(mutate ? mutate(html) : html);
+      })().catch((cause: unknown) => {
+        res.writeHead(502, { "content-type": "text/plain" });
+        res.end(String(cause));
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    proxyPort = (proxy.address() as AddressInfo).port;
+  }, 60_000);
+
+  afterAll(async () => {
+    await session?.close();
+    proxy?.close();
+  });
+
+  beforeEach(() => {
+    mutate = null;
+  });
+
+  interface Outcome {
+    refused: DriverErrorKind | null;
+    confirmationId: string | null;
+    /** What demo-ats actually stored for this job — the ground truth. */
+    recorded: Array<Record<string, string>>;
+    message: string;
+  }
+
+  const idIn = (raw: RawFormPage, name: string): string => {
+    const field = raw.fields.find((f) => f.name === name);
+    if (!field) throw new Error(`no raw field named ${name} in ${raw.url}`);
+    return rawFieldId(field);
+  };
+
+  /**
+   * Capture `path/jobId`, plan answers against what the capture SAW, then arm
+   * the submit-time rendering and drive it. The plan is a function of the
+   * captured page for a reason: a decision can only be made about a control the
+   * user was actually shown.
+   */
+  async function reviewThenSubmit(args: {
+    jobId: string;
+    path: string;
+    decide: (raw: RawFormPage) => Array<[string, string]>;
+    mutation?: (html: string) => string;
+  }): Promise<Outcome> {
+    const url = `http://localhost:${proxyPort}${args.path}/${args.jobId}`;
+    const raw = await capturePage(session, url, deps);
+    const form = parseForm(raw);
+
+    const answers: PlannedAnswer[] = args.decide(raw).map(([fieldId, value]) => ({
+      fieldId,
+      value,
+      source: "user" as const,
+      sourceFactIds: [],
+      confidence: 1,
+      needsUser: false,
+      differsFromApproved: false,
+      note: "",
+    }));
+
+    mutate = args.mutation ?? null;
+    const outcome = await fillAndSubmit(session, { url, form, answers, files: {}, deps }).then(
+      (result) => ({ refused: null, confirmationId: result.confirmationId, message: "" }),
+      (cause: unknown) => ({
+        refused: cause instanceof DriverError ? cause.kind : null,
+        confirmationId: null,
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
+    );
+
+    return { ...outcome, recorded: (await submissionsFor(args.jobId)).map((s) => s.fields) };
+  }
+
+  /** The submit-time rendering, posting to the same job the review was of. */
+  const progressive = (jobId: string) => (): string => steppedConsentPage({ ...JOB, id: jobId }, "replaced");
+
+  /**
+   * The case the whole check exists for, in the one shape it could not see.
+   *
+   * Reviewed with both steps in the DOM: the user reads the background-check
+   * statement and unticks it (`""` — what the consent row commits on untick).
+   * Submitted against the progressive rendering, where step 2 does not exist
+   * until "Next" is clicked and step 1 is removed when it is.
+   *
+   * Before the fix this SUBMITTED: the consent field was absent from the
+   * extraction, its step was written off as unrendered, the driver clicked
+   * through, and demo-ats recorded `background_check_consent: "true"` — the
+   * opposite of the receipt.
+   *
+   * The consent box is the ONLY step-2 control this plan decides about, so the
+   * refusal has to name that question rather than reaching a different missing
+   * field first.
+   */
+  it("refuses when the step carrying the reviewed consent is replaced instead of revealed", async () => {
+    const jobId = `stepped-consent-${RUN}`;
+    const outcome = await reviewThenSubmit({
+      jobId,
+      path: "/stepped/jobs",
+      decide: (raw) => [
+        [idIn(raw, "name"), "Ada Lovelace"],
+        [idIn(raw, "email"), "ada@example.com"],
+        // DECLINED, on the step the submit-time page will not render.
+        [idIn(raw, "background_check_consent"), ""],
+      ],
+      mutation: progressive(jobId),
+    });
+
+    // Asserted as one object so a regression prints WHAT demo-ats stored.
+    expect({ refused: outcome.refused, confirmationId: outcome.confirmationId, recorded: outcome.recorded })
+      .toEqual({ refused: "fill", confirmationId: null, recorded: [] });
+    // Names the question the user answered, since the control itself is gone.
+    expect(outcome.message).toContain("carrying out a background check");
+    expect(outcome.message).toContain("is no longer on the page");
+  }, 60_000);
+
+  /**
+   * The multi-step half that must not break: a form that renders its later
+   * controls only after advancing, reviewed and submitted as itself. Nothing
+   * the user decided about is missing from the live page — the review never saw
+   * step 2 either — so the check has nothing to say and the application goes
+   * through.
+   */
+  it("still submits a progressive wizard that is reviewed and submitted in the same shape", async () => {
+    const jobId = `stepped-progressive-${RUN}`;
+    const outcome = await reviewThenSubmit({
+      jobId,
+      path: "/stepped-progressive/jobs",
+      decide: (raw) => [
+        [idIn(raw, "name"), "Ada Lovelace"],
+        [idIn(raw, "email"), "ada@example.com"],
+      ],
+    });
+
+    expect(outcome.refused).toBeNull();
+    expect(outcome.confirmationId).toMatch(/^NR-[0-9a-f]{8}$/);
+    expect(outcome.recorded).toEqual([{ name: "Ada Lovelace", email: "ada@example.com" }]);
+  }, 60_000);
+
+  /**
+   * And the boundary, stated as a test so it cannot drift into "refuse any page
+   * that got shorter": the SAME two renderings as the refusal above, with no
+   * decision made about anything on step 2. Nothing the user decided is
+   * missing, so the driver goes through — clicking Next into the replaced step
+   * and submitting it.
+   *
+   * What that submission carries is the page's own default, `"true"` on a box
+   * this plan never mentions. That is deliberately NOT this check's business:
+   * it judges whether the decisions the user MADE survive to the click, and a
+   * control the review never showed and the plan never answered is a
+   * review-completeness question, not an identity one.
+   */
+  it("does not refuse a replaced step the user made no decision on", async () => {
+    const jobId = `stepped-undecided-${RUN}`;
+    const outcome = await reviewThenSubmit({
+      jobId,
+      path: "/stepped/jobs",
+      decide: (raw) => [
+        [idIn(raw, "name"), "Ada Lovelace"],
+        [idIn(raw, "email"), "ada@example.com"],
+      ],
+      mutation: progressive(jobId),
+    });
+
+    expect(outcome.refused).toBeNull();
+    expect(outcome.confirmationId).toMatch(/^NR-[0-9a-f]{8}$/);
+    expect(outcome.recorded).toEqual([{
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      available_from: "",
+      background_check_consent: "true",
     }]);
   }, 60_000);
 });

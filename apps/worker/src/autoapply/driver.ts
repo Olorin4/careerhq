@@ -705,11 +705,45 @@ const TICKABLE_KINDS: ReadonlySet<FieldKind> = new Set<FieldKind>(["checkbox", "
  *   empty answer on a control whose reviewed kind is not tickable, which is the
  *   planner's way of saying "leave whatever the page has alone". The driver
  *   types nothing there, so there is nothing to misattribute.
- * - A field on a step the current extraction has not rendered. A multi-step form
- *   whose later controls only exist after a "Next" click is legitimate and
- *   common; refusing it would break every such ATS. Step 0 is always treated as
- *   rendered — it is the step the browser landed on, so "no fields at all" is a
- *   changed page, not an unrendered step.
+ *
+ * ==> WHY PRESENCE IS NO LONGER SCOPED TO "RENDERED STEPS" <==
+ *
+ * It used to be. A decided field missing from the extraction was passed over
+ * when its step was not among the steps that extraction had rendered, on the
+ * reasoning that a multi-step form whose later controls appear only after a
+ * "Next" click is legitimate and refusing it would break every such ATS.
+ *
+ * The reasoning was right about multi-step forms and wrong about what it was
+ * inferring from. "Which steps are rendered" was read off ONE pre-click
+ * extraction, so a page that REPLACES its later-step controls instead of
+ * revealing them — step 2 not in the DOM until "Next" swaps it in, step 1
+ * removed when it does — looks at that moment like a one-step form, and every
+ * reviewed field on the steps it has not built yet falls through the exemption
+ * unjudged. Proven against demo-ats's `steppedConsentPage`: reviewed with both
+ * steps in the DOM and a background-check box the user UNTICKED, served
+ * progressively at submit time, the driver clicked Next into a step whose box
+ * was still ticked and demo-ats recorded `background_check_consent: "true"`
+ * against a receipt that said declined.
+ *
+ * What replaces the inference is not a bigger mechanism but a smaller claim,
+ * grounded in what this function's caller can actually do. `fillAndSubmit`
+ * fills from `plannedFills(extracted.fields, …)` — the pre-click extraction,
+ * and nothing else. A control that is not in it is a control the driver will
+ * never type into, tick or untick, on any step, however many "Next" clicks
+ * later it appears. So for a field the user DECIDED about, absent from the
+ * extraction means exactly one thing: that decision will not reach the form,
+ * and whatever the page ships instead will. There is no step on which that is
+ * acceptable, which is why there is no longer a step test here.
+ *
+ * And it does not break the multi-step case the exemption was protecting,
+ * because that case cannot produce the input the exemption was skipping: a form
+ * whose later controls only exist after a click is CAPTURED the same way at
+ * review time, so the reviewed snapshot has no fields on those steps either and
+ * this loop never reaches them. (Pinned by the demo-ats fixtures: the
+ * three-step greenhouse form, which renders every step up front, still fills
+ * and submits; and the progressive rendering, reviewed and submitted as itself,
+ * still goes through.) The refusal fires only where the reviewed page and the
+ * live page genuinely disagree about a control the user answered.
  */
 function assertReviewedFieldsIntact(
   form: CanonicalForm,
@@ -718,7 +752,6 @@ function assertReviewedFieldsIntact(
   files: Record<string, string>,
 ): void {
   const liveById = new Map(liveFields.map((field) => [rawFieldId(field), field]));
-  const renderedSteps = new Set<number>([0, ...liveFields.map((field) => field.step)]);
 
   for (const reviewed of form.fields) {
     if (reviewed.identityHash === undefined) continue;
@@ -729,7 +762,6 @@ function assertReviewedFieldsIntact(
 
     const live = liveById.get(reviewed.id);
     if (live === undefined) {
-      if (!renderedSteps.has(reviewed.step)) continue;
       throw new DriverError(
         `refusing to fill the form at ${form.url}: the control the user answered `
         + `("${shortLabel(reviewed.label)}") is no longer on the page`,
