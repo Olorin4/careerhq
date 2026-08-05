@@ -2,6 +2,8 @@ import { listEmailConnections } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../../lib/db.js";
 import { readWorkspaceSnapshot } from "../../../../lib/workspace.js";
+import { EmptyState } from "../../../../components/empty-state.js";
+import { Section } from "../../../../components/section.js";
 import { ConnectionForm, ConnectionsTable } from "./connection-form.js";
 
 // Every render reads the database, so there is nothing to prerender: without
@@ -16,12 +18,12 @@ export default async function EmailSettingsPage() {
 
   if (!masterKey) {
     return (
-      <main>
-        <h1>Email connections</h1>
-        <p className="settings-empty">
+      <main className="flex flex-col gap-4">
+        <h1 className="text-2xl font-semibold text-ink">Email connections</h1>
+        <p className="text-sm text-muted">
           Set <code>CAREERHQ_MASTER_KEY</code> to enable mailbox connections. Generate one with:
         </p>
-        <pre className="email-keygen-command">
+        <pre className="inline-block w-fit rounded-md bg-canvas px-3 py-2 text-sm text-ink">
           {"node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\""}
         </pre>
       </main>
@@ -33,28 +35,27 @@ export default async function EmailSettingsPage() {
   const connections = await readWorkspaceSnapshot(getDb(), (tx, ws) => listEmailConnections(tx, ws.id));
 
   return (
-    <main>
-      <h1>Email connections</h1>
+    <main className="flex flex-col gap-8">
+      <h1 className="text-2xl font-semibold text-ink">Email connections</h1>
 
-      <section className="settings-section">
-        <h2>Connections</h2>
+      <Section title="Connections">
         {connections.length === 0 ? (
-          <p className="settings-empty">No mailbox connections yet.</p>
+          <EmptyState title="No mailbox connections yet" />
         ) : (
           <ConnectionsTable connections={connections} now={Date.now()} />
         )}
-      </section>
+      </Section>
 
-      <section className="settings-section">
-        <h2>Add connection</h2>
+      <Section title="Add connection">
         {config.demoMode ? (
-          <p className="settings-empty email-demo-disabled">
-            Credential setup is disabled in the hosted demo — sending is disabled and nothing leaves this server.
-          </p>
+          <EmptyState
+            title="Credential setup is disabled in the hosted demo"
+            hint="Sending is disabled and nothing leaves this server."
+          />
         ) : (
           <ConnectionForm />
         )}
-      </section>
+      </Section>
     </main>
   );
 }

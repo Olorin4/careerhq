@@ -5,6 +5,8 @@ import { getDb } from "../../../lib/db.js";
 import { cvSizeLimit } from "../../../lib/cv-storage.js";
 import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { formatDate } from "../../../lib/time.js";
+import { EmptyState } from "../../../components/empty-state.js";
+import { Table, Td, Th } from "../../../components/table.js";
 import { CvUploadForm } from "./cv-upload-form.js";
 
 // Every render reads the database, so there is nothing to prerender: without
@@ -23,8 +25,8 @@ export default async function CvsPage() {
   const variants = await readWorkspaceSnapshot(getDb(), (tx, ws) => listCvVariants(tx, ws.id));
 
   return (
-    <main>
-      <h1>CV variants</h1>
+    <main className="flex flex-col gap-6">
+      <h1 className="text-2xl font-semibold text-ink">CV variants</h1>
       {/* `humanize` runs here, on the server: a "use client" module's exports
           are client references, so the form takes already-labelled options
           rather than importing the helper across the boundary. `cvSizeLimit`
@@ -37,30 +39,30 @@ export default async function CvsPage() {
       />
 
       {variants.length === 0 ? (
-        <p className="cv-empty">No CV variants uploaded yet.</p>
+        <EmptyState title="No CV variants uploaded yet" hint="Upload one above to start applying." />
       ) : (
-        <table className="cv-table">
+        <Table>
           <thead>
             <tr>
-              <th>Label</th>
-              <th>Format</th>
-              <th>SHA-256</th>
-              <th>Uploaded</th>
+              <Th>Label</Th>
+              <Th>Format</Th>
+              <Th>SHA-256</Th>
+              <Th>Uploaded</Th>
             </tr>
           </thead>
           <tbody>
             {variants.map((variant) => (
               <tr key={variant.id}>
-                <td>{variant.label}</td>
-                <td>{humanize(variant.format)}</td>
-                <td>
+                <Td>{variant.label}</Td>
+                <Td>{humanize(variant.format)}</Td>
+                <Td>
                   <code>{variant.sha256.slice(0, 12)}</code>
-                </td>
-                <td>{formatDate(variant.createdAt)}</td>
+                </Td>
+                <Td>{formatDate(variant.createdAt)}</Td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
     </main>
   );
