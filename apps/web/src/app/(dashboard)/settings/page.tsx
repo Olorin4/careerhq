@@ -3,7 +3,7 @@ import { getDb } from "../../../lib/db.js";
 import { getActiveWorkspace } from "../../../lib/workspace.js";
 import { ProfileForm } from "./profile-form.js";
 import { WatchlistForm } from "./watchlist-form.js";
-import { removeWatchlistEntryAction } from "./actions.js";
+import { WatchlistRemoveForm } from "./watchlist-remove-form.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -70,10 +70,7 @@ function WatchlistRow({ entry }: { entry: WatchlistCompany }) {
         <code>{entry.boardSlug}</code>
       </td>
       <td>
-        <form action={removeWatchlistEntryAction}>
-          <input type="hidden" name="id" value={entry.id} />
-          <button type="submit">Remove</button>
-        </form>
+        <WatchlistRemoveForm entryId={entry.id} />
       </td>
     </tr>
   );

@@ -4,7 +4,7 @@ import { getDb } from "../../../lib/db.js";
 import { getActiveWorkspace } from "../../../lib/workspace.js";
 import { safeExternalHref } from "../../../lib/safe-url.js";
 import { FactForm } from "./fact-form.js";
-import { reverifyFactAction, archiveFactAction } from "./actions.js";
+import { FactRowActions } from "./fact-row-actions.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -93,17 +93,7 @@ function FactRow({
         Verified {fact.verifiedAt.toLocaleDateString()} · Review by{" "}
         {fact.reviewBy.toLocaleDateString()}
       </p>
-      <div className="fact-row-actions">
-        <form action={reverifyFactAction} className="fact-reverify-form">
-          <input type="hidden" name="id" value={fact.id} />
-          <input type="date" name="reviewBy" defaultValue={reviewByDefault} required />
-          <button type="submit">Re-verify</button>
-        </form>
-        <form action={archiveFactAction}>
-          <input type="hidden" name="id" value={fact.id} />
-          <button type="submit">Archive</button>
-        </form>
-      </div>
+      <FactRowActions factId={fact.id} reviewByDefault={reviewByDefault} />
     </li>
   );
 }
