@@ -6,3 +6,6 @@ dist/
 .env.local
 *.tsbuildinfo
 var/
+
+# Visual brainstorming companion (mockups, session state)
+.superpowers/
