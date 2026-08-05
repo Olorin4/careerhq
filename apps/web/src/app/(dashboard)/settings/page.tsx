@@ -1,6 +1,6 @@
 import { getScoringProfile, listWatchlist, type WatchlistCompany } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
-import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { ProfileForm } from "./profile-form.js";
 import { WatchlistForm } from "./watchlist-form.js";
 import { WatchlistRemoveForm } from "./watchlist-remove-form.js";
@@ -12,10 +12,12 @@ import { WatchlistRemoveForm } from "./watchlist-remove-form.js";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
-  const profile = await getScoringProfile(db, ws.id);
-  const watchlist = await listWatchlist(db, ws.id);
+  // One snapshot: the profile and the watchlist shown together belong to the
+  // same workspace generation (see `readWorkspaceSnapshot`).
+  const { profile, watchlist } = await readWorkspaceSnapshot(getDb(), async (tx, ws) => ({
+    profile: await getScoringProfile(tx, ws.id),
+    watchlist: await listWatchlist(tx, ws.id),
+  }));
 
   return (
     <main>

@@ -3,7 +3,7 @@ import { CV_FORMATS } from "@careerhq/contracts";
 import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../lib/db.js";
 import { cvSizeLimit } from "../../../lib/cv-storage.js";
-import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { CvUploadForm } from "./cv-upload-form.js";
 
 // Every render reads the database, so there is nothing to prerender: without
@@ -17,9 +17,9 @@ function humanize(s: string): string {
 }
 
 export default async function CvsPage() {
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
-  const variants = await listCvVariants(db, ws.id);
+  // One snapshot: the workspace and the variants that hang off it (see
+  // `readWorkspaceSnapshot`).
+  const variants = await readWorkspaceSnapshot(getDb(), (tx, ws) => listCvVariants(tx, ws.id));
 
   return (
     <main>

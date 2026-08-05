@@ -17,7 +17,7 @@ export async function createCvVariant(db: DbOrTx, input: {
   return variant!;
 }
 
-export async function listCvVariants(db: Db, workspaceId: string): Promise<CvVariant[]> {
+export async function listCvVariants(db: DbOrTx, workspaceId: string): Promise<CvVariant[]> {
   return db.select().from(cvVariants)
     .where(eq(cvVariants.workspaceId, workspaceId))
     .orderBy(asc(cvVariants.createdAt), asc(cvVariants.id));

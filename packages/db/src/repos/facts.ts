@@ -68,7 +68,7 @@ export async function reverifyFact(
 }
 
 export async function listFacts(
-  db: Db,
+  db: DbOrTx,
   workspaceId: string,
   opts?: { includeArchived?: boolean },
 ): Promise<CandidateFact[]> {

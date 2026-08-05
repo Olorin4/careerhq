@@ -1,7 +1,7 @@
 import { listFacts, isFactStale, type CandidateFact } from "@careerhq/db";
 import { FACT_CATEGORIES } from "@careerhq/contracts";
 import { getDb } from "../../../lib/db.js";
-import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { safeExternalHref } from "../../../lib/safe-url.js";
 import { FactForm } from "./fact-form.js";
 import { FactRowActions } from "./fact-row-actions.js";
@@ -23,9 +23,9 @@ function defaultReviewBy(): string {
 }
 
 export default async function FactsPage() {
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
-  const facts = await listFacts(db, ws.id);
+  // Resolving the workspace and reading its facts are two statements; one
+  // snapshot is what stops a demo reset committing between them.
+  const facts = await readWorkspaceSnapshot(getDb(), (tx, ws) => listFacts(tx, ws.id));
   const now = new Date();
   const reviewByDefault = defaultReviewBy();
 

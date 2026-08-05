@@ -4,7 +4,7 @@ import {
   listPendingSuggestions,
 } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
-import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { SuggestionQueue, type SuggestionListItem } from "./suggestions.js";
 
 // Every render reads the database, so there is nothing to prerender: without
@@ -14,23 +14,30 @@ import { SuggestionQueue, type SuggestionListItem } from "./suggestions.js";
 export const dynamic = "force-dynamic";
 
 export default async function InboxPage() {
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
-  const messages = await listPendingSuggestions(db, ws.id);
+  // One snapshot: a suggestion and the application it is about must come from
+  // the same generation of the workspace (see `readWorkspaceSnapshot`).
+  const { messages, appRows, jobRows, companyRows } = await readWorkspaceSnapshot(
+    getDb(),
+    async (tx, ws) => {
+      const pending = await listPendingSuggestions(tx, ws.id);
 
-  const applicationIds = [...new Set(
-    messages.map((m) => m.applicationId).filter((id): id is string => id !== null),
-  )];
-  const appRows = applicationIds.length
-    ? await db.select().from(applicationsTable).where(inArray(applicationsTable.id, applicationIds))
-    : [];
-  const jobRows = appRows.length
-    ? await db.select().from(jobsTable).where(inArray(jobsTable.id, appRows.map((a) => a.jobId)))
-    : [];
-  const companyRows = jobRows.length
-    ? await db.select().from(companiesTable)
-        .where(inArray(companiesTable.id, jobRows.map((j) => j.companyId!).filter(Boolean)))
-    : [];
+      const applicationIds = [...new Set(
+        pending.map((m) => m.applicationId).filter((id): id is string => id !== null),
+      )];
+      const apps = applicationIds.length
+        ? await tx.select().from(applicationsTable).where(inArray(applicationsTable.id, applicationIds))
+        : [];
+      const jobs = apps.length
+        ? await tx.select().from(jobsTable).where(inArray(jobsTable.id, apps.map((a) => a.jobId)))
+        : [];
+      const companies = jobs.length
+        ? await tx.select().from(companiesTable)
+            .where(inArray(companiesTable.id, jobs.map((j) => j.companyId!).filter(Boolean)))
+        : [];
+
+      return { messages: pending, appRows: apps, jobRows: jobs, companyRows: companies };
+    },
+  );
 
   const suggestions: SuggestionListItem[] = messages.map((m) => {
     const application = m.applicationId ? appRows.find((a) => a.id === m.applicationId) : undefined;

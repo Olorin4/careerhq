@@ -204,7 +204,7 @@ export async function listMessagesForApplication(db: Db, applicationId: string):
 }
 
 /** The suggestion queue: everything still awaiting a human accept/dismiss, newest first. */
-export async function listPendingSuggestions(db: Db, workspaceId: string): Promise<EmailMessage[]> {
+export async function listPendingSuggestions(db: DbOrTx, workspaceId: string): Promise<EmailMessage[]> {
   return db.select().from(emailMessages)
     .where(and(
       eq(emailMessages.workspaceId, workspaceId),

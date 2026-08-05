@@ -87,7 +87,7 @@ export async function getConnectionSecrets(
   return { connection, smtpPassword, imapPassword };
 }
 
-export async function listEmailConnections(db: Db, workspaceId: string): Promise<EmailConnection[]> {
+export async function listEmailConnections(db: DbOrTx, workspaceId: string): Promise<EmailConnection[]> {
   return db.select().from(emailConnections)
     .where(eq(emailConnections.workspaceId, workspaceId))
     .orderBy(asc(emailConnections.createdAt), asc(emailConnections.id));

@@ -1,6 +1,6 @@
 import { listReusableAnswers } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
-import { getActiveWorkspace } from "../../../lib/workspace.js";
+import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build this page statically (baking in build-time data and
@@ -9,12 +9,11 @@ import { getActiveWorkspace } from "../../../lib/workspace.js";
 export const dynamic = "force-dynamic";
 
 export default async function AnswersPage() {
-  const db = getDb();
-  const ws = await getActiveWorkspace(db);
   // Already ordered by questionNorm ascending (listReusableAnswers), which is
   // the alphabetical grouping the brief asks for — a flat list in that order,
-  // same convention as the fact bank's per-category lists.
-  const answers = await listReusableAnswers(db, ws.id);
+  // same convention as the fact bank's per-category lists. One snapshot for
+  // the workspace and its answers (see `readWorkspaceSnapshot`).
+  const answers = await readWorkspaceSnapshot(getDb(), (tx, ws) => listReusableAnswers(tx, ws.id));
 
   return (
     <main>
