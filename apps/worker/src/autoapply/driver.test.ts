@@ -464,6 +464,7 @@ live("driver against demo-ats", () => {
    */
   it("reports an un-tickable consent box as a FILL failure, not an ambiguous timeout", async () => {
     const jobId = "hidden-consent-1";
+    const before = await submissionsFor(jobId);
     const url = `${DEMO_ATS_URL}/hidden-consent/jobs/${jobId}`;
     const shortDeps = { timeoutMs: 2_000, isNavigationAllowed: ALLOW_ANY };
     const raw = await capturePage(session, url, shortDeps);
@@ -500,8 +501,11 @@ live("driver against demo-ats", () => {
     // Stated the other way round, because this is the bit that regressed: the
     // orchestrator's pre-click set contains "fill" and excludes "timeout".
     expect(kind).not.toBe("timeout");
-    // And nothing reached the site.
-    expect(await submissionsFor(jobId)).toEqual([]);
+    // And nothing reached the site. Scoped as a delta, not as `toEqual([])`:
+    // demo-ats's store outlives the run, so a long-lived server holding a row
+    // from an earlier run would turn an absolute assertion red with no code
+    // change. The claim under test is "this attempt added nothing".
+    expect((await submissionsFor(jobId)).map((s) => s.id)).toEqual(before.map((s) => s.id));
   }, 60_000);
 
   /**
@@ -520,12 +524,13 @@ live("driver against demo-ats", () => {
    *
    * Two assertions carry this test. `kind: "fill"` is what apps/web reads as
    * provably pre-click, so the attempt keeps its confirmation and stays
-   * previewable instead of being parked NEEDS_RECONCILE; and the empty
-   * submissions list is the proof behind it — the refusal happened before any
-   * click, so the site has nothing.
+   * previewable instead of being parked NEEDS_RECONCILE; and the unchanged
+   * submissions list for this job is the proof behind it — the refusal happened
+   * before any click, so the site received nothing.
    */
   it("refuses to fill a field whose question changed since review, and submits nothing", async () => {
     const jobId = "consent-drift-1";
+    const before = await submissionsFor(jobId);
     const url = `${DEMO_ATS_URL}/consent/jobs/${jobId}`;
     const raw = await capturePage(session, url, deps);
     const form = parseForm(raw);
@@ -586,7 +591,9 @@ live("driver against demo-ats", () => {
     expect((failure as DriverError).message).toContain(consent.selector);
     expect((failure as DriverError).message).toContain(consent.labelText);
     // The whole point: a browser that never clicked cannot have submitted.
-    expect(await submissionsFor(jobId)).toEqual([]);
+    // Scoped as a delta for the same reason as its sibling above — the claim is
+    // about THIS attempt, not about the total state of a shared service.
+    expect((await submissionsFor(jobId)).map((s) => s.id)).toEqual(before.map((s) => s.id));
   }, 60_000);
 
   /**
