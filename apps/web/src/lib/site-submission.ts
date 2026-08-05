@@ -29,7 +29,8 @@ import {
   getApplicationDetail, getAttempt, getLatestConfirmation, getLatestSnapshot, hasBlockingAttempt, isFactStale,
   listAnswers, listCvVariants, listEvidenceScreenshotPaths, listFacts, listReusableAnswers,
   markAttemptBlocked, markAttemptReady,
-  markNeedsReconcile, recordPreview, saveFormSnapshot, updateSnapshotAnswers, workspaces as workspacesTable,
+  markNeedsReconcile, recordPreview, recordRecoveryScreenshot, saveFormSnapshot, updateSnapshotAnswers,
+  workspaces as workspacesTable,
   type ApplicationAttempt, type CandidateFact, type CvVariant, type Db, type FormSnapshot,
 } from "@careerhq/db";
 import { redactError } from "@careerhq/email";
@@ -1032,7 +1033,7 @@ export async function confirmAndSubmitSite(
   });
   if (!loaded.ok) return { status: "blocked", code: loaded.code, reason: loaded.reason };
   const {
-    attempt, applicationId, applicationState, form, answers, files, payload, fingerprint,
+    attempt, applicationId, applicationState, snapshot, form, answers, files, payload, fingerprint,
   } = loaded.value;
 
   const [workspace] = await db.select().from(workspacesTable)
@@ -1278,6 +1279,7 @@ export async function confirmAndSubmitSite(
     // error looks the same from here) and it is not evidence of failure either.
     const reason = "the submit click landed but the page showed no confirmation id — "
       + `check ${result.finalUrl} and the saved screenshot, then resolve this attempt`;
+    await keepReconcileEvidence(db, snapshot, result.screenshotPath);
     await markNeedsReconcileSafely(deps, attempt.id, reason);
     return { status: "needs_reconcile", reason };
   }
@@ -1302,6 +1304,7 @@ export async function confirmAndSubmitSite(
     // index, a rejected application transition) must never be reported as a
     // failure — that would lose a real submission. Park it with the evidence.
     const reason = `submitted as ${result.confirmationId} but the receipt was refused: ${completed.reason}`;
+    await keepReconcileEvidence(db, snapshot, result.screenshotPath);
     await markNeedsReconcileSafely(deps, attempt.id, reason);
     return { status: "needs_reconcile", reason };
   }
@@ -1327,6 +1330,38 @@ async function markNeedsReconcileSafely(deps: SiteDeps, attemptId: string, reaso
     console.error(
       `[site-submission] attempt ${attemptId} needs reconciling (${reason}) but could not be marked: `
       + errorMessage(err),
+    );
+  }
+}
+
+/**
+ * Makes the screenshot a NEEDS_RECONCILE reason points at survive.
+ *
+ * A reconciled attempt has no confirmed receipt — that is what NEEDS_RECONCILE
+ * MEANS: the click landed and nobody can say what came of it — so the path the
+ * driver just wrote was persisted to no row at all, and in demo mode the
+ * evidence collector reclaimed the file five minutes later while the reason
+ * still told the reader to go and look at it. The app pointed at evidence that
+ * no longer existed, on the one outcome where a human most needs it.
+ *
+ * `recordRecoveryScreenshot` merges the path onto the SAME
+ * `recovery_state->>'screenshotPath'` key the worker's `submit_result` uses,
+ * which is the key `listEvidenceScreenshotPaths` feeds the collector's
+ * keep-set — so this is a reference in exactly the sense the collector already
+ * understands, not a second mechanism. It merges rather than replaces so that
+ * a `submit_in_flight` marker underneath it survives too.
+ *
+ * Post-click, so it never throws, for the same reason
+ * `markNeedsReconcileSafely` does not: losing the file is bad, and losing the
+ * attempt's explanation on the way to complaining about it is worse.
+ */
+async function keepReconcileEvidence(db: Db, snapshot: FormSnapshot, screenshotPath: string): Promise<void> {
+  try {
+    await recordRecoveryScreenshot(db, snapshot.id, screenshotPath);
+  } catch (err) {
+    console.error(
+      `[site-submission] snapshot ${snapshot.id}: the confirmation screenshot ${screenshotPath} could not be `
+      + `referenced, so the demo's collector may reclaim it: ${errorMessage(err)}`,
     );
   }
 }

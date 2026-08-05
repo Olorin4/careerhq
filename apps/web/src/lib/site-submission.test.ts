@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { eq } from "drizzle-orm";
@@ -30,7 +30,7 @@ import type { FallbackResult, GenerateInput, InterpretFieldInput } from "@career
 import {
   applicationEvents, applications, createApplication, createCvVariant, createDb, createFact,
   getActiveConfirmation, getAttempt, getLatestSnapshot, listAttemptsForApplication,
-  transitionApplication, updateSnapshotAnswers, workspaces, type Db,
+  listEvidenceScreenshotPaths, transitionApplication, updateSnapshotAnswers, workspaces, type Db,
 } from "@careerhq/db";
 import {
   confirmAndSubmitSite, prepareSiteApplication, previewSiteSubmission, updatePlannedAnswer,
@@ -1589,6 +1589,67 @@ d("the demo's evidence-screenshot store", () => {
 
     expect(outcome.status).toBe("submitted");
     expect(readdirSync(path.join(fileStorageDir, "site-screenshots"))).toEqual(["kept.png"]);
+  });
+
+  // The outcome that most needs its evidence, and the one that used to lose
+  // it. NEEDS_RECONCILE means "the click landed and nobody can say what came of
+  // it", so there is no confirmed receipt to hold the path — it was persisted
+  // to no row at all, the collector reclaimed the file five minutes later, and
+  // the attempt's reason went on telling the reader to check a screenshot that
+  // was gone.
+  it("never reclaims the screenshot a NEEDS_RECONCILE reason tells the reader to check", async () => {
+    const fileStorageDir = storeDir();
+    const parked = await previewed("Unconfirmed Co");
+    const evidence = path.join(fileStorageDir, "site-screenshots", "reconcile.png");
+    mkdirSync(path.dirname(evidence), { recursive: true });
+    writeFileSync(evidence, "png");
+
+    const outcome = await confirmAndSubmitSite(
+      deps({
+        config: demoConfig(fileStorageDir),
+        // The confirmation page came back with no confirmation id: not evidence
+        // of success, not evidence of failure — a human's problem.
+        submit: async (args) => ({
+          confirmationId: null,
+          finalUrl: `${args.url}/thanks`,
+          screenshotPath: evidence,
+          pageText: "Thanks for applying!",
+        }),
+      }),
+      { workspaceId, attemptId: parked.attemptId, presentedToken: parked.token, retypedTarget: APPLY_HOST },
+    );
+
+    expect(outcome.status).toBe("needs_reconcile");
+    if (outcome.status !== "needs_reconcile") return;
+    expect(outcome.reason).toMatch(/saved screenshot/);
+    expect((await getAttempt(db, parked.attemptId))?.status).toBe("NEEDS_RECONCILE");
+    // The attempt points at the file: same key the worker's `submit_result`
+    // uses, which is the key the collector's keep-set reads.
+    expect(await listEvidenceScreenshotPaths(db)).toContain(evidence);
+
+    // Age it well past the grace window — what the six-hourly reset leaves
+    // behind — and drop a genuine orphan beside it, then run another confirm,
+    // whose reservation runs the collector over the whole store.
+    const stamp = (Date.now() - (ORPHAN_GRACE_MS + 60_000)) / 1000;
+    utimesSync(evidence, stamp, stamp);
+    const orphan = path.join(fileStorageDir, "site-screenshots", "orphan.png");
+    writeFileSync(orphan, "png");
+    utimesSync(orphan, stamp, stamp);
+
+    const second = await previewed("Post Reconcile Confirm Co");
+    const collected = await confirmAndSubmitSite(
+      deps({ config: demoConfig(fileStorageDir), submit: stubSubmit([]) }),
+      { workspaceId, attemptId: second.attemptId, presentedToken: second.token, retypedTarget: APPLY_HOST },
+    );
+    expect(collected.status).toBe("submitted");
+
+    // The referenced screenshot survives and the orphan does not: a keep-set
+    // that keeps everything would be no fix at all.
+    expect(readdirSync(path.join(fileStorageDir, "site-screenshots"))).toEqual(["reconcile.png"]);
+    expect(existsSync(evidence)).toBe(true);
+    // And the parked attempt can still point a human at it.
+    const snapshot = await getLatestSnapshot(db, parked.attemptId);
+    expect((snapshot?.recoveryState as { screenshotPath?: string } | null)?.screenshotPath).toBe(evidence);
   });
 
   // A personal, self-hosted install owns its disk, and its screenshots are the

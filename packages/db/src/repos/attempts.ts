@@ -467,7 +467,13 @@ export async function hasBlockingAttempt(db: Db, applicationId: string): Promise
  *     apps/web's `completeSubmission` records for an interactive submission
  *     (and what `seedDemoWorkspace` records for the seeded one), and
  *   - `form_snapshots.recovery_state->>'screenshotPath'` — what the worker's
- *     `runSubmitJob` records for the queue variant.
+ *     `runSubmitJob` records for the queue variant, and what
+ *     `recordRecoveryScreenshot` merges onto the same key when apps/web parks
+ *     an attempt in NEEDS_RECONCILE. That second writer is why the key is
+ *     read from the snapshot and not from a receipt shape: a reconciled
+ *     attempt has no confirmed receipt by definition — the click landed and
+ *     the outcome is unknown — yet its reason tells the reader to go and look
+ *     at exactly this file, so it is the LAST screenshot that may be reclaimed.
  *
  * `pending_receipt` carries no screenshot path (nothing has been captured when
  * it is written), so it is not read; a receipt shape that grows one must be

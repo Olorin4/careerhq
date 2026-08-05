@@ -6,8 +6,10 @@ import { applicationAttempts } from "../schema/index.js";
 import { createApplication } from "./applications.js";
 import { createSiteAttempt } from "./attempts.js";
 import {
-  findRequisitionAttempt, getLatestSnapshot, saveFormSnapshot, updateRecoveryState, updateSnapshotAnswers,
+  findRequisitionAttempt, getLatestSnapshot, recordRecoveryScreenshot, saveFormSnapshot, updateRecoveryState,
+  updateSnapshotAnswers,
 } from "./form-snapshots.js";
+import { listEvidenceScreenshotPaths } from "./attempts.js";
 
 const url = process.env.TEST_DATABASE_URL;
 const d = describe.skipIf(!url);
@@ -131,6 +133,39 @@ d("form-snapshots repo", () => {
     const latest = await getLatestSnapshot(db, attemptId);
     expect(latest?.currentStep).toBe(2);
     expect(latest?.recoveryState).toEqual({ lastFieldId: "field-1", note: "resumed after crash" });
+  });
+
+  it("recordRecoveryScreenshot puts the path where the collector's keep-set reads it", async () => {
+    const { attemptId } = await siteAttempt("Reconcile Evidence Co");
+    const saved = await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+    const shot = `/tmp/careerhq-test/${saved.id}.png`;
+
+    await recordRecoveryScreenshot(db, saved.id, shot);
+
+    expect((await getLatestSnapshot(db, attemptId))?.recoveryState).toEqual({ screenshotPath: shot });
+    // The keep-set is the whole point: a path that does not turn up here is a
+    // file the demo's collector deletes five minutes later.
+    expect(await listEvidenceScreenshotPaths(db)).toContain(shot);
+  });
+
+  // `runSubmitJob` writes `submit_in_flight` in the instant before the one
+  // submit click, and it is the only durable record that a click may have
+  // happened — a retry that finds it refuses to press the button again.
+  // Recording a screenshot must ADD to that row, never replace it.
+  it("recordRecoveryScreenshot merges into an in-flight marker instead of erasing it", async () => {
+    const { attemptId } = await siteAttempt("In Flight Co");
+    const saved = await saveFormSnapshot(db, { attemptId, form: canonicalForm(), answers: plannedAnswers() });
+    const startedAt = new Date().toISOString();
+    await updateRecoveryState(db, saved.id, 1, { kind: "submit_in_flight", startedAt });
+    const shot = `/tmp/careerhq-test/${saved.id}-inflight.png`;
+
+    await recordRecoveryScreenshot(db, saved.id, shot);
+
+    const latest = await getLatestSnapshot(db, attemptId);
+    expect(latest?.recoveryState).toEqual({ kind: "submit_in_flight", startedAt, screenshotPath: shot });
+    // And the step the marker was written with is untouched — this writes one
+    // key, not a new recovery state.
+    expect(latest?.currentStep).toBe(1);
   });
 
   it("findRequisitionAttempt returns null for a requisition key with no prior attempt", async () => {
