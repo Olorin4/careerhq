@@ -3,7 +3,7 @@
 import { useEffect, useState, type JSX } from "react";
 import { usePathname } from "next/navigation";
 import { Badge } from "./badge.js";
-import { COLLAPSED_ATTR, STORAGE_KEY } from "./sidebar-constants.js";
+import { COLLAPSED_ATTR, DEMO_BANNER_TESTID, SIDEBAR_TOP_OFFSET_VAR, STORAGE_KEY } from "./sidebar-constants.js";
 
 /**
  * Counts shown next to a destination's label. Undefined and zero are both
@@ -80,6 +80,30 @@ export function Sidebar({ counts }: { counts: SidebarCounts }): JSX.Element {
     }
   }, []);
 
+  // Keeps `SIDEBAR_TOP_OFFSET_VAR` in sync with the demo banner's actual
+  // rendered height for the lifetime of the page — `layout.tsx`'s
+  // pre-hydration script sets it once, synchronously, so first paint is
+  // already correct (see that script's own comment for why both this
+  // element and the banner being `position: sticky; top: 0` would otherwise
+  // collide), but the banner's `flex-wrap` can grow it to two lines if the
+  // user resizes a narrow window afterwards, and this keeps the rail's
+  // offset matched to that. No-op (and no `ResizeObserver` ever
+  // constructed) when the banner isn't in the DOM at all — `demoMode` off,
+  // or this component under test without one rendered.
+  useEffect(() => {
+    const banner = document.querySelector(`[data-testid="${DEMO_BANNER_TESTID}"]`);
+    if (!banner || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const sync = (): void => {
+      document.documentElement.style.setProperty(SIDEBAR_TOP_OFFSET_VAR, `${banner.getBoundingClientRect().height}px`);
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(banner);
+    return () => observer.disconnect();
+  }, []);
+
   function toggle(): void {
     setCollapsed((prev) => {
       const next = !prev;
@@ -92,9 +116,14 @@ export function Sidebar({ counts }: { counts: SidebarCounts }): JSX.Element {
     });
   }
 
+  // `var(--sidebar-top-offset,0px)` is written as a literal here (not
+  // interpolated from `SIDEBAR_TOP_OFFSET_VAR`) because Tailwind's arbitrary
+  // values are picked up by statically scanning source text for class
+  // strings — a template-interpolated property name wouldn't be found. Keep
+  // this in sync with the constant by hand if it ever changes.
   return (
     <aside
-      className={`sticky top-0 flex h-screen shrink-0 flex-col overflow-y-auto bg-anchor transition-[width] ${collapsed ? "w-16" : "w-64"}`}
+      className={`sticky top-[var(--sidebar-top-offset,0px)] flex h-[calc(100vh-var(--sidebar-top-offset,0px))] shrink-0 flex-col overflow-y-auto bg-anchor transition-[width] ${collapsed ? "w-16" : "w-64"}`}
       data-testid="sidebar"
     >
       <div className={`flex items-center px-3 py-4 ${collapsed ? "justify-center" : "justify-between"}`}>

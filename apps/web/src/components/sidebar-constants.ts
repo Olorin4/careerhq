@@ -18,3 +18,20 @@ export const STORAGE_KEY = "careerhq.sidebar.collapsed";
  * Cleared by `sidebar.tsx` once it mounts and React's own render takes over.
  */
 export const COLLAPSED_ATTR = "data-sidebar-collapsed";
+
+/**
+ * CSS custom property, set on `<html>`, holding the demo banner's current
+ * rendered height in pixels (or `0px` when `demoMode` is off / the banner
+ * isn't present). `Sidebar` reads it for both its sticky `top` offset and
+ * its height, so the rail sits *below* the banner — which is also
+ * `position: sticky; top: 0` — instead of both pinning to viewport y=0 and
+ * fighting over stacking order. Set once, synchronously, by `layout.tsx`'s
+ * pre-hydration script (so first paint is already correct and nothing ever
+ * needs to "catch up"), and kept in sync afterwards by a `ResizeObserver` in
+ * `sidebar.tsx` (the banner's `flex-wrap` can grow it to two lines on a
+ * narrow viewport).
+ */
+export const SIDEBAR_TOP_OFFSET_VAR = "--sidebar-top-offset";
+
+/** `data-testid` the demo banner is rendered with (see `demo-banner.tsx`). */
+export const DEMO_BANNER_TESTID = "demo-banner";
