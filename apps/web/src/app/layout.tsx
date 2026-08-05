@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { loadConfig } from "@careerhq/config";
 import { Sidebar } from "../components/sidebar.js";
 import { DemoBanner } from "../components/demo-banner.js";
+import { COLLAPSED_ATTR, STORAGE_KEY } from "../components/sidebar-constants.js";
 import "./tokens.css";
 import "./globals.css";
 
@@ -21,6 +22,19 @@ export const metadata = {
 // build fails outside an environment that has DATABASE_URL set.
 export const dynamic = "force-dynamic";
 
+// Runs synchronously, before the browser paints anything below it —
+// including `Sidebar`'s own SSR markup, which always renders expanded
+// (there's no access to localStorage on the server). Without this, a
+// visitor who previously collapsed the sidebar sees it flash from expanded
+// to collapsed after the post-mount effect in `sidebar.tsx` runs. If the
+// stored preference is "collapsed", this stamps `COLLAPSED_ATTR` on `<html>`
+// so the CSS rule in `globals.css` can force the rail to its collapsed
+// width immediately, matching first paint to the stored state. `sidebar.tsx`
+// clears the attribute once it mounts and React's own render takes over.
+const COLLAPSE_FLASH_GUARD_SCRIPT = `try{if(localStorage.getItem(${JSON.stringify(
+  STORAGE_KEY,
+)})==="true"){document.documentElement.setAttribute(${JSON.stringify(COLLAPSED_ATTR)},"true")}}catch(e){}`;
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   const { demoMode } = loadConfig();
 
@@ -31,18 +45,18 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
       <body className="bg-canvas font-sans text-ink">
+        <script dangerouslySetInnerHTML={{ __html: COLLAPSE_FLASH_GUARD_SCRIPT }} />
         {demoMode && <DemoBanner />}
         {/*
-          `items-start` (not the flex default `stretch`) matters here: `Sidebar`
-          sets its own `min-h-screen` so the rail always reads as a persistent
-          shell even on a short page, but `main` must NOT be stretched to match
-          it. `scripts/capture-demo-media.ts`'s `shot()` reads `app-main`'s
-          `getBoundingClientRect().bottom` to find where a page's content
-          actually ends — a stretched `main` would report ~900px on every
-          short page (the viewport height, not the content height), silently
-          reframing the gallery to the same number `shot()` would have picked
-          had the `app-main` testid gone missing entirely (see layout.tsx's
-          git history / task-4-report.md for how this was caught).
+          `items-start` (not the flex default `stretch`) matters here: it stops
+          `main` being stretched to match its sibling, which would make its
+          measured height indistinguishable from the viewport-height fallback
+          `scripts/capture-demo-media.ts`'s `shot()` substitutes when
+          `app-main` is missing entirely (see task-4-report.md). `Sidebar`
+          instead makes itself `sticky top-0 h-screen`, so the rail stays
+          pinned in the viewport for the full scroll of a page taller than one
+          screen (and settles flush with the bottom once the page's own bottom
+          comes into view) without ever influencing `main`'s own height.
         */}
         <div className="flex items-start">
           <Sidebar counts={{}} />

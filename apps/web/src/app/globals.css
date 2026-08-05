@@ -10,6 +10,21 @@
 }
 
 /*
+ * Collapse-flash guard (see layout.tsx's COLLAPSE_FLASH_GUARD_SCRIPT and
+ * sidebar.tsx's COLLAPSED_ATTR). This rule is intentionally NOT inside a
+ * Tailwind @layer: unlayered rules always outrank layered ones in the
+ * cascade regardless of specificity, so this reliably wins over the `w-64`/
+ * `w-16` utility classes Tailwind emits into `@layer utilities` — no
+ * `!important` needed. It only has any effect for the brief pre-hydration
+ * window on a reload of a previously-collapsed sidebar; the mount effect in
+ * sidebar.tsx removes the attribute once React's own render takes over.
+ */
+html[data-sidebar-collapsed="true"] [data-testid="sidebar"] {
+  width: 4rem;
+  overflow: hidden;
+}
+
+/*
  * The refusal line for the forms that grew one when their actions stopped
  * returning `void` — new application, new fact, fact row, watchlist row. Same
  * red and size as the per-panel error classes further down (.cv-error,

@@ -3,6 +3,7 @@
 import { useEffect, useState, type JSX } from "react";
 import { usePathname } from "next/navigation";
 import { Badge } from "./badge.js";
+import { COLLAPSED_ATTR, STORAGE_KEY } from "./sidebar-constants.js";
 
 /**
  * Counts shown next to a destination's label. Undefined and zero are both
@@ -14,8 +15,6 @@ export interface SidebarCounts {
   mail?: number;
   due?: number;
 }
-
-const STORAGE_KEY = "careerhq.sidebar.collapsed";
 
 const DESTINATIONS: ReadonlyArray<{
   href: string;
@@ -51,9 +50,17 @@ export function Sidebar({ counts }: { counts: SidebarCounts }): JSX.Element {
   const [collapsed, setCollapsed] = useState(false);
 
   // Server and first client render both default to expanded (no access to
-  // localStorage during SSR), so there is nothing to reconcile at hydration.
-  // Reading the stored preference here, after mount, is a plain post-hydration
-  // update — a brief flash if the user previously collapsed, not a mismatch.
+  // localStorage during SSR), so there is nothing to reconcile at hydration —
+  // React's own output never disagrees with the server's. The visible first
+  // *paint*, though, is handled separately: `layout.tsx` inlines a blocking
+  // script that runs before this component's JS even loads, and (if the
+  // stored preference is "collapsed") stamps `COLLAPSED_ATTR` on `<html>` so
+  // a plain CSS rule can force the rail to its collapsed width immediately.
+  // That means by the time this effect runs, the visible width may already
+  // be correct; this effect brings React's *state* into agreement (so labels,
+  // aria-pressed, etc. also match) and then removes the attribute, handing
+  // control of the width back to React's own class output so a later
+  // in-session toggle isn't fought by a stale CSS override.
   // Reads/writes are both defensive: storage can be unavailable (private
   // browsing, a disabled/broken implementation) and collapse-state persistence
   // is a nice-to-have, not something worth crashing the shell over.
@@ -64,6 +71,12 @@ export function Sidebar({ counts }: { counts: SidebarCounts }): JSX.Element {
       }
     } catch {
       // Storage unavailable — stay expanded.
+    }
+    try {
+      document.documentElement.removeAttribute(COLLAPSED_ATTR);
+    } catch {
+      // Non-fatal — worst case a later toggle briefly fights a stale
+      // attribute, not a crash.
     }
   }, []);
 
@@ -81,7 +94,7 @@ export function Sidebar({ counts }: { counts: SidebarCounts }): JSX.Element {
 
   return (
     <aside
-      className={`flex min-h-screen shrink-0 flex-col bg-anchor transition-[width] ${collapsed ? "w-16" : "w-64"}`}
+      className={`sticky top-0 flex h-screen shrink-0 flex-col overflow-y-auto bg-anchor transition-[width] ${collapsed ? "w-16" : "w-64"}`}
       data-testid="sidebar"
     >
       <div className={`flex items-center px-3 py-4 ${collapsed ? "justify-center" : "justify-between"}`}>
