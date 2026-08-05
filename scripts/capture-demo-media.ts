@@ -355,7 +355,8 @@ async function captureAutoApply(browser: Browser): Promise<void> {
 
     await assertVisible(page.locator('[data-testid~="site-field-consent"]'),
       "the consent row on the auto-apply review screen");
-    await assertVisible(page.locator('[data-testid="badge-sensitivity"]'),
+    await assertVisible(
+      page.locator('[data-testid="site-review"]').locator('[data-testid="badge-sensitivity"]'),
       "a sensitive lock badge on the auto-apply review screen");
     const step2 = page.locator('[data-testid="site-step"]').nth(1);
     await scrollTo(page, step2, BANNER_CLEARANCE);
