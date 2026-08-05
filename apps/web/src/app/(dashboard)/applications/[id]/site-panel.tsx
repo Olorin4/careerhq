@@ -260,7 +260,7 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
   const canStartNewAttempt = currentAttempt !== null || !alreadySubmitted;
 
   return (
-    <section className="site-panel">
+    <section className="site-panel" data-testid="site-panel">
       <h2>Auto-apply (company site)</h2>
 
       {alreadySubmitted && !currentAttempt && (
@@ -308,6 +308,7 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
               disabled={isPending}
               placeholder="https://boards.greenhouse.io/…"
               autoComplete="off"
+              data-testid="site-url-input"
             />
           </label>
           <button type="button" onClick={() => handlePrepare()} disabled={isPending}>
@@ -350,7 +351,7 @@ function PrepareOutcomePane({
   if (outcome.status === "blocked") {
     const safeUrl = safeExternalHref(url.trim());
     return (
-      <div className="site-outcome site-outcome-blocked">
+      <div className="site-outcome site-outcome-blocked" data-testid="site-outcome">
         <p>Paused — {humanize(outcome.kind)}</p>
         <p>{outcome.detail}</p>
         <p className="site-outcome-hint">
@@ -368,7 +369,7 @@ function PrepareOutcomePane({
   }
   if (outcome.status === "duplicate") {
     return (
-      <div className="site-outcome site-outcome-blocked">
+      <div className="site-outcome site-outcome-blocked" data-testid="site-outcome">
         <p>A submitted attempt for this requisition already exists.</p>
         <p>
           <a href={`/applications/${outcome.existingApplicationId}`}>View the existing application</a>
@@ -380,7 +381,7 @@ function PrepareOutcomePane({
     );
   }
   return (
-    <div className="site-outcome site-outcome-failed">
+    <div className="site-outcome site-outcome-failed" data-testid="site-outcome">
       <p>{outcome.reason}</p>
     </div>
   );
@@ -461,7 +462,7 @@ function ReviewForm({
   const safeReviewUrl = safeExternalHref(reviewUrl);
 
   return (
-    <div className="site-review">
+    <div className="site-review" data-testid="site-review">
       <p className="site-review-url">
         Reviewing {safeReviewUrl ? (
           <a href={safeReviewUrl} target="_blank" rel="noreferrer">{reviewUrl}</a>
@@ -480,7 +481,7 @@ function ReviewForm({
       </p>
 
       {steps.map((step) => (
-        <section key={step} className="site-step">
+        <section key={step} className="site-step" data-testid="site-step">
           <h4>Step {step + 1} of {form.totalSteps}</h4>
           <table className="site-field-table">
             <tbody>
@@ -540,7 +541,7 @@ function FieldRow({
   const rowClass = answer.needsUser ? "site-field-row site-field-needs-you" : "site-field-row";
 
   return (
-    <tr className={rowClass}>
+    <tr className={rowClass} data-testid={answer.needsUser ? "site-field-needs-you" : undefined}>
       <td className="site-field-label">
         {field.label || field.id}
         {field.required && <span className="site-field-required" title="Required">*</span>}
@@ -552,7 +553,7 @@ function FieldRow({
         <span className={`badge site-badge-source-${answer.source}`}>{SOURCE_LABELS[answer.source]}</span>
         <span className="site-field-confidence">{Math.round(answer.confidence * 100)}%</span>
         {sensitive && (
-          <span className="badge badge-sensitivity" title="CareerHQ never fills this automatically">
+          <span className="badge badge-sensitivity" data-testid="badge-sensitivity" title="CareerHQ never fills this automatically">
             🔒 Sensitive
           </span>
         )}
@@ -593,9 +594,10 @@ function ConsentFieldRow({
   const rowClass = answer.needsUser
     ? "site-field-row site-field-consent site-field-needs-you"
     : "site-field-row site-field-consent";
+  const rowTestId = answer.needsUser ? "site-field-consent site-field-needs-you" : "site-field-consent";
 
   return (
-    <tr className={rowClass}>
+    <tr className={rowClass} data-testid={rowTestId}>
       <td className="site-field-consent-cell" colSpan={4}>
         <p className="site-field-consent-statement">
           {field.label || field.id}
@@ -765,6 +767,7 @@ function TextLikeInput({
         onChange={(e) => setValue(e.target.value)}
         onBlur={commitIfChanged}
         disabled={disabled}
+        data-testid="site-field-textarea"
       />
     );
   }
@@ -792,9 +795,9 @@ function SitePreviewPane({
 }) {
   const { payload } = preview;
   return (
-    <div className="site-preview">
+    <div className="site-preview" data-testid="site-preview">
       <h3>Review before submitting</h3>
-      <dl className="site-preview-fields">
+      <dl className="site-preview-fields" data-testid="site-preview-fields">
         <dt>Site</dt>
         <dd>{payload.host}</dd>
         <dt>Requisition</dt>
@@ -829,6 +832,7 @@ function SitePreviewPane({
           onChange={(e) => setRetypedTarget(e.target.value)}
           disabled={isPending}
           autoComplete="off"
+          data-testid="site-retype-input"
         />
       </label>
 
@@ -865,7 +869,7 @@ function SiteConfirmOutcomePane({
     case "submitted": {
       const safeFinalUrl = safeExternalHref(outcome.finalUrl);
       return (
-        <div className="site-outcome site-outcome-submitted">
+        <div className="site-outcome site-outcome-submitted" data-testid="site-outcome">
           <p>Submitted — confirmation <code>{outcome.confirmationId ?? "(none reported by the site)"}</code></p>
           <p>
             {safeFinalUrl ? (
@@ -882,7 +886,7 @@ function SiteConfirmOutcomePane({
     }
     case "blocked":
       return (
-        <div className="site-outcome site-outcome-blocked">
+        <div className="site-outcome site-outcome-blocked" data-testid="site-outcome">
           <p>Blocked ({outcome.code}): {outcome.reason}</p>
           {outcome.code === "gate_closed" && (
             <p className="site-outcome-hint">
@@ -917,7 +921,7 @@ function SiteConfirmOutcomePane({
       );
     case "failed":
       return (
-        <div className="site-outcome site-outcome-failed">
+        <div className="site-outcome site-outcome-failed" data-testid="site-outcome">
           <p>Submission failed: {outcome.reason}</p>
         </div>
       );
@@ -966,7 +970,7 @@ function SiteReconcilePane({
   }
 
   return (
-    <div className="site-outcome site-outcome-reconcile">
+    <div className="site-outcome site-outcome-reconcile" data-testid="site-outcome">
       <p>Needs reconciliation: {reason}</p>
       <p className="site-outcome-hint">
         The submission&apos;s outcome is uncertain — check the site directly and the stored screenshot, then
@@ -1008,7 +1012,10 @@ function SiteAttemptRow({ applicationId, attempt }: { applicationId: string; att
     : null;
 
   return (
-    <li className={highlighted ? "site-attempt-row site-attempt-row-reconcile" : "site-attempt-row"}>
+    <li
+      className={highlighted ? "site-attempt-row site-attempt-row-reconcile" : "site-attempt-row"}
+      data-testid="site-attempt-row"
+    >
       <div className="site-attempt-meta">
         <span className={statusBadgeClass(attempt.status)}>{humanize(attempt.status)}</span>
         <span className="site-attempt-date">{formatTimestamp(attempt.startedAt)}</span>

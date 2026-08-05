@@ -66,14 +66,14 @@ export function JobRow({ job }: { job: JobRowData }) {
   const safeUrl = safeExternalHref(job.url);
 
   return (
-    <article className="job-row">
+    <article className="job-row" data-testid="job-row">
       <header className="job-row-header">
         {safeUrl ? (
-          <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="job-row-link">
+          <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="job-row-link" data-testid="job-row-link">
             <strong>{job.title}</strong> · {job.company}
           </a>
         ) : (
-          <span className="job-row-link">
+          <span className="job-row-link" data-testid="job-row-link">
             <strong>{job.title}</strong> · {job.company}
           </span>
         )}
@@ -86,10 +86,10 @@ export function JobRow({ job }: { job: JobRowData }) {
         {job.llmScore != null && <span>llm score: {job.llmScore}</span>}
       </div>
 
-      {job.llmRationale && <p className="job-row-rationale">{job.llmRationale}</p>}
+      {job.llmRationale && <p className="job-row-rationale" data-testid="job-row-rationale">{job.llmRationale}</p>}
 
       {job.llmRedFlags.length > 0 && (
-        <div className="job-row-flags">
+        <div className="job-row-flags" data-testid="job-row-flags">
           {job.llmRedFlags.map((flag) => (
             <span key={flag} className="badge badge-stale">{flag}</span>
           ))}
@@ -97,7 +97,7 @@ export function JobRow({ job }: { job: JobRowData }) {
       )}
 
       {job.breakdown.length > 0 && (
-        <details className="job-row-breakdown">
+        <details className="job-row-breakdown" data-testid="job-row-breakdown">
           <summary>Score breakdown</summary>
           <ul>
             {job.breakdown.map((entry) => (

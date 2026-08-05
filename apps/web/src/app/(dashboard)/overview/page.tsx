@@ -56,7 +56,7 @@ export default async function OverviewPage() {
             const company = companyRows.find((c) => c.id === job?.companyId);
             const overdue = a.nextActionDue!.getTime() < now;
             return (
-              <li key={a.id} className={overdue ? "overview-due-overdue" : undefined}>
+              <li key={a.id} className={overdue ? "overview-due-overdue" : undefined} data-testid="overview-due-item">
                 <a href={`/applications/${a.id}`}>
                   {company?.name ?? "?"} · {job?.title ?? "?"} — {a.nextAction ?? humanize(a.state)}
                   {" — due "}
@@ -71,7 +71,7 @@ export default async function OverviewPage() {
       <h2>State counts</h2>
       <ul className="overview-counts">
         {[...counts.entries()].map(([state, count]) => (
-          <li key={state}>
+          <li key={state} data-testid="overview-counts-item">
             {humanize(state)}: {count}
           </li>
         ))}

@@ -74,7 +74,7 @@ function SuggestionRow({ suggestion }: { suggestion: SuggestionListItem }) {
   }
 
   return (
-    <li className="inbox-row">
+    <li className="inbox-row" data-testid="inbox-row">
       <p className="inbox-row-subject">
         <strong>{suggestion.subject || "(no subject)"}</strong>
       </p>
@@ -108,7 +108,7 @@ function SuggestionRow({ suggestion }: { suggestion: SuggestionListItem }) {
       </div>
 
       {suggestion.quotedEvidence && (
-        <blockquote className="inbox-row-evidence">&ldquo;{suggestion.quotedEvidence}&rdquo;</blockquote>
+        <blockquote className="inbox-row-evidence" data-testid="inbox-row-evidence">&ldquo;{suggestion.quotedEvidence}&rdquo;</blockquote>
       )}
 
       <div className="inbox-row-actions">

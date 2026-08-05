@@ -28,7 +28,7 @@ export default async function AnswersPage() {
       ) : (
         <ul className="answers-list">
           {answers.map((answer) => (
-            <li key={answer.id} className="answers-row">
+            <li key={answer.id} className="answers-row" data-testid="answers-row">
               <p className="answers-question">
                 <strong>{answer.questionRaw}</strong>
               </p>

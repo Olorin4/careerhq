@@ -68,7 +68,7 @@ function OutcomePane({ outcome, replayDemo }: { outcome: GenerationOutcome; repl
       return null;
     case "needs_facts":
       return (
-        <div className="materials-needs-facts">
+        <div className="materials-needs-facts" data-testid="materials-needs-facts">
           <p>Not enough verified facts to generate this confidently:</p>
           <ul>
             {outcome.reasons.map((reason) => (
@@ -224,21 +224,21 @@ function MaterialSection({
   }
 
   return (
-    <div className="materials-section">
+    <div className="materials-section" data-testid="materials-section">
       <h3>{KIND_LABELS[kind]}</h3>
 
       {document ? (
         <div className="materials-doc">
           <div className="materials-doc-meta">
             {document.origin === "ai" && document.approval === "draft" && (
-              <span className="badge badge-ai-draft">AI-generated — not yet approved</span>
+              <span className="badge badge-ai-draft" data-testid="badge-ai-draft">AI-generated — not yet approved</span>
             )}
             <span className="badge">{humanize(document.approval)}</span>
             <span className="materials-doc-date">{formatTimestamp(document.createdAt)}</span>
           </div>
           <pre className="materials-doc-content">{document.contentMd}</pre>
           <ProvenanceChips factIds={document.sourceFactIds} factClaims={factClaims} />
-          <div className="materials-doc-actions">
+          <div className="materials-doc-actions" data-testid="materials-doc-actions">
             <button
               type="button"
               disabled={isPending || document.approval === "approved"}

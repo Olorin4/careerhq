@@ -34,7 +34,7 @@ const COLUMNS: Column[] = [
 
 export function Board({ cards }: { cards: ApplicationCard[] }) {
   return (
-    <div className="board">
+    <div className="board" data-testid="board">
       {COLUMNS.map((col) => {
         const colCards = cards.filter((c) => col.states.includes(c.state));
         return (
@@ -54,8 +54,8 @@ export function Board({ cards }: { cards: ApplicationCard[] }) {
 
 function Card({ card }: { card: ApplicationCard }) {
   return (
-    <article className="board-card">
-      <a href={`/applications/${card.id}`} className="board-card-link">
+    <article className="board-card" data-testid="board-card">
+      <a href={`/applications/${card.id}`} className="board-card-link" data-testid="board-card-link">
         <strong>{card.company}</strong> · {card.title}
       </a>
       {card.nextAction && (

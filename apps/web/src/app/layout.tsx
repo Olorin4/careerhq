@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         {demoMode && (
-          <div className="demo-banner" role="status">
+          <div className="demo-banner" data-testid="demo-banner" role="status">
             <span>
               Demo — data resets every 6 hours. Sending is disabled; nothing leaves this server.
             </span>
@@ -47,7 +47,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <a href="/cvs">CVs</a>
           <a href="/settings">Settings</a>
         </nav>
-        <main className="app-main">{children}</main>
+        <main className="app-main" data-testid="app-main">{children}</main>
       </body>
     </html>
   );

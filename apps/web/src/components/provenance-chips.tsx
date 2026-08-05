@@ -14,9 +14,9 @@ export function ProvenanceChips({
 }) {
   if (factIds.length === 0) return null;
   return (
-    <div className="chip-list">
+    <div className="chip-list" data-testid="chip-list">
       {factIds.map((id) => (
-        <span key={id} className="chip" title={id}>
+        <span key={id} className="chip" data-testid="chip" title={id}>
           {factClaims[id] ?? "fact removed"}
         </span>
       ))}

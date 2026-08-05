@@ -157,9 +157,9 @@ export default async function ApplicationDetailPage({
       <Messages messages={messages} />
 
       <h2>Event timeline</h2>
-      <ol className="detail-timeline">
+      <ol className="detail-timeline" data-testid="detail-timeline">
         {events.map((event) => (
-          <li key={event.id}>
+          <li key={event.id} data-testid="detail-timeline-item">
             {event.createdAt.toISOString()} — {event.fromState ?? "·"} → {event.toState} (
             {event.trigger})
           </li>
