@@ -4,6 +4,7 @@ import { loadConfig } from "@careerhq/config";
 import { getDb } from "../../../lib/db.js";
 import { cvSizeLimit } from "../../../lib/cv-storage.js";
 import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
+import { formatDate } from "../../../lib/time.js";
 import { CvUploadForm } from "./cv-upload-form.js";
 
 // Every render reads the database, so there is nothing to prerender: without
@@ -55,7 +56,7 @@ export default async function CvsPage() {
                 <td>
                   <code>{variant.sha256.slice(0, 12)}</code>
                 </td>
-                <td>{variant.createdAt.toLocaleDateString()}</td>
+                <td>{formatDate(variant.createdAt)}</td>
               </tr>
             ))}
           </tbody>

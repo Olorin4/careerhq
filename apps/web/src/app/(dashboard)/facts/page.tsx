@@ -3,6 +3,7 @@ import { FACT_CATEGORIES } from "@careerhq/contracts";
 import { getDb } from "../../../lib/db.js";
 import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { safeExternalHref } from "../../../lib/safe-url.js";
+import { formatDate } from "../../../lib/time.js";
 import { FactForm } from "./fact-form.js";
 import { FactRowActions } from "./fact-row-actions.js";
 
@@ -90,8 +91,8 @@ function FactRow({
         )
       )}
       <p className="fact-row-dates">
-        Verified {fact.verifiedAt.toLocaleDateString()} · Review by{" "}
-        {fact.reviewBy.toLocaleDateString()}
+        Verified {formatDate(fact.verifiedAt)} · Review by{" "}
+        {formatDate(fact.reviewBy)}
       </p>
       <FactRowActions factId={fact.id} reviewByDefault={reviewByDefault} />
     </li>

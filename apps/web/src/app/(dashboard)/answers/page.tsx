@@ -1,6 +1,7 @@
 import { listReusableAnswers } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
 import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
+import { formatDate } from "../../../lib/time.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build this page statically (baking in build-time data and
@@ -40,7 +41,7 @@ export default async function AnswersPage() {
                 </span>
                 <span className="answers-detail">
                   Approved{" "}
-                  {answer.approvedAt ? answer.approvedAt.toLocaleDateString() : "—"}
+                  {answer.approvedAt ? formatDate(answer.approvedAt) : "—"}
                 </span>
               </div>
             </li>

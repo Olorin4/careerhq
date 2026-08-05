@@ -37,54 +37,63 @@ describe("formatTimestamp / formatDate", () => {
 });
 
 describe("timeAgo", () => {
-  const baseTime = new Date("2025-08-02T12:00:00Z");
+  const baseTime = new Date("2025-08-02T12:00:00Z").getTime();
 
   it("shows 'just now' for times less than 60 seconds ago", () => {
-    const within30s = new Date(baseTime.getTime() - 30_000);
+    const within30s = new Date(baseTime - 30_000);
     expect(timeAgo(within30s, baseTime)).toBe("just now");
 
-    const within59s = new Date(baseTime.getTime() - 59_000);
+    const within59s = new Date(baseTime - 59_000);
     expect(timeAgo(within59s, baseTime)).toBe("just now");
   });
 
   it("shows minutes for times less than 60 minutes ago", () => {
-    const within1m = new Date(baseTime.getTime() - 60_000);
+    const within1m = new Date(baseTime - 60_000);
     expect(timeAgo(within1m, baseTime)).toBe("1m ago");
 
-    const within30m = new Date(baseTime.getTime() - 30 * 60_000);
+    const within30m = new Date(baseTime - 30 * 60_000);
     expect(timeAgo(within30m, baseTime)).toBe("30m ago");
 
-    const within59m = new Date(baseTime.getTime() - 59 * 60_000);
+    const within59m = new Date(baseTime - 59 * 60_000);
     expect(timeAgo(within59m, baseTime)).toBe("59m ago");
   });
 
   it("shows hours for times less than 24 hours ago", () => {
-    const within1h = new Date(baseTime.getTime() - 60 * 60_000);
+    const within1h = new Date(baseTime - 60 * 60_000);
     expect(timeAgo(within1h, baseTime)).toBe("1h ago");
 
-    const within12h = new Date(baseTime.getTime() - 12 * 60 * 60_000);
+    const within12h = new Date(baseTime - 12 * 60 * 60_000);
     expect(timeAgo(within12h, baseTime)).toBe("12h ago");
 
-    const within23h = new Date(baseTime.getTime() - 23 * 60 * 60_000);
+    const within23h = new Date(baseTime - 23 * 60 * 60_000);
     expect(timeAgo(within23h, baseTime)).toBe("23h ago");
   });
 
   it("shows days for times 24 hours or more ago", () => {
-    const within1d = new Date(baseTime.getTime() - 24 * 60 * 60_000);
+    const within1d = new Date(baseTime - 24 * 60 * 60_000);
     expect(timeAgo(within1d, baseTime)).toBe("1d ago");
 
-    const within7d = new Date(baseTime.getTime() - 7 * 24 * 60 * 60_000);
+    const within7d = new Date(baseTime - 7 * 24 * 60 * 60_000);
     expect(timeAgo(within7d, baseTime)).toBe("7d ago");
 
-    const within30d = new Date(baseTime.getTime() - 30 * 24 * 60 * 60_000);
+    const within30d = new Date(baseTime - 30 * 24 * 60 * 60_000);
     expect(timeAgo(within30d, baseTime)).toBe("30d ago");
   });
 
-  it("defaults to current time when now is not provided", () => {
-    const recentTime = new Date();
-    recentTime.setSeconds(recentTime.getSeconds() - 30);
-
-    // Should not throw and should return "just now" for recent times
-    expect(timeAgo(recentTime)).toBe("just now");
+  // The default `now` this replaces was the bug: an omitted argument meant
+  // the server render and the hydration render each computed their own
+  // instant, so a `lastCheckedAt` sitting on a bucket edge could render "1h
+  // ago" in the HTML and "2h ago" in the browser. There is nothing left to
+  // test about omitting it — the type no longer allows it, which is the point.
+  it("is a pure function of the two instants, so two renders given the same now agree", () => {
+    // One second short of the 1h→2h edge: the shape of value that used to be
+    // able to disagree with itself, because the server render and the
+    // hydration render each called `new Date()` and the second call is later.
+    const checked = new Date(baseTime - (120 * 60_000 - 1_000));
+    expect(timeAgo(checked, baseTime)).toBe("1h ago");
+    expect(timeAgo(checked, baseTime)).toBe(timeAgo(checked, baseTime));
+    // One second of drift really did flip the bucket — so the equality above
+    // is a property of passing the same `now`, not of the buckets being coarse.
+    expect(timeAgo(checked, baseTime + 1_000)).toBe("2h ago");
   });
 });

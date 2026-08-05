@@ -26,8 +26,35 @@ export function formatDate(value: Date | string): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function timeAgo(date: Date, now: Date = new Date()): string {
-  const diffMs = now.getTime() - date.getTime();
+/**
+ * A relative age, in the coarsest bucket that fits. Locale- and zone-free by
+ * construction — it is arithmetic on two epoch millisecond values and never
+ * consults the host's calendar — so unlike {@link formatTimestamp} its hazard
+ * was never *where* it renders but *when*.
+ *
+ * `now` is REQUIRED, and that is the fix. It used to default to `new Date()`,
+ * which meant the caller did not pass a time and therefore did not pass the
+ * SAME time twice: `ConnectionsTable` is a client component rendered from a
+ * server page, so React renders it once in the Node process and again in the
+ * browser when it hydrates. Two `new Date()` calls, milliseconds to seconds
+ * apart, straddling a bucket edge — "1h ago" server-side, "2h ago" in the
+ * browser — is hydration error #418 all over again, the same class as the bug
+ * `b9a7364` fixed and arrived at by a different route. Never observed, because
+ * the window is one bucket edge wide and the data is a mailbox health check;
+ * the point is that nothing prevented it.
+ *
+ * A default value cannot be made safe here — whatever it computes, it computes
+ * twice. So the bucket is decided ONCE, by the server component that owns the
+ * render, and travels to the browser as a serialized prop (`apps/web/src/app/
+ * (dashboard)/settings/email/page.tsx`), which is the same shape `email-panel`'s
+ * `ExpiryCountdown` already uses for its `now`.
+ *
+ * Milliseconds rather than a `Date` for exactly that reason: a number crosses
+ * the server/client boundary as itself, and a caller cannot accidentally hand
+ * this a value the two sides disagree about.
+ */
+export function timeAgo(date: Date, nowMs: number): string {
+  const diffMs = nowMs - date.getTime();
   const diffSeconds = Math.floor(diffMs / 1000);
 
   if (diffSeconds < 60) {

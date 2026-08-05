@@ -2,6 +2,7 @@ import { inArray } from "drizzle-orm";
 import { listApplications, jobs as jobsTable, companies as companiesTable } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
 import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
+import { formatDate } from "../../../lib/time.js";
 
 // Every render reads the database, so there is nothing to prerender: without
 // this Next would build these pages statically (baking in build-time data and
@@ -59,7 +60,7 @@ export default async function OverviewPage() {
                 <a href={`/applications/${a.id}`}>
                   {company?.name ?? "?"} · {job?.title ?? "?"} — {a.nextAction ?? humanize(a.state)}
                   {" — due "}
-                  {a.nextActionDue!.toLocaleDateString()}
+                  {formatDate(a.nextActionDue!)}
                 </a>
               </li>
             );

@@ -30,7 +30,19 @@ function healthBadgeClass(health: string): string {
   return "badge";
 }
 
-export function ConnectionsTable({ connections }: { connections: EmailConnection[] }) {
+/**
+ * `now` is a prop, not a `Date.now()` call in here, and that is load-bearing:
+ * this module is `"use client"` but it is rendered from a server page, so React
+ * renders this table once in the Node process and again in the browser when it
+ * hydrates. A `now` computed inside would be a different instant each time, and
+ * a "last checked" that crossed a bucket edge in between would render "1h ago"
+ * in the HTML and "2h ago" after hydration — a mismatch. Passed down, the two
+ * renders are given the same number and cannot disagree. `router.refresh()`
+ * after a test or a disconnect re-renders on the server and brings a fresh one.
+ */
+export function ConnectionsTable(
+  { connections, now }: { connections: EmailConnection[]; now: number },
+) {
   return (
     <table className="email-connections-table">
       <thead>
@@ -46,14 +58,14 @@ export function ConnectionsTable({ connections }: { connections: EmailConnection
       </thead>
       <tbody>
         {connections.map((connection) => (
-          <ConnectionRow key={connection.id} connection={connection} />
+          <ConnectionRow key={connection.id} connection={connection} now={now} />
         ))}
       </tbody>
     </table>
   );
 }
 
-function ConnectionRow({ connection }: { connection: EmailConnection }) {
+function ConnectionRow({ connection, now }: { connection: EmailConnection; now: number }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [testResult, setTestResult] = useState<{ ok: boolean; reason?: string } | null>(null);
@@ -91,7 +103,7 @@ function ConnectionRow({ connection }: { connection: EmailConnection }) {
         <span className={healthBadgeClass(connection.health)}>{connection.health}</span>
         {connection.healthDetail && <div className="email-health-detail">{connection.healthDetail}</div>}
       </td>
-      <td>{connection.lastCheckedAt ? timeAgo(connection.lastCheckedAt) : "—"}</td>
+      <td>{connection.lastCheckedAt ? timeAgo(connection.lastCheckedAt, now) : "—"}</td>
       <td>{hasImap ? "Yes" : "No"}</td>
       <td>{retention.mode === "days_limited" ? `${retention.mode} (${retention.days}d)` : retention.mode}</td>
       <td className="email-connection-actions">

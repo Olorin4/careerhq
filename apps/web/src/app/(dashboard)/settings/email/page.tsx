@@ -41,7 +41,7 @@ export default async function EmailSettingsPage() {
         {connections.length === 0 ? (
           <p className="settings-empty">No mailbox connections yet.</p>
         ) : (
-          <ConnectionsTable connections={connections} />
+          <ConnectionsTable connections={connections} now={Date.now()} />
         )}
       </section>
 
