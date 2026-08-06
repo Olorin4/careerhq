@@ -12,6 +12,7 @@ const TARGET = "hr@acme.example";
 function baseInput(overrides: Partial<GateCheckInput> = {}): GateCheckInput {
   return {
     envGateOpen: true,
+    channel: "email",
     workspaceKind: "personal",
     sandboxTargetAllowed: true,
     tokenRecord: {
@@ -151,5 +152,39 @@ describe("evaluateSubmissionGates matrix (spec §11, normative check order)", ()
         expect(decision.reason.length).toBeGreaterThan(0);
       }
     }
+  });
+
+  // The refusal has to name the gate the operator can actually act on. Both
+  // channels share this matrix, but not the env var behind it: for a long
+  // while the shared string named SUBMISSIONS_LIVE_EMAIL on both paths, so a
+  // company-site refusal sent its reader to change a setting that has no
+  // effect on the refusal in front of them. Asserting each channel names its
+  // OWN variable and NOT the other one is what keeps them from re-merging.
+  it("names SUBMISSIONS_LIVE_EMAIL when the email channel's gate is shut", () => {
+    const decision = evaluateSubmissionGates(baseInput({ envGateOpen: false, channel: "email" }));
+    expect(decision.allowed).toBe(false);
+    if (decision.allowed) return;
+    expect(decision.code).toBe("gate_closed");
+    expect(decision.reason).toContain("SUBMISSIONS_LIVE_EMAIL");
+    expect(decision.reason).not.toContain("SUBMISSIONS_LIVE_COMPANY_SITE");
+    expect(decision.reason).toContain("email");
+  });
+
+  it("names SUBMISSIONS_LIVE_COMPANY_SITE when the company-site channel's gate is shut", () => {
+    const decision = evaluateSubmissionGates(baseInput({ envGateOpen: false, channel: "company_site" }));
+    expect(decision.allowed).toBe(false);
+    if (decision.allowed) return;
+    expect(decision.code).toBe("gate_closed");
+    expect(decision.reason).toContain("SUBMISSIONS_LIVE_COMPANY_SITE");
+    expect(decision.reason).toContain("company-site");
+  });
+
+  it("gives the two channels different refusals for the same shut gate", () => {
+    const email = evaluateSubmissionGates(baseInput({ envGateOpen: false, channel: "email" }));
+    const site = evaluateSubmissionGates(baseInput({ envGateOpen: false, channel: "company_site" }));
+    expect(email.allowed).toBe(false);
+    expect(site.allowed).toBe(false);
+    if (email.allowed || site.allowed) return;
+    expect(email.reason).not.toBe(site.reason);
   });
 });

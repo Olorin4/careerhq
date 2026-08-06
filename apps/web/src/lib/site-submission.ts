@@ -1068,6 +1068,7 @@ export async function confirmAndSubmitSite(
 
   const gateInput: GateCheckInput = {
     envGateOpen: config.submissionsLiveCompanySite,
+    channel: "company_site",
     // Belt-and-braces (spec P6 §3): SANDBOX_FORCE_SAFE forces every workspace
     // through the sandbox path independently of workspace.kind — a second,
     // independent layer so a regression in workspace resolution (which
