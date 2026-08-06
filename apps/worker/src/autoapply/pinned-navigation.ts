@@ -28,13 +28,19 @@
 // the Playwright driver PROCESS, where our `lookup` cannot reach; the same hop
 // fetched here, in-process, is the one place the pin can be applied.
 //
-// What is NOT pinned, stated rather than implied: a non-GET navigation (the
-// submit POST) and every subresource are handed to Chromium, which resolves
-// them itself. Both are still policy-checked and resolution-checked before they
-// are allowed — what they lack is the pin, so a rebinding answer between our
-// check and Chromium's own lookup would not be caught. Replaying a multipart
-// POST through this fetch to close that is the same trade the redirect walk
-// already refused: it risks submitting an application twice.
+// What this module does NOT pin: a non-GET navigation (the submit POST) and
+// every subresource, because Chromium makes those connections and replaying a
+// multipart POST through this fetch to take one away from it is the trade this
+// project keeps refusing — it risks submitting an application twice.
+//
+// They are pinned all the same, one layer down. `./vetting-proxy.ts` is a
+// loopback proxy the session launches Chromium behind: with a proxy configured
+// Chromium does not resolve destinations at all, so that module performs the
+// only lookup there is, judges every address with the caller's policy and
+// dials one of exactly those — using `pinnedLookup` below. Nothing is replayed;
+// the proxy sits on the live connection. Both halves therefore share this
+// module's `resolveNavigationTarget`/`pinnedLookup`, which is the point of
+// their living here rather than inside the guard.
 import type { LookupAddress } from "node:dns";
 import { lookup as resolveHost } from "node:dns/promises";
 import { request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders } from "node:http";

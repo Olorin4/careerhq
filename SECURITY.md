@@ -235,40 +235,93 @@ Stated plainly rather than omitted. Everything here is also carried in
 [`docs/roadmap.md`](docs/roadmap.md) with its reasoning, so nothing is quietly
 dropped between phases.
 
-- **SSRF: the main-frame capture path is closed by resolve-then-pin; two
-  narrower paths are not.** The auto-apply capture path refuses non-`http(s)`
-  URLs and literal-IP hosts in the loopback, link-local, private, unspecified,
-  CGNAT, benchmarking and IPv6-translation ranges; it resolves every navigation
-  target's hostname and refuses it unless **every** address it answers with
-  passes that same range table; and it applies both to *every* navigation — the
-  submitted URL and each redirect hop, judged from the `Location` header before
-  the hop is requested. For a main-frame `GET` the request is then made over a
-  socket dialled at the addresses that were judged, so the name cannot be
-  re-resolved between the check and the fetch (`packages/autoapply/src/target-policy.ts`,
+- **SSRF: every connection the auto-apply browser causes is now resolve-then-
+  pinned; one narrower path is not chain-walked.** The auto-apply capture path
+  refuses non-`http(s)` URLs and literal-IP hosts in the loopback, link-local,
+  private, unspecified, CGNAT, benchmarking and IPv6-translation ranges; it
+  resolves every navigation target's hostname and refuses it unless **every**
+  address it answers with passes that same range table; and it applies both to
+  *every* navigation — the submitted URL and each redirect hop, judged from the
+  `Location` header before the hop is requested. For a main-frame `GET` the
+  request is then made over a socket dialled at the addresses that were judged,
+  so the name cannot be re-resolved between the check and the fetch
+  (`packages/autoapply/src/target-policy.ts`,
   `apps/worker/src/autoapply/pinned-navigation.ts`).
 
-  What that closes, proven rather than argued: `127-0-0-1.nip.io` is a real
-  public hostname whose A record is `127.0.0.1`. Before the fix, a capture of
-  it returned a loopback-only page's contents in `bodyText` — one request
-  reached the loopback server. After it, the navigation is refused with
-  *"resolves to 127.0.0.1, which is on an internal network"* and the loopback
-  server receives **zero** requests, on the first navigation and on a redirect
-  hop alike; `https://example.com/` still captures normally through the pinned
-  fetch. The probe is committed as
-  `apps/worker/src/autoapply/pinned-navigation.test.ts`.
+  The connections Chromium makes for itself — a non-`GET` navigation (the
+  submit `POST`) and every subresource — used to escape that pin, because
+  checking a name and then handing it to something that resolves it again is a
+  rebinding window rather than a fix. They are now made through a loopback
+  **vetting proxy** that the session launches Chromium behind
+  (`apps/worker/src/autoapply/vetting-proxy.ts`). With a proxy configured
+  Chromium does not resolve destinations at all — it hands the *name* to the
+  proxy — so that proxy performs the only lookup there is, judges every address
+  it answers with by the same predicate the navigation guard judges hops with,
+  and dials one of exactly those. There is no second lookup for a rebinding
+  answer to land in. Nothing is replayed to achieve it: the proxy sits on the
+  live connection, so the multipart `POST` is still made once, by the browser.
+  An `https://` destination arrives as `CONNECT` and is tunnelled byte for
+  byte, so SNI and certificate verification stay end to end between Chromium
+  and the origin.
+
+  What that closes, proven rather than argued:
+
+  - The main-frame `GET`: `127-0-0-1.nip.io` is a real public hostname whose A
+    record is `127.0.0.1`. Before that fix, a capture of it returned a
+    loopback-only page's contents in `bodyText` — one request reached the
+    loopback server. After it, the navigation is refused with *"resolves to
+    127.0.0.1, which is on an internal network"* and the loopback server
+    receives **zero** requests, on the first navigation and on a redirect hop
+    alike; `https://example.com/` still captures normally through the pinned
+    fetch. The probe is committed as
+    `apps/worker/src/autoapply/pinned-navigation.test.ts`.
+  - The submit `POST`, under an actual rebinding answer:
+    `apps/worker/src/autoapply/rebinding-probe.test.ts` stands up two servers
+    on the same port — one on `127.0.0.1`, which is what the name really
+    resolves to and what Chromium's own resolver therefore answers, and one on
+    `127.0.0.2`, which is what this process is told and what the policy allows.
+    A test cannot own an attacker's zone, so one of the two answers is staged;
+    which one is stated in the file. **Before**, a form posting to that name
+    reached the `127.0.0.1` server — the rebinding worked. **After**, that
+    server receives **zero** and the request arrives at `127.0.0.2` instead:
+    not merely "the internal address was not read" but "the connection went to
+    the address we vetted".
+  - Subresources: the same file measures a script tag pointing at the same
+    name. Before, it loaded off `127.0.0.1`; after, it loads off `127.0.0.2`,
+    and with a policy that allows neither answer nothing is dialled at all.
+  - The demo path is unaffected: the site-e2e suite (a real Chromium, a real
+    database, the production `makeSiteCapture`/`makeSiteSubmit` seam) still
+    submits to `demo-ats`, and the same round trip was driven through a DNS
+    name resolving to demo-ats's **private** Docker address — the hosted
+    demo's exact shape — with the CV upload arriving intact and exactly one
+    submission recorded.
 
   What remains, stated rather than implied:
 
-  - **A non-`GET` navigation and every subresource are not pinned.** They are
-    policy-checked and resolution-checked, but Chromium makes those connections
-    itself and resolves the name again to do it, so a rebinding answer landing
-    in that window would not be caught. The submit `POST` is also not
-    chain-walked — it is backstopped by a landed-URL assertion *after* the
-    click. Replaying a multipart POST to close either is the trade this project
-    keeps refusing: it risks submitting an application twice.
-  - **Subresources are not host-checked at all** (they never were): they are
-    not navigations and cannot return a body to the app, so an internal address
-    reached that way is a blind request, not a read.
+  - **A non-`GET` navigation is still not chain-walked.** Chromium follows a
+    `POST`'s `30x` internally, so the workspace's *allow-list* is not applied
+    to that hop before it is requested — it is backstopped by a landed-URL
+    assertion *after* the click. What the proxy adds is the other half: the
+    hop's resolved **address** is judged and pinned before the connection, so
+    what the post-click backstop is now alone in catching is a redirect to a
+    *public* host this workspace's allow-list does not name. Replaying a
+    multipart POST to close the rest is the trade this project keeps refusing:
+    it risks submitting an application twice.
+  - **Subresources are judged by the address table, not by the allow-list.**
+    Deliberately: a page's fonts, stylesheets and images legitimately live on
+    hosts the workspace would never be allowed to navigate to, and refusing
+    them would break rendering without closing anything — the gap being closed
+    is "an outbound request to an internal address", which is what the address
+    table answers. A subresource still cannot return a body to the app.
+  - **Chromium has a rule of its own here, and it is not what this relies on.**
+    Measured while building the probe: a document served by the guard's
+    in-process fetch has no address space of its own, so Chromium's private-
+    network rule already refused its loopback subresources (*"Permission was
+    denied for this request to access the `loopback` address space"*). That
+    rule stops applying the moment the document is one Chromium fetched itself
+    — an application form inside an iframe, which is the ordinary shape — and
+    it is a browser's release note, not this project's guarantee. The probe
+    above is written against the case the browser does not cover.
 
   An earlier version of this entry said the hosted demo was unaffected by any
   of this because its host allow-list is a separate, earlier layer. That was
