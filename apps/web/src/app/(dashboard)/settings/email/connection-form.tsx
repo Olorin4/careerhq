@@ -88,8 +88,16 @@ function ConnectionRow({ connection, now }: { connection: EmailConnection; now: 
     });
   }
 
+  // The copy is deliberately not "this cannot be undone", which is what it used
+  // to say while the control below stays `default`-toned. `--irreversible` is
+  // reserved for controls that touch the outside world, and disconnecting
+  // notifies nobody: it deletes this workspace's own stored credentials and
+  // nothing else, and re-entering them restores the connection. Softening the
+  // sentence is the fix rather than escalating the tone — a confirm that
+  // overstates the stakes teaches the user to distrust the ones that don't.
   function handleDisconnect() {
-    if (typeof window !== "undefined" && !window.confirm(`Disconnect "${connection.label}"? This cannot be undone.`)) {
+    const question = `Disconnect "${connection.label}"? Its stored credentials are deleted — you can reconnect by entering them again.`;
+    if (typeof window !== "undefined" && !window.confirm(question)) {
       return;
     }
     startTransition(async () => {

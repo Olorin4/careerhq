@@ -35,3 +35,21 @@ export const SIDEBAR_TOP_OFFSET_VAR = "--sidebar-top-offset";
 
 /** `data-testid` the demo banner is rendered with (see `demo-banner.tsx`). */
 export const DEMO_BANNER_TESTID = "demo-banner";
+
+/**
+ * Counts shown next to a destination's label. Undefined and zero are both
+ * "nothing to report" — the row renders without a badge either way. A count
+ * only earns a badge when there is something the user might want to look at.
+ *
+ * Declared here rather than in `sidebar.tsx` for the same reason as everything
+ * else in this file: the server side of the wiring (`lib/sidebar-counts.ts`,
+ * which produces the object, and `layout.tsx`, which passes it) needs the
+ * shape, and reaching into a `"use client"` module for it — even for a type —
+ * is the habit that produced the `STORAGE_KEY` bug above. `sidebar.tsx`
+ * re-exports it, so consumers of the component still get it from there.
+ */
+export interface SidebarCounts {
+  discovery?: number;
+  mail?: number;
+  due?: number;
+}

@@ -24,15 +24,18 @@ html[data-sidebar-collapsed="true"] [data-testid="sidebar"] {
   overflow: hidden;
 }
 
+/*
+ * Deliberately carries NO `font-family`. This rule is unlayered, and (see the
+ * note above) unlayered rules outrank layered ones regardless of specificity —
+ * so the `system-ui, …` stack this rule used to declare silently beat the
+ * `font-sans` utility `layout.tsx` puts on `<body>`, which Tailwind emits into
+ * `@layer utilities`. Inter was downloaded on every page load and never used
+ * to paint a glyph. The typeface belongs to the token layer now
+ * (`--font-sans`, set by `next/font` in `layout.tsx` and mapped by
+ * `tailwind.config.ts`); anything declaring a family here would take it back.
+ * `app/tokens.test.ts` fails if a `font-family` reappears outside a layer.
+ */
 body {
   margin: 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
   line-height: 1.5;
 }

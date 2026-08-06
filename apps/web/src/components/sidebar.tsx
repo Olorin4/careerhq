@@ -3,18 +3,15 @@
 import { useEffect, useState, type JSX } from "react";
 import { usePathname } from "next/navigation";
 import { Badge } from "./badge.js";
-import { COLLAPSED_ATTR, DEMO_BANNER_TESTID, SIDEBAR_TOP_OFFSET_VAR, STORAGE_KEY } from "./sidebar-constants.js";
+import {
+  COLLAPSED_ATTR,
+  DEMO_BANNER_TESTID,
+  SIDEBAR_TOP_OFFSET_VAR,
+  STORAGE_KEY,
+  type SidebarCounts,
+} from "./sidebar-constants.js";
 
-/**
- * Counts shown next to a destination's label. Undefined and zero are both
- * "nothing to report" — the row renders without a badge either way. A count
- * only earns a badge when there is something the user might want to look at.
- */
-export interface SidebarCounts {
-  discovery?: number;
-  mail?: number;
-  due?: number;
-}
+export type { SidebarCounts };
 
 const DESTINATIONS: ReadonlyArray<{
   href: string;

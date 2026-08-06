@@ -6,6 +6,7 @@ import { DOCUMENT_KINDS, type DocumentKind } from "@careerhq/contracts";
 import type { GeneratedDocument } from "@careerhq/db";
 import { Badge } from "../../../../components/badge.js";
 import { Button } from "../../../../components/button.js";
+import { Card } from "../../../../components/card.js";
 import { CONTROL_CLASSES, Field } from "../../../../components/field.js";
 import { ProvenanceChips } from "../../../../components/provenance-chips.js";
 import { Section } from "../../../../components/section.js";
@@ -244,10 +245,7 @@ function MaterialSection({
   const aiDraft = document?.origin === "ai" && document.approval === "draft";
 
   return (
-    <div
-      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-card"
-      data-testid="materials-section"
-    >
+    <Card className="flex flex-col gap-3" testId="materials-section">
       <h3 className="m-0 text-sm font-semibold text-ink">{KIND_LABELS[kind]}</h3>
 
       {document ? (
@@ -338,6 +336,6 @@ function MaterialSection({
           </p>
         )}
       </form>
-    </div>
+    </Card>
   );
 }

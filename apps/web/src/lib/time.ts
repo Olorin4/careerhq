@@ -27,6 +27,15 @@ export function formatDate(value: Date | string): string {
 }
 
 /**
+ * How far ahead a `nextActionDue` still counts as "due". Shared by the
+ * `/overview` "Due soon" list and the sidebar's own `due` badge
+ * (`lib/sidebar-counts.ts`) so the number in the rail is a count OF the rows
+ * the destination it sits next to will show — a badge that disagrees with its
+ * own page is worse than no badge.
+ */
+export const DUE_SOON_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
  * A relative age, in the coarsest bucket that fits. Locale- and zone-free by
  * construction — it is arithmetic on two epoch millisecond values and never
  * consults the host's calendar — so unlike {@link formatTimestamp} its hazard

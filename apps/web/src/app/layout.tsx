@@ -9,6 +9,7 @@ import {
   SIDEBAR_TOP_OFFSET_VAR,
   STORAGE_KEY,
 } from "../components/sidebar-constants.js";
+import { readSidebarCounts } from "../lib/sidebar-counts.js";
 import "./tokens.css";
 import "./globals.css";
 
@@ -58,13 +59,17 @@ const SIDEBAR_TOP_OFFSET_SCRIPT = `try{var b=document.querySelector('[data-testi
   SIDEBAR_TOP_OFFSET_VAR,
 )},(b?b.getBoundingClientRect().height:0)+"px")}catch(e){}`;
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
   const { demoMode } = loadConfig();
 
-  // The shell fetches nothing itself — `counts` is empty until Task 5 wires a
-  // page's own data in. `Sidebar` already omits every undefined/zero count,
-  // so an empty object here renders the same destinations with no badges,
-  // not a broken one.
+  // The rail's live counts (spec §Shell). The shell owns this read rather than
+  // a page: the rail is rendered here, on every route, and a count shown only
+  // on the page it counts would be pointless. `readSidebarCounts` never
+  // throws — it returns `{}` if the database is unreachable — and `Sidebar`
+  // omits every undefined or zero count, so the rail degrades to the
+  // no-badges rendering rather than taking every route down with it.
+  const counts = await readSidebarCounts();
+
   return (
     <html lang="en" className={inter.variable}>
       <body className="bg-canvas font-sans text-ink">
@@ -85,8 +90,31 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           own height.
         */}
         <div className="flex items-start">
-          <Sidebar counts={{}} />
-          <main className="flex-1 overflow-x-auto p-6" data-testid="app-main">
+          <Sidebar counts={counts} />
+          {/*
+            No `overflow-x` here, deliberately. A computed `overflow-x` other
+            than `visible`/`clip` forces `overflow-y` to `auto` as well (CSS
+            Overflow §3), which made this element the nearest scrollport for
+            every descendant — including the detail page's `lg:sticky` rail
+            (`applications/[id]/page.tsx`). `main` is never itself scrolled
+            (its height is content-driven, see `items-start` above), so that
+            rail's sticky constraint was trivially satisfied and it laid out
+            as static, scrolling off the top of the window with the page. The
+            one place that genuinely needs a horizontal scroller carries its
+            own (`applications/board.tsx`); a page that needs another should
+            do the same rather than putting it back here.
+
+            `min-w-0` is what the removed `overflow-x` was doing for the
+            layout, without the side effect: a flex item's automatic minimum
+            size is its content's, so `flex-1` alone lets `main` grow WIDER
+            than the flex line to fit the board's 1,716px grid — which moved
+            the horizontal scrollbar from the board onto the document.
+            `overflow-x: auto` used to force that minimum to zero as a
+            side effect of being a scroll container. `min-w-0` says it
+            directly, so the board stays the thing that scrolls sideways and
+            `main` is not a scrollport.
+          */}
+          <main className="min-w-0 flex-1 p-6" data-testid="app-main">
             {children}
           </main>
         </div>

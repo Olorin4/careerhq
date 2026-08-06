@@ -3,10 +3,11 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicationState, ReplyClassification } from "@careerhq/contracts";
-import { Badge, type BadgeTone } from "../../../components/badge.js";
+import { Badge } from "../../../components/badge.js";
 import { Button } from "../../../components/button.js";
 import { EmptyState } from "../../../components/empty-state.js";
 import { Row } from "../../../components/row.js";
+import { classificationTone } from "../../../lib/application-state.js";
 import { formatTimestamp } from "../../../lib/time.js";
 import { acceptSuggestionAction, dismissSuggestionAction } from "./actions.js";
 
@@ -28,18 +29,6 @@ export interface SuggestionListItem {
 
 function humanize(s: string): string {
   return s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");
-}
-
-/**
- * `interview`/`offer` read as `ok` (the outcome the applicant wants), a
- * `rejection` as `bad`; anything else (e.g. an acknowledgement) is `neutral`
- * — none of these are "in progress" or "needs you", so `info`/`warn` don't
- * apply to a classification badge.
- */
-function classificationTone(classification: ReplyClassification): BadgeTone {
-  if (classification === "interview" || classification === "offer") return "ok";
-  if (classification === "rejection") return "bad";
-  return "neutral";
 }
 
 export function SuggestionQueue({ suggestions }: { suggestions: SuggestionListItem[] }) {

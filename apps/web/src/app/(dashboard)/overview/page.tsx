@@ -3,7 +3,7 @@ import { listApplications, jobs as jobsTable, companies as companiesTable } from
 import { APPLICATION_STATES } from "@careerhq/contracts";
 import { getDb } from "../../../lib/db.js";
 import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
-import { formatDate } from "../../../lib/time.js";
+import { DUE_SOON_WINDOW_MS, formatDate } from "../../../lib/time.js";
 import { STATE_TONE } from "../../../lib/application-state.js";
 import { Badge, type BadgeTone } from "../../../components/badge.js";
 import { Card } from "../../../components/card.js";
@@ -31,7 +31,9 @@ const TONE_TEXT: Record<BadgeTone, string> = {
 
 export default async function OverviewPage() {
   const now = Date.now();
-  const soon = now + 3 * 24 * 60 * 60 * 1000;
+  // The same window the sidebar's `due` badge counts against — see
+  // DUE_SOON_WINDOW_MS.
+  const soon = now + DUE_SOON_WINDOW_MS;
 
   // One snapshot for the whole page: the state counts below are counts OF the
   // applications resolved here, and a demo reset committing between the two

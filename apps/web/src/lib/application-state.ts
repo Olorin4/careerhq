@@ -1,4 +1,6 @@
-import type { ApplicationState, ApprovalState, AttemptStatus } from "@careerhq/contracts";
+import type {
+  ApplicationState, ApprovalState, AttemptStatus, ReplyClassification,
+} from "@careerhq/contracts";
 import type { BadgeTone } from "../components/badge.js";
 
 /**
@@ -19,10 +21,16 @@ import type { BadgeTone } from "../components/badge.js";
  * applicant's own reversible choice, not a failure, so it stays neutral
  * rather than bad.
  *
- * The canonical copy: `/overview` (`overview/page.tsx`) and the applications
- * board (`applications/board.tsx`) both import this rather than keeping their
- * own tables, so the mapping can't drift between the two places that render
- * it (see Task 6's `OFFER` fix, made once here instead of twice).
+ * The canonical copy: `/overview` (`overview/page.tsx`), the applications
+ * board (`applications/board.tsx`), the detail page's status card and — via
+ * {@link classificationTone} — `/inbox`'s reply badges all import this rather
+ * than keeping their own tables, so the mapping can't drift between the
+ * places that render it. It did drift once: Task 6's `OFFER: ok → warn` fix
+ * was made here, while `/inbox` kept a hand-written copy that still read
+ * `ok`, so the same event was green in the mail queue and amber on the board
+ * (final branch review, Finding 3). `classificationTone` below is now derived
+ * from this table rather than restating it, and `application-state.test.ts`
+ * asserts the two agree.
  */
 export const STATE_TONE: Record<ApplicationState, BadgeTone> = {
   DISCOVERED: "neutral",
@@ -37,6 +45,34 @@ export const STATE_TONE: Record<ApplicationState, BadgeTone> = {
   WITHDRAWN: "neutral",
   EXPIRED: "bad",
 };
+
+/**
+ * The funnel stage a classified reply is evidence of, for the classifications
+ * that name one. `ack` and `recruiter` are contact without a stage change and
+ * `unrelated` is not evidence of anything, so they map to nothing and read
+ * `neutral`.
+ */
+const CLASSIFICATION_STATE: Partial<Record<ReplyClassification, ApplicationState>> = {
+  interview: "INTERVIEW",
+  offer: "OFFER",
+  rejection: "REJECTED",
+};
+
+/**
+ * Colour for a reply-classification badge on `/inbox` (`inbox/suggestions.tsx`).
+ *
+ * Derived from {@link STATE_TONE} rather than restated as its own table, which
+ * is the whole point: an `offer` reply in the mail queue and the `OFFER` row it
+ * moves on the board are the same event, and they were reading opposite
+ * answers to "who acts next" — green "nothing further needed" here, amber
+ * "needs you" there — because one table was corrected and its copy was not.
+ * Deriving makes the two impossible to disagree; a classification with no
+ * corresponding stage stays `neutral`.
+ */
+export function classificationTone(classification: ReplyClassification): BadgeTone {
+  const state = CLASSIFICATION_STATE[classification];
+  return state ? STATE_TONE[state] : "neutral";
+}
 
 /**
  * Colour per generated-document/answer approval state, shared by
