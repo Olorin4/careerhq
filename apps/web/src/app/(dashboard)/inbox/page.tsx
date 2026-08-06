@@ -60,9 +60,9 @@ export default async function InboxPage() {
   });
 
   return (
-    <main className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <h1 className="text-2xl font-semibold text-ink">Mail</h1>
       <SuggestionQueue suggestions={suggestions} />
-    </main>
+    </div>
   );
 }

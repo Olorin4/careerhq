@@ -50,7 +50,13 @@ export function TransitionButtons({
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap gap-1">
         {targets.map((to) => (
-          <Button key={to} type="button" disabled={isPending} onClick={() => handleClick(to)}>
+          <Button
+            key={to}
+            type="button"
+            size="compact"
+            disabled={isPending}
+            onClick={() => handleClick(to)}
+          >
             {humanize(to)}
           </Button>
         ))}

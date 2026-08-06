@@ -17,9 +17,10 @@ import type { BadgeTone } from "../components/badge.js";
  * instance of the applicant needing to act (accept, negotiate or decline),
  * so `ok` — "done, nothing further needed" — would tell them the opposite
  * of the truth on the row that matters most. It gets the same `warn` as
- * READY_FOR_REVIEW. REJECTED/EXPIRED are refusals (bad); WITHDRAWN is the
- * applicant's own reversible choice, not a failure, so it stays neutral
- * rather than bad.
+ * READY_FOR_REVIEW. REJECTED is a refusal (bad). EXPIRED and WITHDRAWN are
+ * both neutral rather than bad: WITHDRAWN is the applicant's own reversible
+ * choice, not a failure, and EXPIRED is the posting's window closing on its
+ * own — nobody refused anything.
  *
  * The canonical copy: `/overview` (`overview/page.tsx`), the applications
  * board (`applications/board.tsx`), the detail page's status card and — via
@@ -43,7 +44,7 @@ export const STATE_TONE: Record<ApplicationState, BadgeTone> = {
   OFFER: "warn",
   REJECTED: "bad",
   WITHDRAWN: "neutral",
-  EXPIRED: "bad",
+  EXPIRED: "neutral",
 };
 
 /**

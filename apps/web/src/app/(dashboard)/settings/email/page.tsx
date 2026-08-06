@@ -18,7 +18,7 @@ export default async function EmailSettingsPage() {
 
   if (!masterKey) {
     return (
-      <main className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4">
         <h1 className="text-2xl font-semibold text-ink">Email connections</h1>
         <p className="text-sm text-muted">
           Set <code>CAREERHQ_MASTER_KEY</code> to enable mailbox connections. Generate one with:
@@ -26,7 +26,7 @@ export default async function EmailSettingsPage() {
         <pre className="inline-block w-fit rounded-md bg-canvas px-3 py-2 text-sm text-ink">
           {"node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\""}
         </pre>
-      </main>
+      </div>
     );
   }
 
@@ -35,7 +35,7 @@ export default async function EmailSettingsPage() {
   const connections = await readWorkspaceSnapshot(getDb(), (tx, ws) => listEmailConnections(tx, ws.id));
 
   return (
-    <main className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8">
       <h1 className="text-2xl font-semibold text-ink">Email connections</h1>
 
       <Section title="Connections">
@@ -56,6 +56,6 @@ export default async function EmailSettingsPage() {
           <ConnectionForm />
         )}
       </Section>
-    </main>
+    </div>
   );
 }

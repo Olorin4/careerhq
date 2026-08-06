@@ -73,7 +73,7 @@ export default async function JobsPage() {
   }
 
   return (
-    <main className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold text-ink">Discovery inbox</h1>
         <p className="m-0 text-sm text-muted">
@@ -126,6 +126,6 @@ export default async function JobsPage() {
           </div>
         </details>
       )}
-    </main>
+    </div>
   );
 }
