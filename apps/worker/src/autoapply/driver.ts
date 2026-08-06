@@ -14,6 +14,7 @@ import { BUTTON_STEPS_SCRIPT, deriveTotalSteps, EXTRACT_SCRIPT, type ExtractedPa
 import {
   pinnedFetch, resolveNavigationTarget, type ResolvedAddressPolicy,
 } from "./pinned-navigation.js";
+import { startVettingProxy, type VettingProxy } from "./vetting-proxy.js";
 
 export type DriverErrorKind = "navigation" | "timeout" | "fill" | "submit" | "advance";
 
@@ -33,6 +34,23 @@ export interface BrowserSession {
   /** A fresh page; the caller closes it. Exposed so Task 11 can fake a session. */
   newPage(): Promise<Page>;
   close(): Promise<void>;
+  /**
+   * Point this session's vetting proxy (./vetting-proxy.ts) at the address
+   * policy of the call that is about to drive it — every connection Chromium
+   * makes for itself (the submit POST, every subresource) is judged by it and
+   * pinned to the addresses it approved.
+   *
+   * `capturePage` and `fillAndSubmit` call it with the SAME expression the
+   * navigation guard judges hops with, so the two enforcement points cannot
+   * disagree. Optional because a faked session (Task 11's, the unit suites')
+   * launches no browser and therefore has no proxy to aim; a real session
+   * always has one, and one that is never aimed refuses every internal address.
+   *
+   * The policy is session-wide while it is set, which is sound because a
+   * session drives exactly one capture or one submit: every call site opens a
+   * session, makes one call and closes it.
+   */
+  useAddressPolicy?(policy: ResolvedAddressPolicy): void;
 }
 
 export interface DriverDeps {
@@ -104,6 +122,17 @@ function defaultAddressPolicy(deps: DriverDeps): ResolvedAddressPolicy {
     if (deps.isNavigationAllowed(asAddress.toString())) return true;
     return isInternalHostname(hostname) && deps.isNavigationAllowed(url);
   };
+}
+
+/**
+ * THE address policy for one call — the single expression both enforcement
+ * points read. The navigation guard judges each hop with it; the session's
+ * vetting proxy judges every connection Chromium opens for itself with it. Two
+ * derivations of "which addresses may be connected to" is how the two would
+ * drift apart, so there is one.
+ */
+function addressPolicyFor(deps: DriverDeps): ResolvedAddressPolicy {
+  return deps.isResolvedAddressAllowed ?? defaultAddressPolicy(deps);
 }
 
 export interface SubmitResult {
@@ -222,6 +251,14 @@ async function closeWithinBudget(browser: Browser): Promise<void> {
  * wrapped in a `DriverError`: "there was no room to start a browser" is a
  * different thing from "the browser failed to start", and apps/web turns the
  * two into different outcomes for the user. Both are provably pre-click.
+ *
+ * It is also where the browser is given the only route to the network it is
+ * allowed to have: a loopback vetting proxy (./vetting-proxy.ts) that resolves
+ * every destination itself, judges every address, and dials the addresses it
+ * judged. Playwright launches Chromium with `--proxy-bypass-list=<-loopback>`
+ * alongside `--proxy-server`, so even a request to `127.0.0.1` goes through it
+ * rather than around it. The proxy's lifetime is the session's: it is started
+ * before the launch and closed with the browser.
  */
 export async function openSession(opts: OpenSessionOptions = {}): Promise<BrowserSession> {
   const caller = opts.slot;
@@ -229,12 +266,25 @@ export async function openSession(opts: OpenSessionOptions = {}): Promise<Browse
   // is exactly the bug this parameter exists to prevent.
   const releaseSlot = caller ?? acquireBrowserSlot();
   const releaseOwnSlot = caller ? (): void => undefined : releaseSlot;
+
+  let proxy: VettingProxy;
+  try {
+    proxy = await startVettingProxy();
+  } catch (cause) {
+    releaseOwnSlot();
+    // Same reasoning as a launch failure below: nothing has been navigated, so
+    // this is provably pre-click.
+    throw new DriverError(`could not start the vetting proxy: ${detailOf(cause)}`, "navigation", { cause });
+  }
+
   let browser: Browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, proxy: { server: proxy.server } });
   } catch (cause) {
     // The slot goes back before the throw: a browser that never started must
-    // not hold the process's only one for the rest of its life.
+    // not hold the process's only one for the rest of its life. So does the
+    // proxy's port.
+    await proxy.close();
     releaseOwnSlot();
     // NOT via driverError: a launch has no click to be ambiguous about, so
     // even a launch TIMEOUT must stay provably pre-click ("navigation"), not
@@ -244,13 +294,19 @@ export async function openSession(opts: OpenSessionOptions = {}): Promise<Browse
   }
   return {
     newPage: () => browser.newPage(),
+    useAddressPolicy: (policy) => proxy.setPolicy(policy),
     // `finally`, so a close that throws still frees the slot — otherwise one
     // wedged Chromium would refuse every later visitor for the process's life.
+    // Nested, so a proxy that fails to close does not strand the slot either.
     close: async () => {
       try {
         await closeWithinBudget(browser);
       } finally {
-        releaseOwnSlot();
+        try {
+          await proxy.close();
+        } finally {
+          releaseOwnSlot();
+        }
       }
     },
   };
@@ -347,10 +403,17 @@ interface NavigationGuard {
  * by the post-navigation backstop in `capturePage`/`fillAndSubmit` instead —
  * later than we would like, which is why it is stated here rather than left
  * silent.
+ *
+ * They are, however, PINNED — as is every subresource. Not here: the
+ * connection Chromium makes for them goes through the session's vetting proxy
+ * (./vetting-proxy.ts), which resolves the name once, judges every address by
+ * `addressPolicyFor(deps)` — this function's own `isAddressAllowed` — and dials
+ * one of exactly those. Nothing is replayed to achieve that; the proxy is on
+ * the live connection, not beside it.
  */
 async function installNavigationGuard(page: Page, deps: DriverDeps): Promise<NavigationGuard> {
   const guard: NavigationGuard = { refused: null, refusedBecause: null, redirectTo: null };
-  const isAddressAllowed = deps.isResolvedAddressAllowed ?? defaultAddressPolicy(deps);
+  const isAddressAllowed = addressPolicyFor(deps);
 
   const refuse = async (url: string, because: string, route: { abort: (code: string) => Promise<void> }): Promise<void> => {
     guard.refused = url;
@@ -389,9 +452,11 @@ async function installNavigationGuard(page: Page, deps: DriverDeps): Promise<Nav
     }
 
     if (request.method() !== "GET" || request.frame() !== page.mainFrame()) {
-      // Checked and resolution-checked, but Chromium makes this connection
-      // itself and resolves the name again to do it — see the module header of
-      // ./pinned-navigation.ts for why replaying a POST here is worse.
+      // Chromium makes this connection itself — replaying a POST here to take
+      // it away from the browser is the trade this project keeps refusing (see
+      // ./pinned-navigation.ts's header). What it no longer lacks is the pin:
+      // the connection goes through the session's vetting proxy, which resolves
+      // and dials it in this process under the same address policy.
       await route.continue();
       return;
     }
@@ -513,6 +578,9 @@ export async function capturePage(session: BrowserSession, url: string, deps: Dr
   // Before a page is opened, not merely before it is navigated: a refused
   // target must cost nothing and leave nothing behind.
   assertNavigable(url, deps);
+  // …and before anything can be requested: every connection the browser makes
+  // for itself — subresources here — is judged by this call's address policy.
+  session.useAddressPolicy?.(addressPolicyFor(deps));
   const page = await session.newPage();
   page.setDefaultTimeout(deps.timeoutMs);
   try {
@@ -839,6 +907,9 @@ async function readConfirmationId(page: Page, pageText: string): Promise<string 
 export async function fillAndSubmit(session: BrowserSession, args: FillAndSubmitArgs): Promise<SubmitResult> {
   const { url, form, answers, files, deps } = args;
   assertNavigable(url, deps);
+  // The submit POST is the connection this covers: Chromium opens it, and the
+  // vetting proxy is where it is resolved, judged and dialled.
+  session.useAddressPolicy?.(addressPolicyFor(deps));
   const page = await session.newPage();
   page.setDefaultTimeout(deps.timeoutMs);
 

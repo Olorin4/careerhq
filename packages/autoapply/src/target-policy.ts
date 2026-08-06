@@ -387,7 +387,12 @@ export function refuseCaptureTarget(rawUrl: string, policy: CaptureTargetPolicy)
  * allow-list, every resolved address is judged.
  *
  * Callers pass this to the driver as `DriverDeps.isResolvedAddressAllowed`; the
- * driver then connects to the addresses it judged and nothing else.
+ * driver then connects to the addresses it judged and nothing else — in both
+ * of the places a connection can be made. Its own in-process fetch pins a
+ * main-frame GET, and the same predicate is handed to the session's vetting
+ * proxy (`apps/worker/src/autoapply/vetting-proxy.ts`), which is where every
+ * connection Chromium makes for itself — the submit POST, every subresource —
+ * is resolved, judged and dialled.
  */
 export function allowsResolvedAddress(
   rawUrl: string,
