@@ -1,6 +1,9 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { Button } from "../../../components/button.js";
+import { Card } from "../../../components/card.js";
+import { CONTROL_CLASSES, Field } from "../../../components/field.js";
 import { createApplicationAction } from "./actions.js";
 
 /**
@@ -21,41 +24,60 @@ export function NewApplicationForm() {
   const typed = state?.values ?? {};
 
   return (
-    <form action={submit} className="new-application-form">
-      <h2>Log application</h2>
-      <label>
-        Company
-        <input name="companyName" type="text" required defaultValue={typed.companyName ?? ""} />
-      </label>
-      <label>
-        Job title
-        <input name="jobTitle" type="text" required defaultValue={typed.jobTitle ?? ""} />
-      </label>
-      <label>
-        Job URL
-        <input name="jobUrl" type="url" defaultValue={typed.jobUrl ?? ""} />
-      </label>
-      <label>
-        Notes
-        <textarea name="notes" defaultValue={typed.notes ?? ""} />
-      </label>
-      <label className="new-application-form-checkbox">
-        <input
-          name="external"
-          type="checkbox"
-          checked={external}
-          onChange={(e) => setExternal(e.target.checked)}
-        />
-        Already applied elsewhere
-      </label>
-      {external && (
-        <label>
-          Submitted on
-          <input name="submittedAt" type="date" required defaultValue={typed.submittedAt ?? ""} />
+    <Card className="max-w-lg">
+      <form action={submit} className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-ink">Log application</h2>
+        <Field label="Company">
+          <input
+            name="companyName" type="text" required defaultValue={typed.companyName ?? ""}
+            className={CONTROL_CLASSES}
+          />
+        </Field>
+        <Field label="Job title">
+          <input
+            name="jobTitle" type="text" required defaultValue={typed.jobTitle ?? ""}
+            className={CONTROL_CLASSES}
+          />
+        </Field>
+        <Field label="Job URL">
+          <input
+            name="jobUrl" type="url" defaultValue={typed.jobUrl ?? ""}
+            className={CONTROL_CLASSES}
+          />
+        </Field>
+        <Field label="Notes">
+          <textarea
+            name="notes" defaultValue={typed.notes ?? ""}
+            className={CONTROL_CLASSES}
+          />
+        </Field>
+        {/* A checkbox doesn't fit `Field` — it stacks label above control,
+            which draws an empty label line over a lone tickbox. Composed
+            inline instead; see `field.tsx`'s `CONTROL_CLASSES` comment. */}
+        <label className="flex items-center gap-2 text-sm text-ink">
+          <input
+            name="external"
+            type="checkbox"
+            checked={external}
+            onChange={(e) => setExternal(e.target.checked)}
+          />
+          Already applied elsewhere
         </label>
-      )}
-      <button type="submit">Log application</button>
-      {state && <p className="form-error">Not logged — {state.reason}.</p>}
-    </form>
+        {external && (
+          <Field label="Submitted on">
+            <input
+              name="submittedAt" type="date" required defaultValue={typed.submittedAt ?? ""}
+              className={CONTROL_CLASSES}
+            />
+          </Field>
+        )}
+        <Button type="submit" tone="primary" className="self-start">Log application</Button>
+        {state && (
+          <p className="m-0 text-sm text-bad" role="alert">
+            Not logged — {state.reason}.
+          </p>
+        )}
+      </form>
+    </Card>
   );
 }

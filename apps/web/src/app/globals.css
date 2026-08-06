@@ -24,18 +24,6 @@ html[data-sidebar-collapsed="true"] [data-testid="sidebar"] {
   overflow: hidden;
 }
 
-/*
- * The refusal line for the forms that grew one when their actions stopped
- * returning `void` — new application, new fact, fact row, watchlist row. Same
- * red and size as the per-panel error classes further down (.cv-error,
- * .settings-form-error, …); shared rather than copied four more times.
- */
-.form-error {
-  color: #b00020;
-  margin: 0;
-  font-size: 0.85rem;
-}
-
 body {
   margin: 0;
   font-family:
@@ -47,28 +35,4 @@ body {
     Arial,
     sans-serif;
   line-height: 1.5;
-}
-
-.new-application-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  max-width: 480px;
-  margin-bottom: 2rem;
-  padding: 1rem;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-}
-
-.new-application-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
-}
-
-.new-application-form-checkbox {
-  flex-direction: row !important;
-  align-items: center;
-  gap: 0.5rem !important;
 }
