@@ -1,4 +1,4 @@
-import type { ApplicationState } from "@careerhq/contracts";
+import type { ApplicationState, ApprovalState, AttemptStatus } from "@careerhq/contracts";
 import type { BadgeTone } from "../components/badge.js";
 
 /**
@@ -36,4 +36,48 @@ export const STATE_TONE: Record<ApplicationState, BadgeTone> = {
   REJECTED: "bad",
   WITHDRAWN: "neutral",
   EXPIRED: "bad",
+};
+
+/**
+ * Colour per generated-document/answer approval state, shared by
+ * `[id]/materials.tsx` and `[id]/qa.tsx` (both use the same `approval_state`
+ * enum — see `packages/db/src/schema/index.ts`, one Postgres enum for both
+ * tables). `draft` is neutral rather than `warn` on its own: a manually
+ * written draft that is merely unreviewed is not yet anyone's problem to fix,
+ * only AI origin *combined with* draft gets the page's dedicated
+ * "AI-generated — not yet approved" `warn` badge (see `badge-ai-draft` in
+ * `materials.tsx`, and its Q&A-panel counterpart in `qa.tsx`).
+ */
+export const APPROVAL_TONE: Record<ApprovalState, BadgeTone> = {
+  draft: "neutral",
+  approved: "ok",
+  rejected: "bad",
+};
+
+/**
+ * Colour per submission-attempt status (`ATTEMPT_STATUSES` in
+ * `@careerhq/contracts`), shared by `[id]/site-panel.tsx` and
+ * `[id]/email-panel.tsx` — both drive the same attempt lifecycle through two
+ * different channels and previously kept two byte-identical copies of this
+ * mapping. `READY`/`SUBMITTING` are the pipeline working (info, matching the
+ * spec's own SUBMITTING example); `PENDING_CONFIRMATION` is the one status
+ * the *live* `Countdown` renders instead of a badge, but it still needs a
+ * tone for the attempt-history list once the token itself is gone from
+ * memory (a reload) — `warn`, because a countdown mid-flight is, by
+ * definition, still waiting on the user. `BLOCKED` is a pause the user must
+ * clear (login wall, duplicate requisition, …), not a failure, so it is also
+ * `warn` rather than `bad`. `NEEDS_RECONCILE` is rendered through the
+ * dedicated `ReconcilePanel` wherever it appears in full, never through this
+ * map alone — the `warn` value here only colours the compact inline status
+ * badge that sits beside that panel.
+ */
+export const ATTEMPT_TONE: Record<AttemptStatus, BadgeTone> = {
+  DRAFT: "neutral",
+  READY: "info",
+  PENDING_CONFIRMATION: "warn",
+  SUBMITTING: "info",
+  SUBMITTED: "ok",
+  FAILED: "bad",
+  BLOCKED: "warn",
+  NEEDS_RECONCILE: "warn",
 };

@@ -21,13 +21,16 @@ export function Badge({
   tone,
   children,
   testId,
+  title,
 }: {
   tone: BadgeTone;
   children: ReactNode;
   testId?: string;
+  /** An optional native tooltip — e.g. explaining why a sensitivity lock badge is there. */
+  title?: string;
 }): JSX.Element {
   return (
-    <span className={`${BASE} ${TONE_CLASSES[tone]}`} data-testid={testId}>
+    <span className={`${BASE} ${TONE_CLASSES[tone]}`} data-testid={testId} title={title}>
       {children}
     </span>
   );

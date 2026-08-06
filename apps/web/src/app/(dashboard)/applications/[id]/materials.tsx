@@ -4,7 +4,12 @@ import { useActionState, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DOCUMENT_KINDS, type DocumentKind } from "@careerhq/contracts";
 import type { GeneratedDocument } from "@careerhq/db";
+import { Badge } from "../../../../components/badge.js";
+import { Button } from "../../../../components/button.js";
+import { CONTROL_CLASSES, Field } from "../../../../components/field.js";
 import { ProvenanceChips } from "../../../../components/provenance-chips.js";
+import { Section } from "../../../../components/section.js";
+import { APPROVAL_TONE } from "../../../../lib/application-state.js";
 import type { GenerationOutcome } from "../../../../lib/generation.js";
 import { REPLAY_MISS, replayMissMessage } from "../../../../lib/replay-miss.js";
 import { formatTimestamp } from "../../../../lib/time.js";
@@ -41,25 +46,27 @@ export function Materials({
   applicationId, documents, factClaims, aiAvailable, replayDemo,
 }: MaterialsProps) {
   return (
-    <section className="materials">
-      <h2>Materials</h2>
-      {DOCUMENT_KINDS.map((kind) => (
-        <MaterialSection
-          key={kind}
-          applicationId={applicationId}
-          kind={kind}
-          // `documents` is ordered newest-first across all kinds (see
-          // listDocuments), so the first match for a kind is its latest version.
-          document={documents.find((d) => d.kind === kind) ?? null}
-          factClaims={factClaims}
-          aiAvailable={aiAvailable}
-          replayDemo={replayDemo}
-        />
-      ))}
-    </section>
+    <Section title="Materials">
+      <div className="flex flex-col gap-4">
+        {DOCUMENT_KINDS.map((kind) => (
+          <MaterialSection
+            key={kind}
+            applicationId={applicationId}
+            kind={kind}
+            // `documents` is ordered newest-first across all kinds (see
+            // listDocuments), so the first match for a kind is its latest version.
+            document={documents.find((d) => d.kind === kind) ?? null}
+            factClaims={factClaims}
+            aiAvailable={aiAvailable}
+            replayDemo={replayDemo}
+          />
+        ))}
+      </div>
+    </Section>
   );
 }
 
+/** The shared "the pipeline refused, here's why, here's the way out" treatment — matches `qa.tsx`'s `OutcomePane`. */
 function OutcomePane({ outcome, replayDemo }: { outcome: GenerationOutcome; replayDemo: boolean }) {
   switch (outcome.status) {
     case "ok":
@@ -68,35 +75,42 @@ function OutcomePane({ outcome, replayDemo }: { outcome: GenerationOutcome; repl
       return null;
     case "needs_facts":
       return (
-        <div className="materials-needs-facts" data-testid="materials-needs-facts">
-          <p>Not enough verified facts to generate this confidently:</p>
-          <ul>
+        <div
+          className="flex flex-col gap-2 rounded-md border-l-4 border-warn bg-warn-soft p-3 text-sm text-ink"
+          data-testid="materials-needs-facts"
+        >
+          <p className="m-0 font-medium">Not enough verified facts to generate this confidently:</p>
+          <ul className="m-0 flex flex-col gap-1 pl-5">
             {outcome.reasons.map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
           </ul>
-          <p>
-            <a href="/facts">Add a verified fact</a>, or write a draft manually below.
+          <p className="m-0">
+            <a href="/facts" className="font-medium text-ink underline">Add a verified fact</a>, or write a draft
+            manually below.
           </p>
         </div>
       );
     case "sensitive_blocked":
       return (
-        <p className="materials-error">
-          This touches a sensitive topic ({outcome.matchedTerms.join(", ")}) — please write it
-          manually below.
+        <p className="m-0 text-sm text-bad" role="alert">
+          This touches a sensitive topic ({outcome.matchedTerms.join(", ")}) — please write it manually below.
         </p>
       );
     case "ai_unavailable":
-      return <p className="materials-manual-note">AI is not configured — write a manual draft below.</p>;
+      return <p className="m-0 text-sm text-soft italic">AI is not configured — write a manual draft below.</p>;
     case "failed":
       // `replay_miss` is an internal token, not something to put in front of a
       // stranger: on the hosted demo it is the expected answer for a prompt
       // nobody recorded, so it is explained rather than printed.
       if (replayDemo && outcome.error === REPLAY_MISS) {
-        return <p className="materials-manual-note">{replayMissMessage("document")}</p>;
+        return <p className="m-0 text-sm text-soft italic">{replayMissMessage("document")}</p>;
       }
-      return <p className="materials-error">Generation failed: {outcome.error}</p>;
+      return (
+        <p className="m-0 text-sm text-bad" role="alert">
+          Generation failed: {outcome.error}
+        </p>
+      );
   }
 }
 
@@ -223,83 +237,105 @@ function MaterialSection({
     });
   }
 
+  // The AI-generated-and-not-yet-approved warning is the design vocabulary's
+  // own named example of `warn` — a distinct badge from the general approval
+  // badge below it, which stays `neutral` for every draft regardless of who
+  // wrote it (see `APPROVAL_TONE`).
+  const aiDraft = document?.origin === "ai" && document.approval === "draft";
+
   return (
-    <div className="materials-section" data-testid="materials-section">
-      <h3>{KIND_LABELS[kind]}</h3>
+    <div
+      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-card"
+      data-testid="materials-section"
+    >
+      <h3 className="m-0 text-sm font-semibold text-ink">{KIND_LABELS[kind]}</h3>
 
       {document ? (
-        <div className="materials-doc">
-          <div className="materials-doc-meta">
-            {document.origin === "ai" && document.approval === "draft" && (
-              <span className="badge badge-ai-draft" data-testid="badge-ai-draft">AI-generated — not yet approved</span>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {aiDraft && (
+              <Badge tone="warn" testId="badge-ai-draft">AI-generated — not yet approved</Badge>
             )}
-            <span className="badge">{humanize(document.approval)}</span>
-            <span className="materials-doc-date">{formatTimestamp(document.createdAt)}</span>
+            <Badge tone={APPROVAL_TONE[document.approval]}>{humanize(document.approval)}</Badge>
+            <span className="text-xs text-soft">{formatTimestamp(document.createdAt)}</span>
           </div>
-          <pre className="materials-doc-content">{document.contentMd}</pre>
+          <pre className="m-0 whitespace-pre-wrap rounded-md border border-line bg-canvas p-3 font-sans text-sm text-ink">
+            {document.contentMd}
+          </pre>
           <ProvenanceChips factIds={document.sourceFactIds} factClaims={factClaims} />
-          <div className="materials-doc-actions" data-testid="materials-doc-actions">
-            <button
+          <div className="flex gap-2" data-testid="materials-doc-actions">
+            <Button
               type="button"
+              tone="primary"
               disabled={isPending || document.approval === "approved"}
               onClick={handleApprove}
             >
               Approve
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               disabled={isPending || document.approval === "rejected"}
               onClick={handleReject}
             >
               Reject
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
-        <p className="materials-empty">No draft yet.</p>
+        <p className="m-0 text-sm text-soft">No draft yet.</p>
       )}
-      {error && <p className="materials-error">{error}</p>}
+      {error && (
+        <p className="m-0 text-sm text-bad" role="alert">
+          {error}
+        </p>
+      )}
 
-      <div className="materials-generate">
+      <div className="flex flex-col gap-2">
         {aiAvailable ? (
           <>
-            <button type="button" disabled={streaming} onClick={handleGenerate}>
-              {streaming ? "Generating…" : "Generate with AI"}
-            </button>
+            <div>
+              <Button type="button" disabled={streaming} onClick={handleGenerate}>
+                {streaming ? "Generating…" : "Generate with AI"}
+              </Button>
+            </div>
             {streaming && (
-              <div className="materials-stream">
+              <div className="rounded-md border border-dashed border-line bg-canvas p-3 text-sm text-ink">
                 {fellBack && (
-                  <p className="materials-fallback-note">
+                  <p className="m-0 mb-2 text-xs text-warn">
                     Streaming model unavailable — retrying without streaming…
                   </p>
                 )}
-                <pre>{streamText || "Waiting for model…"}</pre>
+                <pre className="m-0 whitespace-pre-wrap font-sans">{streamText || "Waiting for model…"}</pre>
               </div>
             )}
             {outcome && <OutcomePane outcome={outcome} replayDemo={replayDemo} />}
           </>
         ) : (
-          <p className="materials-manual-note">
+          <p className="m-0 text-xs text-soft italic">
             AI generation is not configured for this workspace — write a manual draft below.
           </p>
         )}
       </div>
 
-      <form action={saveManualDraft} className="materials-manual-form">
+      <form action={saveManualDraft} className="flex flex-col gap-2 border-t border-line pt-3">
         <input type="hidden" name="applicationId" value={applicationId} />
         <input type="hidden" name="kind" value={kind} />
-        <label>
-          Manual draft
+        <Field label="Manual draft">
           <textarea
             name="content"
             defaultValue={manualDraft?.content ?? (document?.origin === "user" ? document.contentMd : "")}
             rows={6}
             required
+            className={CONTROL_CLASSES}
           />
-        </label>
-        <button type="submit">Save manual draft</button>
+        </Field>
+        <div>
+          <Button type="submit">Save manual draft</Button>
+        </div>
         {manualDraft && (
-          <p className="materials-error">Not saved — {manualDraft.reason}. Your draft is still here; try again.</p>
+          <p className="m-0 text-sm text-bad" role="alert">
+            Not saved — {manualDraft.reason}. Your draft is still here; try again.
+          </p>
         )}
       </form>
     </div>

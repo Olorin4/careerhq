@@ -5,13 +5,15 @@ export function Section({
   title,
   action,
   children,
+  testId,
 }: {
   title: string;
   action?: ReactNode;
   children: ReactNode;
+  testId?: string;
 }): JSX.Element {
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-3" data-testid={testId}>
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-ink">{title}</h2>
         {action ? <div>{action}</div> : null}

@@ -12,6 +12,14 @@ import type { ApplicationAttempt, CvVariant, FormSnapshot, SiteAttemptDraft } fr
 import type { PrepareOutcome, SiteConfirmOutcome, SitePreviewOutcome } from "../../../../lib/site-submission.js";
 import { safeExternalHref } from "../../../../lib/safe-url.js";
 import { formatTimestamp } from "../../../../lib/time.js";
+import { Badge, type BadgeTone } from "../../../../components/badge.js";
+import { Button } from "../../../../components/button.js";
+import { CONTROL_CLASSES, Field } from "../../../../components/field.js";
+import { Countdown } from "../../../../components/countdown.js";
+import { OutcomePanel } from "../../../../components/outcome-panel.js";
+import { ReconcilePanel } from "../../../../components/reconcile-panel.js";
+import { Section } from "../../../../components/section.js";
+import { ATTEMPT_TONE } from "../../../../lib/application-state.js";
 import { resolveReconcileAction } from "./email-actions.js";
 import {
   confirmAndSubmitSiteAction, prepareSiteApplicationAction, previewSiteSubmissionAction,
@@ -76,6 +84,23 @@ const SOURCE_LABELS: Record<AnswerSource, string> = {
   document: "Document",
 };
 
+/**
+ * Colour per answer source: a verified fact, a reused prior answer, a
+ * profile field or a source document are all the applicant's own vetted
+ * data (`ok`); an AI guess is exactly the design vocabulary's
+ * "AI-generated — not yet approved" example (`warn`); a value the user
+ * typed themselves is neither verified-and-done nor pending review, so it
+ * stays `neutral`.
+ */
+const SOURCE_TONE: Record<AnswerSource, BadgeTone> = {
+  fact: "ok",
+  saved_answer: "ok",
+  profile: "ok",
+  document: "ok",
+  ai: "warn",
+  user: "neutral",
+};
+
 const plannedAnswersSchema = z.array(plannedAnswerSchema);
 
 function humanize(value: string): string {
@@ -96,13 +121,6 @@ function parseSnapshot(
   const answers = plannedAnswersSchema.safeParse(snapshot.plannedAnswers);
   if (!form.success || !answers.success) return null;
   return { id: snapshot.id, form: form.data, answers: answers.data };
-}
-
-function statusBadgeClass(status: ApplicationAttempt["status"]): string {
-  if (status === "SUBMITTED") return "badge badge-ok";
-  if (status === "FAILED" || status === "BLOCKED") return "badge badge-error";
-  if (status === "NEEDS_RECONCILE") return "badge badge-reconcile";
-  return "badge";
 }
 
 /** `failureReason` on a blocked attempt is stored as `${kind}: ${detail}` (see `prepareSiteApplication`). */
@@ -150,14 +168,6 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
   const [confirmOutcome, setConfirmOutcome] = useState<SiteConfirmOutcome | null>(null);
   const [retypedTarget, setRetypedTarget] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-
-  // Drives the expiry countdown on the confirm screen; only ticks while a live token is on screen.
-  useEffect(() => {
-    if (!preview) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [preview]);
 
   const readyState: ReadyState | null = useMemo(() => {
     if (prepareOutcome?.status === "ready") {
@@ -260,11 +270,9 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
   const canStartNewAttempt = currentAttempt !== null || !alreadySubmitted;
 
   return (
-    <section className="site-panel" data-testid="site-panel">
-      <h2>Auto-apply (company site)</h2>
-
+    <Section title="Auto-apply (company site)" testId="site-panel">
       {alreadySubmitted && !currentAttempt && (
-        <p className="site-hint">This application already has a submitted attempt.</p>
+        <p className="m-0 text-sm text-muted">This application already has a submitted attempt.</p>
       )}
 
       {confirmOutcome && readyState && (
@@ -279,7 +287,6 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
       {!canStartNewAttempt ? null : preview ? (
         <SitePreviewPane
           preview={preview}
-          now={now}
           retypedTarget={retypedTarget}
           setRetypedTarget={setRetypedTarget}
           isPending={isPending}
@@ -298,9 +305,8 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
           onPreview={handlePreview}
         />
       ) : (
-        <div className="site-url-form">
-          <label>
-            Application page URL
+        <div className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-card">
+          <Field label="Application page URL">
             <input
               type="url"
               value={url}
@@ -308,16 +314,23 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
               disabled={isPending}
               placeholder="https://boards.greenhouse.io/…"
               autoComplete="off"
+              className={CONTROL_CLASSES}
               data-testid="site-url-input"
             />
-          </label>
-          <button type="button" onClick={() => handlePrepare()} disabled={isPending}>
-            {isPending ? "Reading the page…" : "Prepare"}
-          </button>
+          </Field>
+          <div>
+            <Button type="button" tone="primary" onClick={() => handlePrepare()} disabled={isPending}>
+              {isPending ? "Reading the page…" : "Prepare"}
+            </Button>
+          </div>
         </div>
       )}
 
-      {error && <p className="site-error">{error}</p>}
+      {error && (
+        <p className="m-0 text-sm text-bad" role="alert">
+          {error}
+        </p>
+      )}
 
       {!readyState && prepareOutcome && prepareOutcome.status !== "ready" && (
         <PrepareOutcomePane
@@ -329,9 +342,11 @@ export function SitePanel({ applicationId, attempts, latestSnapshot, cvVariantId
         />
       )}
 
-      <h3>Attempt history</h3>
-      <SiteAttemptHistory applicationId={applicationId} attempts={siteAttempts} />
-    </section>
+      <div className="flex flex-col gap-2">
+        <h3 className="m-0 text-sm font-semibold text-ink">Attempt history</h3>
+        <SiteAttemptHistory applicationId={applicationId} attempts={siteAttempts} />
+      </div>
+    </Section>
   );
 }
 
@@ -351,39 +366,47 @@ function PrepareOutcomePane({
   if (outcome.status === "blocked") {
     const safeUrl = safeExternalHref(url.trim());
     return (
-      <div className="site-outcome site-outcome-blocked" data-testid="site-outcome">
-        <p>Paused — {humanize(outcome.kind)}</p>
-        <p>{outcome.detail}</p>
-        <p className="site-outcome-hint">
+      <OutcomePanel tone="warn" testId="site-outcome">
+        <p className="m-0 font-medium">Paused — {humanize(outcome.kind)}</p>
+        <p className="m-0">{outcome.detail}</p>
+        <p className="m-0 text-xs text-muted">
           This is a pause, not a failure: nothing was submitted.{" "}
           {safeUrl && (
-            <a href={safeUrl} target="_blank" rel="noreferrer">Open the application in your browser</a>
+            <a href={safeUrl} target="_blank" rel="noreferrer" className="font-medium text-ink underline">
+              Open the application in your browser
+            </a>
           )}{" "}
           to finish it yourself.{BLOCKER_HINT[outcome.kind] ? ` ${BLOCKER_HINT[outcome.kind]}` : ""}
         </p>
-        <button type="button" onClick={onRetry} disabled={isPending}>
-          {isPending ? "Retrying…" : "Retry prepare"}
-        </button>
-      </div>
+        <div>
+          <Button type="button" onClick={onRetry} disabled={isPending}>
+            {isPending ? "Retrying…" : "Retry prepare"}
+          </Button>
+        </div>
+      </OutcomePanel>
     );
   }
   if (outcome.status === "duplicate") {
     return (
-      <div className="site-outcome site-outcome-blocked" data-testid="site-outcome">
-        <p>A submitted attempt for this requisition already exists.</p>
-        <p>
-          <a href={`/applications/${outcome.existingApplicationId}`}>View the existing application</a>
+      <OutcomePanel tone="warn" testId="site-outcome">
+        <p className="m-0">A submitted attempt for this requisition already exists.</p>
+        <p className="m-0">
+          <a href={`/applications/${outcome.existingApplicationId}`} className="font-medium text-ink underline">
+            View the existing application
+          </a>
         </p>
-        <button type="button" onClick={onOverride} disabled={isPending}>
-          {isPending ? "Applying…" : "Apply anyway"}
-        </button>
-      </div>
+        <div>
+          <Button type="button" onClick={onOverride} disabled={isPending}>
+            {isPending ? "Applying…" : "Apply anyway"}
+          </Button>
+        </div>
+      </OutcomePanel>
     );
   }
   return (
-    <div className="site-outcome site-outcome-failed" data-testid="site-outcome">
-      <p>{outcome.reason}</p>
-    </div>
+    <OutcomePanel tone="bad" testId="site-outcome">
+      <p className="m-0">{outcome.reason}</p>
+    </OutcomePanel>
   );
 }
 
@@ -462,61 +485,78 @@ function ReviewForm({
   const safeReviewUrl = safeExternalHref(reviewUrl);
 
   return (
-    <div className="site-review" data-testid="site-review">
-      <p className="site-review-url">
-        Reviewing {safeReviewUrl ? (
-          <a href={safeReviewUrl} target="_blank" rel="noreferrer">{reviewUrl}</a>
-        ) : (
-          reviewUrl
-        )}
-      </p>
+    <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-4 shadow-card" data-testid="site-review">
+      <div className="flex flex-col gap-1">
+        <p className="m-0 text-sm text-muted">
+          Reviewing {safeReviewUrl ? (
+            <a href={safeReviewUrl} target="_blank" rel="noreferrer" className="font-medium text-ink underline">
+              {reviewUrl}
+            </a>
+          ) : (
+            reviewUrl
+          )}
+        </p>
 
-      <p className="site-cv-line">
-        CV that will be attached: <strong>{attachedVariant ? attachedVariant.label : "No CV variant selected"}</strong>{" "}
-        <a href="#cv-select">change</a>
-      </p>
+        <p className="m-0 text-sm text-ink">
+          CV that will be attached:{" "}
+          <strong>{attachedVariant ? attachedVariant.label : "No CV variant selected"}</strong>{" "}
+          <a href="#cv-select" className="font-medium text-ink underline">change</a>
+        </p>
 
-      <p className="site-summary">
-        {form.fields.length} fields · {blocking.length} need you
-      </p>
+        <p className="m-0 text-sm font-semibold text-ink">
+          {form.fields.length} fields · {blocking.length} need you
+        </p>
+      </div>
 
       {steps.map((step) => (
-        <section key={step} className="site-step" data-testid="site-step">
-          <h4>Step {step + 1} of {form.totalSteps}</h4>
-          <table className="site-field-table">
-            <tbody>
-              {form.fields
-                .filter((f) => f.step === step && f.kind !== "hidden")
-                .map((field) => {
-                  const answer = answerByFieldId.get(field.id);
-                  if (!answer) return null;
-                  return (
-                    <FieldRow
-                      key={field.id}
-                      field={field}
-                      answer={answer}
-                      cvVariants={cvVariants}
-                      onCommit={commitAnswer}
-                      disabled={isPending}
-                    />
-                  );
-                })}
-            </tbody>
-          </table>
+        <section key={step} className="flex flex-col gap-2" data-testid="site-step">
+          <h4 className="m-0 text-sm font-semibold text-ink">Step {step + 1} of {form.totalSteps}</h4>
+          <div className="overflow-x-auto rounded-md border border-line">
+            <table className="w-full border-collapse text-sm">
+              <tbody>
+                {form.fields
+                  .filter((f) => f.step === step && f.kind !== "hidden")
+                  .map((field) => {
+                    const answer = answerByFieldId.get(field.id);
+                    if (!answer) return null;
+                    return (
+                      <FieldRow
+                        key={field.id}
+                        field={field}
+                        answer={answer}
+                        cvVariants={cvVariants}
+                        onCommit={commitAnswer}
+                        disabled={isPending}
+                      />
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
         </section>
       ))}
 
-      {saveError && <p className="site-error">{saveError}</p>}
-
-      <button type="button" onClick={onPreview} disabled={isPending || blocking.length > 0}>
-        {isPending ? "Working…" : "Preview"}
-      </button>
-      {blocking.length > 0 && (
-        <p className="site-hint">Still need you: {blockingLabels.join(", ")}</p>
+      {saveError && (
+        <p className="m-0 text-sm text-bad" role="alert">
+          {saveError}
+        </p>
       )}
+
+      <div className="flex flex-col gap-1">
+        <div>
+          <Button type="button" tone="primary" onClick={onPreview} disabled={isPending || blocking.length > 0}>
+            {isPending ? "Working…" : "Preview"}
+          </Button>
+        </div>
+        {blocking.length > 0 && (
+          <p className="m-0 text-xs text-warn">Still need you: {blockingLabels.join(", ")}</p>
+        )}
+      </div>
     </div>
   );
 }
+
+const FIELD_CELL = "border-b border-line px-3 py-2 align-top";
 
 function FieldRow({
   field, answer, cvVariants, onCommit, disabled,
@@ -537,37 +577,42 @@ function FieldRow({
     return <ConsentFieldRow field={field} answer={answer} cvVariants={cvVariants} onCommit={onCommit} disabled={disabled} />;
   }
 
+  // `isSensitiveField` is a static category (never AI-answerable), independent
+  // of whether THIS row still needs the user right now — a non-stale saved
+  // answer can satisfy it. The lock badge is therefore `info` (a standing
+  // note about the field), kept visually distinct from the `warn` "Needs
+  // your answer" badge below, which only appears when `needsUser` is true.
   const sensitive = isSensitiveField(field);
-  const rowClass = answer.needsUser ? "site-field-row site-field-needs-you" : "site-field-row";
+  const rowClass = answer.needsUser ? "bg-warn-soft" : "";
 
   return (
     <tr className={rowClass} data-testid={answer.needsUser ? "site-field-needs-you" : undefined}>
-      <td className="site-field-label">
+      <td className={`${FIELD_CELL} w-[22%] font-medium text-ink`}>
         {field.label || field.id}
-        {field.required && <span className="site-field-required" title="Required">*</span>}
+        {field.required && <span className="ml-0.5 text-bad" title="Required">*</span>}
       </td>
-      <td className="site-field-value">
+      <td className={`${FIELD_CELL} w-[30%]`}>
         <FieldInput field={field} answer={answer} cvVariants={cvVariants} onCommit={onCommit} disabled={disabled} />
       </td>
-      <td className="site-field-meta">
-        <span className={`badge site-badge-source-${answer.source}`}>{SOURCE_LABELS[answer.source]}</span>
-        <span className="site-field-confidence">{Math.round(answer.confidence * 100)}%</span>
-        {sensitive && (
-          <span className="badge badge-sensitivity" data-testid="badge-sensitivity" title="CareerHQ never fills this automatically">
-            🔒 Sensitive
-          </span>
-        )}
-        {answer.needsUser && <span className="badge site-badge-needs-you">Needs your answer</span>}
-        {answer.differsFromApproved && (
-          <span className="badge site-badge-differs">Differs from approved</span>
-        )}
-        {answer.note && <span className="site-field-note">{answer.note}</span>}
+      <td className={FIELD_CELL}>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge tone={SOURCE_TONE[answer.source]}>{SOURCE_LABELS[answer.source]}</Badge>
+          <span className="text-xs text-soft">{Math.round(answer.confidence * 100)}%</span>
+          {sensitive && (
+            <Badge tone="info" testId="badge-sensitivity" title="CareerHQ never fills this automatically">
+              🔒 Sensitive
+            </Badge>
+          )}
+          {answer.needsUser && <Badge tone="warn">Needs your answer</Badge>}
+          {answer.differsFromApproved && <Badge tone="warn">Differs from approved</Badge>}
+          {answer.note && <span className="basis-full text-xs italic text-muted">{answer.note}</span>}
+        </div>
       </td>
-      <td className="site-field-actions">
+      <td className={FIELD_CELL}>
         {field.kind !== "file" && !field.required && (
-          <button type="button" onClick={() => onCommit(field.id, "")} disabled={disabled}>
+          <Button type="button" tone="ghost" onClick={() => onCommit(field.id, "")} disabled={disabled}>
             Skip / leave blank
-          </button>
+          </Button>
         )}
       </td>
     </tr>
@@ -591,49 +636,44 @@ function ConsentFieldRow({
   onCommit: (fieldId: string, value: string) => void;
   disabled: boolean;
 }) {
-  const rowClass = answer.needsUser
-    ? "site-field-row site-field-consent site-field-needs-you"
-    : "site-field-row site-field-consent";
+  const rowClass = answer.needsUser ? "bg-warn-soft" : "";
   const rowTestId = answer.needsUser ? "site-field-consent site-field-needs-you" : "site-field-consent";
 
   return (
     <tr className={rowClass} data-testid={rowTestId}>
-      <td className="site-field-consent-cell" colSpan={4}>
-        <p className="site-field-consent-statement">
-          {field.label || field.id}
-          {field.required && <span className="site-field-required" title="Required">*</span>}
-        </p>
-        <p className="site-field-consent-copy">{CONSENT_COPY}</p>
-        <ConsentControl field={field} answer={answer} cvVariants={cvVariants} onCommit={onCommit} disabled={disabled} />
-        {/*
-          Declining is an ANSWER, not an omission, and it must not require
-          tick-then-untick to express. This commits exactly what the untick path
-          commits — "" — so a declined row and an untouched one are the same
-          bytes in the fingerprinted payload, both readable as "no consent
-          given". Optional rows only: a required consent field cannot be cleared
-          and still previewed, so offering it there would be a dead button.
-        */}
-        {!field.required && (
-          <button
-            type="button"
-            className="site-consent-decline"
-            onClick={() => onCommit(field.id, "")}
-            disabled={disabled}
-          >
-            Decline / leave unticked
-          </button>
-        )}
-        <div className="site-field-meta">
-          <span className={`badge site-badge-source-${answer.source}`}>{SOURCE_LABELS[answer.source]}</span>
-          <span className="site-field-confidence">{Math.round(answer.confidence * 100)}%</span>
-          {answer.needsUser && <span className="badge site-badge-needs-you">Needs your answer</span>}
-          {answer.differsFromApproved && (
-            <span className="badge site-badge-differs">Differs from approved</span>
+      <td className={`${FIELD_CELL} border-l-4 border-anchor`} colSpan={4}>
+        <div className="flex flex-col gap-2">
+          <p className="m-0 font-semibold text-ink">
+            {field.label || field.id}
+            {field.required && <span className="ml-0.5 text-bad" title="Required">*</span>}
+          </p>
+          <p className="m-0 text-xs italic text-muted">{CONSENT_COPY}</p>
+          <ConsentControl field={field} answer={answer} cvVariants={cvVariants} onCommit={onCommit} disabled={disabled} />
+          {/*
+            Declining is an ANSWER, not an omission, and it must not require
+            tick-then-untick to express. This commits exactly what the untick path
+            commits — "" — so a declined row and an untouched one are the same
+            bytes in the fingerprinted payload, both readable as "no consent
+            given". Optional rows only: a required consent field cannot be cleared
+            and still previewed, so offering it there would be a dead button.
+          */}
+          {!field.required && (
+            <div>
+              <Button type="button" tone="ghost" onClick={() => onCommit(field.id, "")} disabled={disabled}>
+                Decline / leave unticked
+              </Button>
+            </div>
           )}
-          {/* The planner's CONSENT_NOTE ("you must answer this yourself for each
-              application") lands here — the row's own explanation of why no
-              saved answer was reused. */}
-          {answer.note && <span className="site-field-note">{answer.note}</span>}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge tone={SOURCE_TONE[answer.source]}>{SOURCE_LABELS[answer.source]}</Badge>
+            <span className="text-xs text-soft">{Math.round(answer.confidence * 100)}%</span>
+            {answer.needsUser && <Badge tone="warn">Needs your answer</Badge>}
+            {answer.differsFromApproved && <Badge tone="warn">Differs from approved</Badge>}
+            {/* The planner's CONSENT_NOTE ("you must answer this yourself for each
+                application") lands here — the row's own explanation of why no
+                saved answer was reused. */}
+            {answer.note && <span className="text-xs italic text-muted">{answer.note}</span>}
+          </div>
         </div>
       </td>
     </tr>
@@ -651,6 +691,11 @@ function ConsentFieldRow({
  * fingerprinted payload, both readable as "no consent given".
  *
  * Non-checkbox consent fields (criminal_history selects/text) keep the ordinary FieldInput.
+ *
+ * Native `<label>` + `<input type="checkbox">`, unchanged from before this
+ * screen's redesign: this is what makes the control reachable by Tab and
+ * operable with Space alone, with no `onClick`/`tabIndex` reimplementation to
+ * get wrong.
  */
 function ConsentControl({
   field, answer, cvVariants, onCommit, disabled,
@@ -663,7 +708,7 @@ function ConsentControl({
 }) {
   if (field.kind === "checkbox") {
     return (
-      <label className="site-consent-checkbox">
+      <label className="flex items-center gap-2 text-sm font-medium text-ink">
         <input
           type="checkbox"
           checked={answer.value === "true"}
@@ -693,10 +738,14 @@ function FieldInput({
     // is a CV — a different file field (e.g. `cover_letter_file`) has no CV to show and
     // must not be mislabeled "No CV attached".
     const variant = answer.value ? cvVariants.find((v) => v.id === answer.value) : undefined;
-    if (variant) return <span>{variant.label}</span>;
-    if (field.canonicalField === "resume_file") return <span>No CV attached</span>;
-    if (answer.value) return <span>{answer.value}</span>;
-    return <span>{answer.needsUser ? "No file attached yet — attach this in your browser" : "No file attached"}</span>;
+    if (variant) return <span className="text-sm text-ink">{variant.label}</span>;
+    if (field.canonicalField === "resume_file") return <span className="text-sm text-soft">No CV attached</span>;
+    if (answer.value) return <span className="text-sm text-ink">{answer.value}</span>;
+    return (
+      <span className="text-sm text-soft">
+        {answer.needsUser ? "No file attached yet — attach this in your browser" : "No file attached"}
+      </span>
+    );
   }
   if (field.kind === "checkbox") {
     return (
@@ -710,7 +759,12 @@ function FieldInput({
   }
   if (field.kind === "select" || field.kind === "radio") {
     return (
-      <select value={answer.value} onChange={(e) => onCommit(field.id, e.target.value)} disabled={disabled}>
+      <select
+        value={answer.value}
+        onChange={(e) => onCommit(field.id, e.target.value)}
+        disabled={disabled}
+        className={CONTROL_CLASSES}
+      >
         <option value="">— Select —</option>
         {field.options.map((opt) => (
           <option key={opt.value} value={opt.value}>{opt.label || opt.value}</option>
@@ -726,6 +780,7 @@ function FieldInput({
         value={[...selected]}
         onChange={(e) => onCommit(field.id, [...e.target.selectedOptions].map((o) => o.value).join(","))}
         disabled={disabled}
+        className={CONTROL_CLASSES}
       >
         {field.options.map((opt) => (
           <option key={opt.value} value={opt.value}>{opt.label || opt.value}</option>
@@ -767,6 +822,7 @@ function TextLikeInput({
         onChange={(e) => setValue(e.target.value)}
         onBlur={commitIfChanged}
         disabled={disabled}
+        className={CONTROL_CLASSES}
         data-testid="site-field-textarea"
       />
     );
@@ -778,15 +834,15 @@ function TextLikeInput({
       onChange={(e) => setValue(e.target.value)}
       onBlur={commitIfChanged}
       disabled={disabled}
+      className={CONTROL_CLASSES}
     />
   );
 }
 
 function SitePreviewPane({
-  preview, now, retypedTarget, setRetypedTarget, isPending, onBack, onConfirm,
+  preview, retypedTarget, setRetypedTarget, isPending, onBack, onConfirm,
 }: {
   preview: Preview;
-  now: number;
   retypedTarget: string;
   setRetypedTarget: (value: string) => void;
   isPending: boolean;
@@ -795,20 +851,25 @@ function SitePreviewPane({
 }) {
   const { payload } = preview;
   return (
-    <div className="site-preview" data-testid="site-preview">
-      <h3>Review before submitting</h3>
-      <dl className="site-preview-fields" data-testid="site-preview-fields">
-        <dt>Site</dt>
-        <dd>{payload.host}</dd>
-        <dt>Requisition</dt>
-        <dd><code>{payload.requisitionKey}</code></dd>
-        <dt>Answers</dt>
-        <dd>{payload.answers.length} fields</dd>
+    <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-4 shadow-card" data-testid="site-preview">
+      <h3 className="m-0 text-sm font-semibold text-ink">Review before submitting</h3>
+      <dl
+        className="m-0 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-sm"
+        data-testid="site-preview-fields"
+      >
+        <dt className="font-medium text-muted">Site</dt>
+        <dd className="m-0 text-ink">{payload.host}</dd>
+        <dt className="font-medium text-muted">Requisition</dt>
+        <dd className="m-0 text-ink"><code>{payload.requisitionKey}</code></dd>
+        <dt className="font-medium text-muted">Answers</dt>
+        <dd className="m-0 text-ink">{payload.answers.length} fields</dd>
         {payload.attachments.length > 0 && (
           <>
-            <dt>{payload.attachments.length === 1 ? "Attachment" : "Attachments"}</dt>
-            <dd>
-              <ul className="site-preview-attachments">
+            <dt className="font-medium text-muted">
+              {payload.attachments.length === 1 ? "Attachment" : "Attachments"}
+            </dt>
+            <dd className="m-0 text-ink">
+              <ul className="m-0 flex flex-col gap-0.5 pl-4">
                 {payload.attachments.map((attachment) => (
                   <li key={attachment.fieldId}>
                     {attachment.filename} — sha256 <code>{attachment.sha256.slice(0, 12)}…</code>
@@ -818,43 +879,47 @@ function SitePreviewPane({
             </dd>
           </>
         )}
-        <dt>Fingerprint</dt>
-        <dd><code>{preview.fingerprint.slice(0, 16)}…</code></dd>
-        <dt>Expires</dt>
-        <dd><ExpiryCountdown expiresAt={preview.expiresAt} now={now} /></dd>
+        <dt className="font-medium text-muted">Fingerprint</dt>
+        <dd className="m-0 text-ink"><code>{preview.fingerprint.slice(0, 16)}…</code></dd>
+        <dt className="font-medium text-muted">Expires</dt>
+        <dd className="m-0 text-ink tabular-nums">
+          <Countdown expiresAt={preview.expiresAt} />
+        </dd>
       </dl>
+      <p className="m-0 text-xs text-muted">If this expires, go back and preview again.</p>
 
-      <label className="site-retype-label">
-        Type the site&apos;s host ({payload.host}) exactly to confirm submitting
+      <Field label={`Type the site's host (${payload.host}) exactly to confirm submitting`}>
         <input
           type="text"
           value={retypedTarget}
           onChange={(e) => setRetypedTarget(e.target.value)}
           disabled={isPending}
           autoComplete="off"
+          className={CONTROL_CLASSES}
           data-testid="site-retype-input"
         />
-      </label>
+      </Field>
 
-      <div className="site-preview-actions">
-        <button type="button" onClick={onBack} disabled={isPending}>Back to edit</button>
-        <button type="button" onClick={onConfirm} disabled={isPending || retypedTarget.trim().length === 0}>
+      <div className="flex gap-2">
+        <Button type="button" onClick={onBack} disabled={isPending}>Back to edit</Button>
+        {/*
+          The one `irreversible`-toned control on this entire page: this is
+          the click that touches the outside world (the real company site)
+          and cannot be undone. Its colour must be the single reason a user
+          can tell it apart from "Back to edit" before reading either label —
+          see tokens.css's own reservation note on `--irreversible`.
+        */}
+        <Button
+          type="button"
+          tone="irreversible"
+          onClick={onConfirm}
+          disabled={isPending || retypedTarget.trim().length === 0}
+        >
           {isPending ? "Submitting…" : "Confirm and submit"}
-        </button>
+        </Button>
       </div>
     </div>
   );
-}
-
-function ExpiryCountdown({ expiresAt, now }: { expiresAt: string; now: number }) {
-  const remainingMs = Math.max(0, new Date(expiresAt).getTime() - now);
-  if (remainingMs <= 0) {
-    return <span className="site-expired">Expired — go back and preview again</span>;
-  }
-  const totalSeconds = Math.floor(remainingMs / 1000);
-  const mm = Math.floor(totalSeconds / 60);
-  const ss = String(totalSeconds % 60).padStart(2, "0");
-  return <span>{mm}:{ss}</span>;
 }
 
 function SiteConfirmOutcomePane({
@@ -869,61 +934,65 @@ function SiteConfirmOutcomePane({
     case "submitted": {
       const safeFinalUrl = safeExternalHref(outcome.finalUrl);
       return (
-        <div className="site-outcome site-outcome-submitted" data-testid="site-outcome">
-          <p>Submitted — confirmation <code>{outcome.confirmationId ?? "(none reported by the site)"}</code></p>
-          <p>
+        <OutcomePanel tone="ok" testId="site-outcome">
+          <p className="m-0">
+            Submitted — confirmation <code>{outcome.confirmationId ?? "(none reported by the site)"}</code>
+          </p>
+          <p className="m-0">
             {safeFinalUrl ? (
-              <a href={safeFinalUrl} target="_blank" rel="noreferrer">{outcome.finalUrl}</a>
+              <a href={safeFinalUrl} target="_blank" rel="noreferrer" className="font-medium text-ink underline">
+                {outcome.finalUrl}
+              </a>
             ) : (
               outcome.finalUrl
             )}
           </p>
           {outcome.screenshotPath && (
-            <p className="site-outcome-hint">Evidence saved to <code>{outcome.screenshotPath}</code></p>
+            <p className="m-0 text-xs text-muted">Evidence saved to <code>{outcome.screenshotPath}</code></p>
           )}
-        </div>
+        </OutcomePanel>
       );
     }
     case "blocked":
       return (
-        <div className="site-outcome site-outcome-blocked" data-testid="site-outcome">
-          <p>Blocked ({outcome.code}): {outcome.reason}</p>
+        <OutcomePanel tone="warn" testId="site-outcome">
+          <p className="m-0">Blocked ({outcome.code}): {outcome.reason}</p>
           {outcome.code === "gate_closed" && (
-            <p className="site-outcome-hint">
+            <p className="m-0 text-xs text-muted">
               Live company-site submission is off. Set <code>SUBMISSIONS_LIVE_COMPANY_SITE=true</code> to
               enable submitting.
             </p>
           )}
           {outcome.code === "sandbox_blocked" && (
-            <p className="site-outcome-hint">
+            <p className="m-0 text-xs text-muted">
               Sandbox workspaces may only submit to the host named by <code>SANDBOX_SITE_ALLOWED_HOST</code>.
             </p>
           )}
           {outcome.code === "application_not_ready" && (
-            <p className="site-outcome-hint">
+            <p className="m-0 text-xs text-muted">
               This application is no longer in a state that can be submitted from. Re-typing the host
               won&apos;t fix this — use the transition buttons above to walk it back to Ready for review,
               then confirm again.
             </p>
           )}
           {outcome.code === "driver_unavailable" && (
-            <p className="site-outcome-hint">
+            <p className="m-0 text-xs text-muted">
               The auto-apply browser isn&apos;t available in this process right now — this is a pause, not a
               failure: nothing was typed into the form. Try confirming again shortly.
             </p>
           )}
           {outcome.code === "review_required" && (
-            <p className="site-outcome-hint">
+            <p className="m-0 text-xs text-muted">
               Go back to the review screen, settle every field still needing you, then preview again.
             </p>
           )}
-        </div>
+        </OutcomePanel>
       );
     case "failed":
       return (
-        <div className="site-outcome site-outcome-failed" data-testid="site-outcome">
-          <p>Submission failed: {outcome.reason}</p>
-        </div>
+        <OutcomePanel tone="bad" testId="site-outcome">
+          <p className="m-0">Submission failed: {outcome.reason}</p>
+        </OutcomePanel>
       );
     case "needs_reconcile":
       return (
@@ -970,33 +1039,43 @@ function SiteReconcilePane({
   }
 
   return (
-    <div className="site-outcome site-outcome-reconcile" data-testid="site-outcome">
-      <p>Needs reconciliation: {reason}</p>
-      <p className="site-outcome-hint">
-        The submission&apos;s outcome is uncertain — check the site directly and the stored screenshot, then
-        resolve manually.
-      </p>
-      <label>
-        Evidence note (optional)
-        <input type="text" value={note} onChange={(e) => setNote(e.target.value)} disabled={isPending} />
-      </label>
-      <div className="site-reconcile-actions">
-        <button type="button" disabled={isPending} onClick={() => resolve("submitted")}>
-          Mark submitted (with evidence note)
-        </button>
-        <button type="button" disabled={isPending} onClick={() => resolve("failed")}>
-          Mark failed
-        </button>
-      </div>
-      {error && <p className="site-error">{error}</p>}
+    <div data-testid="site-outcome">
+      <ReconcilePanel reason={reason}>
+        <p className="m-0 text-xs text-muted">
+          The submission&apos;s outcome is uncertain — check the site directly and the stored screenshot, then
+          resolve manually.
+        </p>
+        <Field label="Evidence note (optional)">
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            disabled={isPending}
+            className={CONTROL_CLASSES}
+          />
+        </Field>
+        <div className="flex gap-2">
+          <Button type="button" disabled={isPending} onClick={() => resolve("submitted")}>
+            Mark submitted (with evidence note)
+          </Button>
+          <Button type="button" disabled={isPending} onClick={() => resolve("failed")}>
+            Mark failed
+          </Button>
+        </div>
+        {error && (
+          <p className="m-0 text-sm text-bad" role="alert">
+            {error}
+          </p>
+        )}
+      </ReconcilePanel>
     </div>
   );
 }
 
 function SiteAttemptHistory({ applicationId, attempts }: { applicationId: string; attempts: ApplicationAttempt[] }) {
-  if (attempts.length === 0) return <p className="site-empty">No auto-apply attempts yet.</p>;
+  if (attempts.length === 0) return <p className="m-0 text-sm text-soft">No auto-apply attempts yet.</p>;
   return (
-    <ul className="site-attempt-list">
+    <ul className="m-0 flex list-none flex-col gap-2 p-0">
       {[...attempts].reverse().map((attempt) => (
         <SiteAttemptRow key={attempt.id} applicationId={applicationId} attempt={attempt} />
       ))}
@@ -1013,16 +1092,24 @@ function SiteAttemptRow({ applicationId, attempt }: { applicationId: string; att
 
   return (
     <li
-      className={highlighted ? "site-attempt-row site-attempt-row-reconcile" : "site-attempt-row"}
+      className="flex flex-col gap-1.5 rounded-lg border border-line bg-surface p-3 shadow-card"
       data-testid="site-attempt-row"
     >
-      <div className="site-attempt-meta">
-        <span className={statusBadgeClass(attempt.status)}>{humanize(attempt.status)}</span>
-        <span className="site-attempt-date">{formatTimestamp(attempt.startedAt)}</span>
-        {draft?.url && <span className="site-attempt-url">{draft.url}</span>}
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={ATTEMPT_TONE[attempt.status]}>{humanize(attempt.status)}</Badge>
+        <span className="text-xs text-soft">{formatTimestamp(attempt.startedAt)}</span>
+        {draft?.url && <span className="text-xs text-muted">{draft.url}</span>}
       </div>
-      {blocked && <p className="site-error">{humanize(blocked.kind)}: {blocked.detail}</p>}
-      {!blocked && attempt.failureReason && <p className="site-error">{attempt.failureReason}</p>}
+      {blocked && (
+        <p className="m-0 text-sm text-bad" role="alert">
+          {humanize(blocked.kind)}: {blocked.detail}
+        </p>
+      )}
+      {!blocked && attempt.failureReason && (
+        <p className="m-0 text-sm text-bad" role="alert">
+          {attempt.failureReason}
+        </p>
+      )}
       {highlighted && (
         <SiteReconcilePane
           applicationId={applicationId}
