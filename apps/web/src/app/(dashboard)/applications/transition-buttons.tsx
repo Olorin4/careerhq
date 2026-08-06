@@ -4,12 +4,22 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicationState } from "@careerhq/contracts";
 import { legalTargets } from "@careerhq/core";
+import { Button } from "../../../components/button.js";
 import { transitionApplicationAction } from "./actions.js";
 
 function humanize(state: string): string {
   return state.charAt(0) + state.slice(1).toLowerCase().replace(/_/g, " ");
 }
 
+/**
+ * Every `user`-triggerable edge out of a state (`legalTargets(state, "user")`)
+ * is an internal record change — SUBMITTED only ever arrives via the
+ * confirmed-attempt trigger the auto-apply driver uses, never from this
+ * button row. Nothing here sends, submits, or deletes anything outside
+ * CareerHQ, so every button stays the `default` tone; `irreversible` is
+ * reserved for controls that do (see `[id]/site-panel.tsx`'s own confirm
+ * step).
+ */
 export function TransitionButtons({
   applicationId,
   state,
@@ -37,15 +47,19 @@ export function TransitionButtons({
   }
 
   return (
-    <div className="board-card-actions">
-      <div className="board-card-buttons">
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap gap-1">
         {targets.map((to) => (
-          <button key={to} type="button" disabled={isPending} onClick={() => handleClick(to)}>
+          <Button key={to} type="button" disabled={isPending} onClick={() => handleClick(to)}>
             {humanize(to)}
-          </button>
+          </Button>
         ))}
       </div>
-      {error && <p className="board-card-error">{error}</p>}
+      {error && (
+        <p className="m-0 text-xs text-bad" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

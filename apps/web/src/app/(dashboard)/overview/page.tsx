@@ -1,9 +1,10 @@
 import { inArray } from "drizzle-orm";
 import { listApplications, jobs as jobsTable, companies as companiesTable } from "@careerhq/db";
-import { APPLICATION_STATES, type ApplicationState } from "@careerhq/contracts";
+import { APPLICATION_STATES } from "@careerhq/contracts";
 import { getDb } from "../../../lib/db.js";
 import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
 import { formatDate } from "../../../lib/time.js";
+import { STATE_TONE } from "../../../lib/application-state.js";
 import { Badge, type BadgeTone } from "../../../components/badge.js";
 import { Card } from "../../../components/card.js";
 import { EmptyState } from "../../../components/empty-state.js";
@@ -19,38 +20,6 @@ export const dynamic = "force-dynamic";
 function humanize(state: string): string {
   return state.charAt(0) + state.slice(1).toLowerCase().replace(/_/g, " ");
 }
-
-/**
- * Colour per funnel stage, following the design spec's own vocabulary table
- * (`docs/superpowers/specs/2026-08-05-ui-design-system-design.md`): who acts
- * next, not how the stage "feels". DISCOVERED needs nobody yet (neutral);
- * SHORTLISTED/PREPARING are the pipeline working automatically (info);
- * READY_FOR_REVIEW is one stage that is, by name, waiting on the applicant
- * (warn — the spec's own "needs you" reading); SUBMITTED/ACKNOWLEDGED/
- * INTERVIEW are confirmed progress with the applicant's part done and
- * nothing outstanding from them right now (ok, matching the spec's own
- * "SUBMITTED … confirmed receipt" example). OFFER is deliberately NOT
- * grouped with those three: it is the funnel's single highest-stakes
- * instance of the applicant needing to act (accept, negotiate or decline),
- * so `ok` — "done, nothing further needed" — would tell them the opposite
- * of the truth on the row that matters most. It gets the same `warn` as
- * READY_FOR_REVIEW. REJECTED/EXPIRED are refusals (bad); WITHDRAWN is the
- * applicant's own reversible choice, not a failure, so it stays neutral
- * rather than bad.
- */
-const STATE_TONE: Record<ApplicationState, BadgeTone> = {
-  DISCOVERED: "neutral",
-  SHORTLISTED: "info",
-  PREPARING: "info",
-  READY_FOR_REVIEW: "warn",
-  SUBMITTED: "ok",
-  ACKNOWLEDGED: "ok",
-  INTERVIEW: "ok",
-  OFFER: "warn",
-  REJECTED: "bad",
-  WITHDRAWN: "neutral",
-  EXPIRED: "bad",
-};
 
 const TONE_TEXT: Record<BadgeTone, string> = {
   neutral: "text-muted",
