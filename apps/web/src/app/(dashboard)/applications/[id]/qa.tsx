@@ -3,7 +3,12 @@
 import { useActionState, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicationAnswer } from "@careerhq/db";
+import { Badge } from "../../../../components/badge.js";
+import { Button } from "../../../../components/button.js";
+import { CONTROL_CLASSES, Field } from "../../../../components/field.js";
 import { ProvenanceChips } from "../../../../components/provenance-chips.js";
+import { Section } from "../../../../components/section.js";
+import { APPROVAL_TONE } from "../../../../lib/application-state.js";
 import { REPLAY_MISS, replayMissMessage } from "../../../../lib/replay-miss.js";
 import { formatTimestamp } from "../../../../lib/time.js";
 import {
@@ -24,6 +29,7 @@ interface QaPanelProps {
   replayDemo: boolean;
 }
 
+/** Matches `materials.tsx`'s `OutcomePane` — the same refusal vocabulary for the same shape of outcome. */
 function OutcomePane({ result, replayDemo }: { result: AskQuestionResult; replayDemo: boolean }) {
   const { outcome } = result;
   switch (outcome.status) {
@@ -34,33 +40,34 @@ function OutcomePane({ result, replayDemo }: { result: AskQuestionResult; replay
       return null;
     case "needs_facts":
       return (
-        <div className="qa-needs-facts">
-          <p>Not enough verified facts to answer this confidently:</p>
-          <ul>
+        <div className="flex flex-col gap-2 rounded-md border-l-4 border-warn bg-warn-soft p-3 text-sm text-ink">
+          <p className="m-0 font-medium">Not enough verified facts to answer this confidently:</p>
+          <ul className="m-0 flex flex-col gap-1 pl-5">
             {outcome.reasons.map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
           </ul>
-          <p>
-            <a href="/facts">Add a verified fact</a>, or answer manually below.
+          <p className="m-0">
+            <a href="/facts" className="font-medium text-ink underline">Add a verified fact</a>, or answer manually
+            below.
           </p>
         </div>
       );
     case "sensitive_blocked":
       return (
-        <p className="qa-error">
-          This question is sensitive (matched: {outcome.matchedTerms.join(", ")}) — CareerHQ never
-          AI-answers it. Answer manually below.
+        <p className="m-0 text-sm text-bad" role="alert">
+          This question is sensitive (matched: {outcome.matchedTerms.join(", ")}) — CareerHQ never AI-answers it.
+          Answer manually below.
         </p>
       );
     case "ai_unavailable":
       return (
         <>
-          <p className="qa-manual-note">AI is not configured — answer manually below.</p>
+          <p className="m-0 text-sm text-soft italic">AI is not configured — answer manually below.</p>
           {result.rulesetSensitive && (
-            <p className="qa-error">
-              This looks sensitive (matched: {result.rulesetSensitive.matchedTerms.join(", ")}) —
-              CareerHQ will never AI-answer it, even once AI is configured. Answer manually below.
+            <p className="m-0 text-sm text-bad" role="alert">
+              This looks sensitive (matched: {result.rulesetSensitive.matchedTerms.join(", ")}) — CareerHQ will
+              never AI-answer it, even once AI is configured. Answer manually below.
             </p>
           )}
         </>
@@ -70,9 +77,13 @@ function OutcomePane({ result, replayDemo }: { result: AskQuestionResult; replay
       // *normal* outcome for anything but the recorded question — see
       // `lib/replay-miss.ts`.
       if (replayDemo && outcome.error === REPLAY_MISS) {
-        return <p className="qa-manual-note">{replayMissMessage("question")}</p>;
+        return <p className="m-0 text-sm text-soft italic">{replayMissMessage("question")}</p>;
       }
-      return <p className="qa-error">Could not answer: {outcome.error}</p>;
+      return (
+        <p className="m-0 text-sm text-bad" role="alert">
+          Could not answer: {outcome.error}
+        </p>
+      );
   }
 }
 
@@ -94,11 +105,13 @@ function ManualAnswerForm({
   // survives on its own.
   const [saveState, saveManualAnswer] = useActionState(saveManualAnswerAction, null);
   return (
-    <form action={saveManualAnswer} className="qa-manual-form">
+    <form
+      action={saveManualAnswer}
+      className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-4 shadow-card"
+    >
       <input type="hidden" name="applicationId" value={applicationId} />
       <input type="hidden" name="sensitivity" value={sensitive ? "sensitive" : "normal"} />
-      <label>
-        Question
+      <Field label="Question">
         <input
           type="text"
           name="question"
@@ -106,15 +119,19 @@ function ManualAnswerForm({
           onChange={(e) => onQuestionChange(e.target.value)}
           minLength={3}
           required
+          className={CONTROL_CLASSES}
         />
-      </label>
-      <label>
-        Answer
-        <textarea name="answer" defaultValue={saveState?.answer ?? ""} rows={4} required />
-      </label>
-      <button type="submit">Save manual answer</button>
+      </Field>
+      <Field label="Answer">
+        <textarea name="answer" defaultValue={saveState?.answer ?? ""} rows={4} required className={CONTROL_CLASSES} />
+      </Field>
+      <div>
+        <Button type="submit">Save manual answer</Button>
+      </div>
       {saveState && (
-        <p className="qa-error">Not saved — {saveState.reason}. Your answer is still here; try again.</p>
+        <p className="m-0 text-sm text-bad" role="alert">
+          Not saved — {saveState.reason}. Your answer is still here; try again.
+        </p>
       )}
     </form>
   );
@@ -134,26 +151,34 @@ function AnswerRow({
   onReject: (id: string) => void;
 }) {
   const [reusable, setReusable] = useState(false);
+  // Same combined-badge reasoning as materials.tsx's `aiDraft`: this is the
+  // design vocabulary's own "AI-generated — not yet approved" example,
+  // distinct from the general (always-neutral) origin label below it. No
+  // `data-testid` here deliberately — `[data-testid="badge-sensitivity"]`
+  // two rows down is one of the 36 hooks `capture-demo-media.ts` depends on,
+  // scoped to `site-panel.tsx`'s own sensitivity badge; this row never
+  // carries that hook (see the file's own note on the carried hazard).
+  const aiDraft = answer.origin === "ai" && answer.approval === "draft";
+
   return (
-    <li className="qa-answer-row">
-      <p className="qa-answer-question">
-        <strong>{answer.questionRaw}</strong>
-      </p>
-      <p className="qa-answer-text">{answer.answer}</p>
-      <div className="qa-answer-meta">
-        <span className="badge">{humanize(answer.origin)}</span>
-        <span className="badge">{humanize(answer.approval)}</span>
+    <li className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-4 shadow-card">
+      <p className="m-0 text-sm font-semibold text-ink">{answer.questionRaw}</p>
+      <p className="m-0 whitespace-pre-wrap text-sm text-ink">{answer.answer}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        {aiDraft && <Badge tone="warn">AI-generated — not yet approved</Badge>}
+        <Badge tone="neutral">{humanize(answer.origin)}</Badge>
+        <Badge tone={APPROVAL_TONE[answer.approval]}>{humanize(answer.approval)}</Badge>
         {answer.sensitivity === "sensitive" && (
-          <span className="badge badge-sensitivity">Sensitive</span>
+          <Badge tone="info" title="CareerHQ never AI-answers this">🔒 Sensitive</Badge>
         )}
-        <span className="qa-answer-date">{formatTimestamp(answer.createdAt)}</span>
+        <span className="text-xs text-soft">{formatTimestamp(answer.createdAt)}</span>
       </div>
       {answer.origin === "ai" && (
         <ProvenanceChips factIds={answer.sourceFactIds} factClaims={factClaims} />
       )}
       {answer.approval === "draft" && (
-        <div className="qa-answer-actions">
-          <label className="qa-reusable-checkbox">
+        <div className="flex flex-wrap items-center gap-3 border-t border-line pt-2">
+          <label className="flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={reusable}
@@ -161,12 +186,12 @@ function AnswerRow({
             />
             Reusable
           </label>
-          <button type="button" disabled={isPending} onClick={() => onApprove(answer.id, reusable)}>
+          <Button type="button" tone="primary" disabled={isPending} onClick={() => onApprove(answer.id, reusable)}>
             Approve
-          </button>
-          <button type="button" disabled={isPending} onClick={() => onReject(answer.id)}>
+          </Button>
+          <Button type="button" disabled={isPending} onClick={() => onReject(answer.id)}>
             Reject
-          </button>
+          </Button>
         </div>
       )}
     </li>
@@ -221,25 +246,33 @@ export function QaPanel({ applicationId, answers, factClaims, replayDemo }: QaPa
     : false;
 
   return (
-    <section className="qa">
-      <h2>Questions &amp; answers</h2>
-      <form className="qa-ask-form" onSubmit={handleAsk}>
-        <label>
-          Question
+    <Section title="Questions & answers">
+      <form
+        className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-4 shadow-card"
+        onSubmit={handleAsk}
+      >
+        <Field label="Question">
           <input
             type="text"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             minLength={3}
             required
+            className={CONTROL_CLASSES}
           />
-        </label>
-        <button type="submit" disabled={isPending || question.trim().length < 3}>
-          {isPending ? "Asking…" : "Ask"}
-        </button>
+        </Field>
+        <div>
+          <Button type="submit" tone="primary" disabled={isPending || question.trim().length < 3}>
+            {isPending ? "Asking…" : "Ask"}
+          </Button>
+        </div>
       </form>
 
-      {error && <p className="qa-error">{error}</p>}
+      {error && (
+        <p className="m-0 text-sm text-bad" role="alert">
+          {error}
+        </p>
+      )}
       {result && <OutcomePane result={result} replayDemo={replayDemo} />}
 
       <ManualAnswerForm
@@ -249,19 +282,22 @@ export function QaPanel({ applicationId, answers, factClaims, replayDemo }: QaPa
         sensitive={sensitive}
       />
 
-      <ul className="qa-answer-list">
-        {answers.map((answer) => (
-          <AnswerRow
-            key={answer.id}
-            answer={answer}
-            factClaims={factClaims}
-            isPending={isPending}
-            onApprove={handleApprove}
-            onReject={handleReject}
-          />
-        ))}
-      </ul>
-      {answers.length === 0 && <p className="qa-empty">No questions answered yet.</p>}
-    </section>
+      {answers.length === 0 ? (
+        <p className="m-0 text-sm text-soft">No questions answered yet.</p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-3 p-0">
+          {answers.map((answer) => (
+            <AnswerRow
+              key={answer.id}
+              answer={answer}
+              factClaims={factClaims}
+              isPending={isPending}
+              onApprove={handleApprove}
+              onReject={handleReject}
+            />
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }

@@ -1,5 +1,8 @@
 "use client";
 import { useActionState } from "react";
+import { Button } from "../../../components/button.js";
+import { Card } from "../../../components/card.js";
+import { CONTROL_CLASSES, Field } from "../../../components/field.js";
 import { uploadCvAction, type CvUploadState } from "./actions.js";
 
 /**
@@ -49,30 +52,34 @@ export function CvUploadForm({ formats, sizeLimit }: {
   );
 
   return (
-    <form action={upload} className="cv-form">
-      <h2>Upload CV</h2>
-      <label>
-        Label
-        <input name="label" type="text" required defaultValue={state?.label ?? ""} />
-      </label>
-      <label>
-        Format
-        <select name="format" required defaultValue={formats[0]?.value}>
-          {formats.map((format) => (
-            <option key={format.value} value={format.value}>
-              {format.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        PDF file
-        <input name="file" type="file" accept="application/pdf" required />
-      </label>
-      <button type="submit">Upload</button>
-      {state && (
-        <p className="cv-error">Not uploaded — {state.reason}. Choose the file again to retry.</p>
-      )}
-    </form>
+    <Card className="max-w-lg">
+      <form action={upload} className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-ink">Upload CV</h2>
+        <Field label="Label">
+          <input
+            name="label" type="text" required defaultValue={state?.label ?? ""}
+            className={CONTROL_CLASSES}
+          />
+        </Field>
+        <Field label="Format">
+          <select name="format" required defaultValue={formats[0]?.value} className={CONTROL_CLASSES}>
+            {formats.map((format) => (
+              <option key={format.value} value={format.value}>
+                {format.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="PDF file">
+          <input name="file" type="file" accept="application/pdf" required className={CONTROL_CLASSES} />
+        </Field>
+        <Button type="submit" tone="primary" className="self-start">Upload</Button>
+        {state && (
+          <p className="text-sm text-bad" role="alert">
+            Not uploaded — {state.reason}. Choose the file again to retry.
+          </p>
+        )}
+      </form>
+    </Card>
   );
 }

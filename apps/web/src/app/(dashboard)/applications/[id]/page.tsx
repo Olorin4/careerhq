@@ -7,7 +7,10 @@ import {
   type ApplicationAttempt,
 } from "@careerhq/db";
 import { loadConfig } from "@careerhq/config";
+import { Badge } from "../../../../components/badge.js";
+import { Card } from "../../../../components/card.js";
 import { getDb } from "../../../../lib/db.js";
+import { STATE_TONE } from "../../../../lib/application-state.js";
 import { safeExternalHref } from "../../../../lib/safe-url.js";
 import { formatDate } from "../../../../lib/time.js";
 import { TransitionButtons } from "../transition-buttons.js";
@@ -83,88 +86,119 @@ export default async function ApplicationDetailPage({
   const latestSiteSnapshot = currentSiteAttempt ? await getLatestSnapshot(db, currentSiteAttempt.id) : null;
 
   return (
-    <main>
-      <h1>
-        {company?.name ?? "?"} · {job.title}
-      </h1>
-      {job.url && (
-        <p>
-          {safeJobUrl ? (
-            <a href={safeJobUrl} target="_blank" rel="noreferrer">
-              {job.url}
-            </a>
-          ) : (
-            job.url
+    <main className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-semibold text-ink">
+          {company?.name ?? "?"} · {job.title}
+        </h1>
+        {job.url && (
+          <p className="m-0 mt-1 text-sm text-muted">
+            {safeJobUrl ? (
+              <a href={safeJobUrl} target="_blank" rel="noreferrer" className="font-medium text-ink underline">
+                {job.url}
+              </a>
+            ) : (
+              job.url
+            )}
+          </p>
+        )}
+      </div>
+
+      {/*
+        Two columns, per the spec: a main scroll (materials, screening Q&A,
+        auto-apply, email — the depth this screen exists to show) plus a
+        sticky rail (status, computed next action, timeline) that stays
+        visible while the main column scrolls past it. The rail reuses the
+        shell's own `--sidebar-top-offset` CSS var (set by the root layout's
+        blocking script, see `layout.tsx`) so it settles below the demo
+        banner exactly like `Sidebar` does, rather than duplicating that
+        offset logic a third time.
+      */}
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          <CvSelect
+            applicationId={application.id}
+            cvVariantId={application.cvVariantId}
+            variants={cvVariants}
+          />
+
+          <Materials
+            applicationId={application.id}
+            documents={documents}
+            factClaims={factClaims}
+            aiAvailable={aiAvailable}
+            replayDemo={replayDemo}
+          />
+
+          <QaPanel
+            applicationId={application.id}
+            answers={answers}
+            factClaims={factClaims}
+            replayDemo={replayDemo}
+          />
+
+          <SitePanel
+            applicationId={application.id}
+            attempts={attempts}
+            latestSnapshot={latestSiteSnapshot}
+            cvVariantId={application.cvVariantId}
+            cvVariants={cvVariants}
+          />
+
+          <EmailPanel
+            applicationId={application.id}
+            connections={emailConnections}
+            attempts={emailAttempts}
+            documents={documents}
+            cvVariantId={application.cvVariantId}
+            cvVariants={cvVariants}
+          />
+
+          <Messages messages={messages} />
+        </div>
+
+        <aside className="flex w-full flex-col gap-4 lg:sticky lg:top-[var(--sidebar-top-offset,0px)] lg:w-72 lg:shrink-0">
+          <Card className="flex flex-col gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted">Status</span>
+            <Badge tone={STATE_TONE[application.state]}>{humanize(application.state)}</Badge>
+            <TransitionButtons applicationId={application.id} state={application.state} />
+          </Card>
+
+          {(application.nextAction || application.notes) && (
+            <Card className="flex flex-col gap-3">
+              {application.nextAction && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted">Next action</span>
+                  <p className="m-0 text-sm text-ink">{application.nextAction}</p>
+                  {application.nextActionDue && (
+                    <p className="m-0 text-xs text-muted">Due {formatDate(application.nextActionDue)}</p>
+                  )}
+                </div>
+              )}
+              {application.notes && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted">Notes</span>
+                  <p className="m-0 text-sm text-ink">{application.notes}</p>
+                </div>
+              )}
+            </Card>
           )}
-        </p>
-      )}
-      <p>
-        State: <strong>{humanize(application.state)}</strong>
-      </p>
-      {application.nextAction && (
-        <p>
-          Next action: {application.nextAction}
-          {application.nextActionDue
-            ? ` — due ${formatDate(application.nextActionDue)}`
-            : ""}
-        </p>
-      )}
-      {application.notes && (
-        <p>
-          Notes: {application.notes}
-        </p>
-      )}
-      <TransitionButtons applicationId={application.id} state={application.state} />
 
-      <CvSelect
-        applicationId={application.id}
-        cvVariantId={application.cvVariantId}
-        variants={cvVariants}
-      />
-
-      <Materials
-        applicationId={application.id}
-        documents={documents}
-        factClaims={factClaims}
-        aiAvailable={aiAvailable}
-        replayDemo={replayDemo}
-      />
-
-      <QaPanel
-        applicationId={application.id}
-        answers={answers}
-        factClaims={factClaims}
-        replayDemo={replayDemo}
-      />
-
-      <EmailPanel
-        applicationId={application.id}
-        connections={emailConnections}
-        attempts={emailAttempts}
-        documents={documents}
-        cvVariantId={application.cvVariantId}
-        cvVariants={cvVariants}
-      />
-
-      <SitePanel
-        applicationId={application.id}
-        attempts={attempts}
-        latestSnapshot={latestSiteSnapshot}
-        cvVariantId={application.cvVariantId}
-        cvVariants={cvVariants}
-      />
-
-      <Messages messages={messages} />
-
-      <h2>Event timeline</h2>
-      <ol className="detail-timeline">
-        {events.map((event) => (
-          <li key={event.id}>
-            {event.createdAt.toISOString()} — {event.fromState ?? "·"} → {event.toState} (
-            {event.trigger})
-          </li>
-        ))}
-      </ol>
+          <Card className="flex flex-col gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted">Event timeline</span>
+            <ol className="m-0 flex list-none flex-col gap-2 p-0 text-xs" data-testid="detail-timeline">
+              {events.map((event) => (
+                <li key={event.id} className="flex flex-col gap-0.5 border-l-2 border-line pl-2" data-testid="detail-timeline-item">
+                  <span className="tabular-nums text-soft">{event.createdAt.toISOString()}</span>
+                  <span className="text-ink">
+                    {event.fromState ?? "·"} → {event.toState} <span className="text-muted">({event.trigger})</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </Card>
+        </aside>
+      </div>
     </main>
   );
 }

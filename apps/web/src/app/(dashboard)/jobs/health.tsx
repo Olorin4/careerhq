@@ -1,6 +1,8 @@
 import { listIngestRuns } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
 import { timeAgo } from "../../../lib/time.js";
+import { EmptyState } from "../../../components/empty-state.js";
+import { Table, Td, Th } from "../../../components/table.js";
 
 interface ErrorItem {
   message: string;
@@ -17,24 +19,25 @@ export async function IngestHealth({ workspaceId }: { workspaceId: string }) {
 
   if (runs.length === 0) {
     return (
-      <p>
-        No ingestion runs yet — the worker runs on a schedule, or trigger one via the worker.
-      </p>
+      <EmptyState
+        title="No ingestion runs yet"
+        hint="The worker runs on a schedule, or trigger one via the worker."
+      />
     );
   }
 
   return (
-    <table className="ingest-health-table">
+    <Table>
       <thead>
         <tr>
-          <th>Source</th>
-          <th>Started</th>
-          <th>Duration</th>
-          <th>Fetched</th>
-          <th>Inserted</th>
-          <th>Updated</th>
-          <th>Duplicates</th>
-          <th>Errors</th>
+          <Th>Source</Th>
+          <Th>Started</Th>
+          <Th>Duration</Th>
+          <Th>Fetched</Th>
+          <Th>Inserted</Th>
+          <Th>Updated</Th>
+          <Th>Duplicates</Th>
+          <Th>Errors</Th>
         </tr>
       </thead>
       <tbody>
@@ -48,24 +51,24 @@ export async function IngestHealth({ workspaceId }: { workspaceId: string }) {
 
           return (
             <tr key={run.id}>
-              <td>{run.source}</td>
-              <td>{timeAgo(run.startedAt, now)}</td>
-              <td>{duration}</td>
-              <td>{run.fetched}</td>
-              <td>{run.inserted}</td>
-              <td>{run.updated}</td>
-              <td>{run.duplicates}</td>
-              <td>
+              <Td>{run.source}</Td>
+              <Td className="tabular-nums">{timeAgo(run.startedAt, now)}</Td>
+              <Td className="tabular-nums">{duration}</Td>
+              <Td className="tabular-nums">{run.fetched}</Td>
+              <Td className="tabular-nums">{run.inserted}</Td>
+              <Td className="tabular-nums">{run.updated}</Td>
+              <Td className="tabular-nums">{run.duplicates}</Td>
+              <Td>
                 {errorsList.length > 0 ? (
-                  <details className="ingest-error-details">
-                    <summary className="badge badge-error">
+                  <details>
+                    <summary className="inline-flex cursor-pointer items-center rounded-full bg-bad-soft px-2 py-0.5 text-xs font-medium text-bad">
                       {errorsList.length}
                       {" "}
                       error
                       {errorsList.length > 1 ? "s" : ""}
                     </summary>
-                    <div className="ingest-error-messages">
-                      <ul>
+                    <div className="mt-2 rounded-md border-l-4 border-bad bg-bad-soft p-3 text-sm text-ink">
+                      <ul className="m-0 flex list-none flex-col gap-1 p-0">
                         {errorsList.map((item, idx) => {
                           const message = (item as ErrorItem)?.message ?? String(item);
                           return (
@@ -78,11 +81,11 @@ export async function IngestHealth({ workspaceId }: { workspaceId: string }) {
                 ) : (
                   "—"
                 )}
-              </td>
+              </Td>
             </tr>
           );
         })}
       </tbody>
-    </table>
+    </Table>
   );
 }

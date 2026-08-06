@@ -4,6 +4,7 @@ import {
 } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
 import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
+import { EmptyState } from "../../../components/empty-state.js";
 import { JobRow, type JobRowData, type ScoreBreakdownRow } from "./job-row.js";
 import { IngestHealth } from "./health.js";
 
@@ -72,37 +73,57 @@ export default async function JobsPage() {
   }
 
   return (
-    <main>
-      <h1>Discovery inbox</h1>
-      <p className="jobs-summary">
-        {inbox.length} in inbox
-        {duplicateCount > 0 ? ` · ${duplicateCount} hidden duplicates` : ""}
-      </p>
+    <main className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold text-ink">Discovery inbox</h1>
+        <p className="m-0 text-sm text-muted">
+          <span className="font-medium tabular-nums text-ink">{inbox.length}</span> in inbox
+          {duplicateCount > 0 && (
+            <>
+              {" · "}
+              <span className="font-medium tabular-nums text-ink">{duplicateCount}</span> hidden duplicates
+            </>
+          )}
+        </p>
+      </div>
 
-      <details className="ingest-health-details">
-        <summary>Pipeline health</summary>
-        <IngestHealth workspaceId={workspaceId} />
+      <details className="rounded-lg border border-line bg-surface">
+        <summary className="cursor-pointer select-none px-4 py-2 text-sm font-medium text-ink">
+          Pipeline health
+        </summary>
+        <div className="border-t border-line p-4">
+          <IngestHealth workspaceId={workspaceId} />
+        </div>
       </details>
 
       {ranked.length === 0 ? (
-        <p>No ranked jobs in the inbox.</p>
+        <EmptyState
+          title="No ranked jobs in the inbox"
+          hint="New matches appear here once discovery runs."
+        />
       ) : (
-        ranked.map((job) => <JobRow key={job.id} job={job} />)
+        <div className="flex flex-col gap-3">
+          {ranked.map((job) => <JobRow key={job.id} job={job} />)}
+        </div>
       )}
 
       {filteredOut.length > 0 && (
-        <details className="jobs-filtered-out">
-          <summary>Filtered out ({filteredOut.length})</summary>
-          {filteredOut.map((job) => (
-            <div key={job.id} className="jobs-filtered-out-row">
-              <JobRow job={job} />
-              <p className="jobs-filtered-out-reason">
-                {job.remoteFiltered ? "remote filter" : ""}
-                {job.remoteFiltered && job.excludedBy.length > 0 ? " · " : ""}
-                {job.excludedBy.length > 0 ? `excluded by: ${job.excludedBy.join(", ")}` : ""}
-              </p>
-            </div>
-          ))}
+        <details className="rounded-lg border border-line bg-surface">
+          <summary className="cursor-pointer select-none px-4 py-2 text-sm font-medium text-ink">
+            Filtered out (<span className="tabular-nums">{filteredOut.length}</span>)
+          </summary>
+          <div className="flex flex-col gap-3 border-t border-line p-4">
+            {filteredOut.map((job) => (
+              <div key={job.id} className="flex flex-col gap-1">
+                <JobRow job={job} />
+                <p className="m-0 text-xs text-muted">
+                  {job.remoteFiltered ? "remote filter" : ""}
+                  {job.remoteFiltered && job.excludedBy.length > 0 ? " · " : ""}
+                  {job.excludedBy.length > 0 ? `excluded by: ${job.excludedBy.join(", ")}` : ""}
+                </p>
+              </div>
+            ))}
+          </div>
         </details>
       )}
     </main>

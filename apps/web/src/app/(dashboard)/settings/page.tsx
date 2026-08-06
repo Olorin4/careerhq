@@ -1,6 +1,9 @@
 import { getScoringProfile, listWatchlist, type WatchlistCompany } from "@careerhq/db";
 import { getDb } from "../../../lib/db.js";
 import { readWorkspaceSnapshot } from "../../../lib/workspace.js";
+import { EmptyState } from "../../../components/empty-state.js";
+import { Section } from "../../../components/section.js";
+import { Table, Td, Th } from "../../../components/table.js";
 import { ProfileForm } from "./profile-form.js";
 import { WatchlistForm } from "./watchlist-form.js";
 import { WatchlistRemoveForm } from "./watchlist-remove-form.js";
@@ -20,26 +23,24 @@ export default async function SettingsPage() {
   }));
 
   return (
-    <main>
-      <h1>Settings</h1>
+    <main className="flex flex-col gap-8">
+      <h1 className="text-2xl font-semibold text-ink">Settings</h1>
 
-      <section className="settings-section">
-        <h2>Scoring profile</h2>
+      <Section title="Scoring profile">
         <ProfileForm profile={profile} />
-      </section>
+      </Section>
 
-      <section className="settings-section">
-        <h2>ATS watchlist</h2>
+      <Section title="ATS watchlist">
         {watchlist.length === 0 ? (
-          <p className="settings-empty">No companies on the watchlist yet.</p>
+          <EmptyState title="No companies on the watchlist yet" />
         ) : (
-          <table className="watchlist-table">
+          <Table>
             <thead>
               <tr>
-                <th>Company</th>
-                <th>ATS</th>
-                <th>Board slug</th>
-                <th />
+                <Th>Company</Th>
+                <Th>ATS</Th>
+                <Th>Board slug</Th>
+                <Th />
               </tr>
             </thead>
             <tbody>
@@ -47,18 +48,19 @@ export default async function SettingsPage() {
                 <WatchlistRow key={entry.id} entry={entry} />
               ))}
             </tbody>
-          </table>
+          </Table>
         )}
         <WatchlistForm />
-      </section>
+      </Section>
 
-      <section className="settings-section">
-        <h2>Email connections</h2>
-        <p>
+      <Section title="Email connections">
+        <p className="text-sm text-ink">
           Connect a mailbox to send applications and track replies.{" "}
-          <a href="/settings/email">Manage email connections</a>
+          <a href="/settings/email" className="text-ink underline">
+            Manage email connections
+          </a>
         </p>
-      </section>
+      </Section>
     </main>
   );
 }
@@ -66,14 +68,14 @@ export default async function SettingsPage() {
 function WatchlistRow({ entry }: { entry: WatchlistCompany }) {
   return (
     <tr>
-      <td>{entry.companyName}</td>
-      <td>{entry.atsType}</td>
-      <td>
+      <Td>{entry.companyName}</Td>
+      <Td>{entry.atsType}</Td>
+      <Td>
         <code>{entry.boardSlug}</code>
-      </td>
-      <td>
+      </Td>
+      <Td>
         <WatchlistRemoveForm entryId={entry.id} />
-      </td>
+      </Td>
     </tr>
   );
 }

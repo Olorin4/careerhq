@@ -22,6 +22,12 @@
  *      chip or an empty panel fails the run rather than shipping a screenshot
  *      of a bug into the README.
  *
+ * Every locator below targets a `data-testid`, not a CSS class: this script is
+ * the sole consumer of CareerHQ's styling outside the components themselves,
+ * and a `data-testid` is the one hook a restyle is not entitled to rename or
+ * remove (see Task 1 of the UI redesign spec). `getByRole` calls (buttons by
+ * accessible name) need no such hook and are untouched.
+ *
  * Notes on the demo's own behaviour, because two captures depend on it:
  *
  *   - `AI_MODE=replay` with no `OPENROUTER_API_KEY`. Generation returns the
@@ -152,7 +158,7 @@ async function goto(page: Page, pathname: string): Promise<void> {
   await page.addStyleTag({ content: STEADY_CSS });
   // The demo banner is the first thing on every page and the proof that these
   // images come from the demo, not a dev database.
-  await page.locator(".demo-banner").waitFor({ state: "visible" });
+  await page.locator('[data-testid="demo-banner"]').waitFor({ state: "visible" });
 }
 
 /**
@@ -211,7 +217,9 @@ async function shot(page: Page, name: string, frame: ShotFrame = {}): Promise<vo
   const contentBottom = frame.to
     ? Math.ceil((await edges(frame.to)).bottom) + 12
     : await page.evaluate(() => {
-        const main = document.querySelector("main.app-main");
+        // Runs in the browser context, so it cannot reference the Node-side
+        // locator helpers above — it re-selects by the same `data-testid`.
+        const main = document.querySelector('[data-testid="app-main"]');
         return main ? Math.ceil(main.getBoundingClientRect().bottom) + 24 : window.innerHeight;
       });
   const height = Math.max(240, Math.min(VIEWPORT.height - top, contentBottom - top));
@@ -225,7 +233,7 @@ async function shot(page: Page, name: string, frame: ShotFrame = {}): Promise<vo
 /** The application id for a seeded company, found the way a visitor would: from the board. */
 async function applicationIdFor(page: Page, company: string): Promise<string> {
   await goto(page, "/applications");
-  const link = page.locator(".board-card-link", { hasText: company }).first();
+  const link = page.locator('[data-testid="board-card-link"]', { hasText: company }).first();
   await link.waitFor({ state: "visible" });
   const href = await link.getAttribute("href");
   const id = href?.split("/").pop();
@@ -249,8 +257,8 @@ async function captureShots(browser: Browser): Promise<void> {
   try {
     // 1 — the funnel and the overdue follow-up.
     await goto(page, "/overview");
-    await assertVisible(page.locator(".overview-due-list li"), "a due follow-up on /overview");
-    await assertVisible(page.locator(".overview-counts li"), "the state counts on /overview");
+    await assertVisible(page.locator('[data-testid="overview-due-item"]'), "a due follow-up on /overview");
+    await assertVisible(page.locator('[data-testid="overview-counts-item"]'), "the state counts on /overview");
     await shot(page, "01-overview");
 
     // 2 — the Kanban board. Scrolled so the board's own column headings are the
@@ -259,29 +267,29 @@ async function captureShots(browser: Browser): Promise<void> {
     // 9-column grid inside the app's 960px column, so it scrolls sideways for
     // the later states — that is what the product does at this width.
     await goto(page, "/applications");
-    await assertVisible(page.locator(".board-card"), "application cards on /applications");
-    const board = page.locator(".board").first();
+    await assertVisible(page.locator('[data-testid="board-card"]'), "application cards on /applications");
+    const board = page.locator('[data-testid="board"]').first();
     await scrollTo(page, board, 8);
     await shot(page, "02-applications-board", { from: board, to: board });
 
     // 4 — the scored discovery inbox with one score breakdown expanded. Framed
     // from the top of the page so the "N in inbox" summary is in shot.
     await goto(page, "/jobs");
-    await assertVisible(page.locator(".job-row-rationale"), "an LLM rationale on /jobs");
-    const firstBreakdown = page.locator(".job-row-breakdown").first();
+    await assertVisible(page.locator('[data-testid="job-row-rationale"]'), "an LLM rationale on /jobs");
+    const firstBreakdown = page.locator('[data-testid="job-row-breakdown"]').first();
     await firstBreakdown.locator("summary").click();
     await assertVisible(firstBreakdown.locator("li"), "an expanded score breakdown");
     await shot(page, "04-discovery-inbox");
 
     // 7 — the reusable answer bank.
     await goto(page, "/answers");
-    await assertVisible(page.locator(".answers-row"), "reusable answers on /answers");
+    await assertVisible(page.locator('[data-testid="answers-row"]'), "reusable answers on /answers");
     await shot(page, "07-answer-bank");
 
     // 10 — the reply classification awaiting a decision.
     await goto(page, "/inbox");
-    await assertVisible(page.locator(".inbox-row"), "a pending suggestion on /inbox");
-    await assertVisible(page.locator(".inbox-row-evidence"), "the quoted evidence on /inbox");
+    await assertVisible(page.locator('[data-testid="inbox-row"]'), "a pending suggestion on /inbox");
+    await assertVisible(page.locator('[data-testid="inbox-row-evidence"]'), "the quoted evidence on /inbox");
     await shot(page, "10-inbox-suggestion");
 
     // 3 — the submitted application: the receipt its auto-apply attempt left,
@@ -289,13 +297,13 @@ async function captureShots(browser: Browser): Promise<void> {
     // the shot is "what happened to this application", top to bottom.
     const wexford = await applicationIdFor(page, "Wexford Health");
     await goto(page, `/applications/${wexford}`);
-    await assertVisible(page.locator(".detail-timeline li"), "the event timeline");
-    await assertVisible(page.locator(".site-attempt-row, .site-panel .badge"),
+    await assertVisible(page.locator('[data-testid="detail-timeline-item"]'), "the event timeline");
+    await assertVisible(page.locator('[data-testid="site-attempt-row"]'),
       "the submitted attempt in the history");
-    const sitePanel = page.locator(".site-panel").first();
+    const sitePanel = page.locator('[data-testid="site-panel"]').first();
     await scrollTo(page, sitePanel, 8);
     await shot(page, "03-application-timeline", {
-      from: sitePanel, to: page.locator(".detail-timeline"),
+      from: sitePanel, to: page.locator('[data-testid="detail-timeline"]'),
     });
 
     // 5 — a freshly generated cover letter, with a provenance chip per fact it
@@ -304,14 +312,14 @@ async function captureShots(browser: Browser): Promise<void> {
     // the committed fixture), and it is the draft state — "AI-generated, not
     // yet approved" — that the panel exists to make reviewable.
     await goto(page, `/applications/${wexford}`);
-    const coverLetter = page.locator(".materials-section").filter({ hasText: "Cover letter" }).first();
+    const coverLetter = page.locator('[data-testid="materials-section"]').filter({ hasText: "Cover letter" }).first();
     await coverLetter.getByRole("button", { name: "Generate with AI" }).click();
-    await coverLetter.locator(".badge-ai-draft").waitFor({ state: "visible", timeout: 60_000 });
-    await assertVisible(coverLetter.locator(".chip-list .chip"),
+    await coverLetter.locator('[data-testid="badge-ai-draft"]').waitFor({ state: "visible", timeout: 60_000 });
+    await assertVisible(coverLetter.locator('[data-testid="chip"]'),
       "provenance chips on the generated draft");
     await scrollTo(page, coverLetter, BANNER_CLEARANCE);
     await shot(page, "05-materials-provenance", {
-      from: coverLetter, to: coverLetter.locator(".materials-doc-actions"),
+      from: coverLetter, to: coverLetter.locator('[data-testid="materials-doc-actions"]'),
     });
   } finally {
     await context.close();
@@ -329,10 +337,10 @@ async function captureAutoApply(browser: Browser): Promise<void> {
   try {
     const silvermark = await applicationIdFor(page, "Silvermark Labs");
     await goto(page, `/applications/${silvermark}`);
-    await page.locator(".site-panel input[type=url]").fill(ATS_URL);
+    await page.locator('[data-testid="site-url-input"]').fill(ATS_URL);
     await page.getByRole("button", { name: "Prepare" }).click();
     // The driver launches Chromium in the web container and reads the page.
-    await page.locator(".site-review").waitFor({ state: "visible", timeout: 120_000 });
+    await page.locator('[data-testid="site-review"]').waitFor({ state: "visible", timeout: 120_000 });
 
     await settleBlockingFields(page);
 
@@ -342,23 +350,24 @@ async function captureAutoApply(browser: Browser): Promise<void> {
     // human. Framed from that step's heading so both are in one shot.
     // `fill` leaves a small textarea scrolled to the end of what was typed, so
     // the shot would show the tail of an answer with its first line cut off.
-    await page.locator(".site-field-table textarea")
+    await page.locator('[data-testid="site-field-textarea"]')
       .evaluateAll((els) => els.forEach((el) => { (el as HTMLTextAreaElement).scrollTop = 0; }));
 
-    await assertVisible(page.locator(".site-field-consent"),
+    await assertVisible(page.locator('[data-testid~="site-field-consent"]'),
       "the consent row on the auto-apply review screen");
-    await assertVisible(page.locator(".site-panel .badge-sensitivity"),
+    await assertVisible(
+      page.locator('[data-testid="site-review"]').locator('[data-testid="badge-sensitivity"]'),
       "a sensitive lock badge on the auto-apply review screen");
-    const step2 = page.locator(".site-step").nth(1);
+    const step2 = page.locator('[data-testid="site-step"]').nth(1);
     await scrollTo(page, step2, BANNER_CLEARANCE);
     await shot(page, "08-autoapply-review", { from: step2, to: step2 });
 
-    await page.locator(".site-review").getByRole("button", { name: "Preview" }).click();
-    await page.locator(".site-preview").waitFor({ state: "visible", timeout: 120_000 });
+    await page.locator('[data-testid="site-review"]').getByRole("button", { name: "Preview" }).click();
+    await page.locator('[data-testid="site-preview"]').waitFor({ state: "visible", timeout: 120_000 });
     const host = new URL(ATS_URL).hostname;
-    await page.locator(".site-retype-label input").fill(host);
-    await assertVisible(page.locator(".site-preview-fields"), "the preview payload");
-    const preview = page.locator(".site-preview");
+    await page.locator('[data-testid="site-retype-input"]').fill(host);
+    await assertVisible(page.locator('[data-testid="site-preview-fields"]'), "the preview payload");
+    const preview = page.locator('[data-testid="site-preview"]');
     await scrollTo(page, preview, BANNER_CLEARANCE);
     await shot(page, "09-preview-confirm", { from: preview, to: preview });
   } finally {
@@ -402,7 +411,7 @@ function answerFor(label: string): string | null {
  */
 async function settleBlockingFields(page: Page): Promise<void> {
   for (let round = 0; round < 24; round += 1) {
-    const rows = page.locator(".site-field-needs-you");
+    const rows = page.locator('[data-testid~="site-field-needs-you"]');
     if (await rows.count() === 0) return;
     const row = rows.first();
     const label = (await row.innerText()).split("\n")[0] ?? "";
@@ -463,9 +472,9 @@ async function captureNeedsFacts(browser: Browser): Promise<void> {
     }
 
     await goto(page, `/applications/${kestrel}`);
-    const coverLetter = page.locator(".materials-section").filter({ hasText: "Cover letter" }).first();
+    const coverLetter = page.locator('[data-testid="materials-section"]').filter({ hasText: "Cover letter" }).first();
     await coverLetter.getByRole("button", { name: "Generate with AI" }).click();
-    const block = coverLetter.locator(".materials-needs-facts");
+    const block = coverLetter.locator('[data-testid="materials-needs-facts"]');
     await block.waitFor({ state: "visible", timeout: 60_000 });
     await scrollTo(page, coverLetter, BANNER_CLEARANCE);
     await shot(page, "06-needs-facts", { from: coverLetter, to: block });
@@ -515,13 +524,13 @@ async function recordWalkthrough(browser: Browser): Promise<string> {
     // 1. The scored discovery inbox, and what a score is made of.
     await goto(page, "/jobs");
     await page.waitForTimeout(BEAT);
-    const breakdown = page.locator(".job-row-breakdown").first();
+    const breakdown = page.locator('[data-testid="job-row-breakdown"]').first();
     await breakdown.locator("summary").click();
     await page.waitForTimeout(BEAT * 2);
     await breakdown.locator("summary").click();
     await page.waitForTimeout(BEAT / 2);
     // Further down the ranking, a listing the re-rank flagged rather than hid.
-    await scrollTo(page, page.locator(".job-row-flags").first(), 220);
+    await scrollTo(page, page.locator('[data-testid="job-row-flags"]').first(), 220);
     await page.waitForTimeout(BEAT * 2);
     await page.evaluate(() => { window.scrollTo({ top: 0, behavior: "instant" }); });
     await page.waitForTimeout(BEAT / 2);
@@ -529,78 +538,78 @@ async function recordWalkthrough(browser: Browser): Promise<string> {
     // 2. Promote the top-ranked listing, then show where it landed. A promoted
     //    listing leaves the inbox, so the proof is the board, not the row: wait
     //    for the row to go, then let the new Discovered card be the payoff.
-    const topRow = page.locator(".job-row").first();
-    const topTitle = (await topRow.locator(".job-row-link").innerText()).split("\n")[0] ?? "";
+    const topRow = page.locator('[data-testid="job-row"]').first();
+    const topTitle = (await topRow.locator('[data-testid="job-row-link"]').innerText()).split("\n")[0] ?? "";
     await topRow.scrollIntoViewIfNeeded();
     await page.waitForTimeout(600);
     await topRow.getByRole("button", { name: "Promote" }).click();
-    await page.locator(".job-row-link", { hasText: topTitle }).first()
+    await page.locator('[data-testid="job-row-link"]', { hasText: topTitle }).first()
       .waitFor({ state: "detached", timeout: 30_000 });
     await page.waitForTimeout(BEAT);
 
     await goto(page, "/applications");
-    await scrollTo(page, page.locator(".board").first(), BANNER_CLEARANCE);
+    await scrollTo(page, page.locator('[data-testid="board"]').first(), BANNER_CLEARANCE);
     await page.waitForTimeout(BEAT * 2);
 
     // 3. Generate a grounded cover letter — replayed from a committed fixture,
     //    which is why it is the Wexford Health application (see the header).
     const wexford = await applicationIdFor(page, "Wexford Health");
     await goto(page, `/applications/${wexford}`);
-    const materials = page.locator(".materials-section").filter({ hasText: "Cover letter" }).first();
+    const materials = page.locator('[data-testid="materials-section"]').filter({ hasText: "Cover letter" }).first();
     await scrollTo(page, materials, BANNER_CLEARANCE);
     await page.waitForTimeout(BEAT);
     await materials.getByRole("button", { name: "Generate with AI" }).click();
-    await materials.locator(".badge-ai-draft").waitFor({ state: "visible", timeout: 60_000 });
+    await materials.locator('[data-testid="badge-ai-draft"]').waitFor({ state: "visible", timeout: 60_000 });
     await scrollTo(page, materials, BANNER_CLEARANCE);
     await page.waitForTimeout(BEAT * 3);
     // The chips: one per fact the draft is allowed to have used.
-    await scrollTo(page, materials.locator(".chip-list").first(), 420);
+    await scrollTo(page, materials.locator('[data-testid="chip-list"]').first(), 420);
     await page.waitForTimeout(BEAT * 2);
 
     // 4. Auto-apply: read a real form, review every planned answer.
     const silvermark = await applicationIdFor(page, "Silvermark Labs");
     await goto(page, `/applications/${silvermark}`);
-    await scrollTo(page, page.locator(".site-panel"), BANNER_CLEARANCE);
+    await scrollTo(page, page.locator('[data-testid="site-panel"]'), BANNER_CLEARANCE);
     await page.waitForTimeout(BEAT);
-    await page.locator(".site-panel input[type=url]").pressSequentially(ATS_URL, { delay: 25 });
+    await page.locator('[data-testid="site-url-input"]').pressSequentially(ATS_URL, { delay: 25 });
     await page.waitForTimeout(BEAT);
     await page.getByRole("button", { name: "Prepare" }).click();
-    await page.locator(".site-review").waitFor({ state: "visible", timeout: 120_000 });
-    await scrollTo(page, page.locator(".site-review"), BANNER_CLEARANCE);
+    await page.locator('[data-testid="site-review"]').waitFor({ state: "visible", timeout: 120_000 });
+    await scrollTo(page, page.locator('[data-testid="site-review"]'), BANNER_CLEARANCE);
     await page.waitForTimeout(BEAT * 2);
     // Step by step, so the sources (Profile / Document / Saved answer) and the
     // two things CareerHQ refuses to fill are both legible.
     for (const step of [0, 1, 2]) {
-      await scrollTo(page, page.locator(".site-step").nth(step), BANNER_CLEARANCE);
+      await scrollTo(page, page.locator('[data-testid="site-step"]').nth(step), BANNER_CLEARANCE);
       await page.waitForTimeout(BEAT * 1.5);
     }
 
     // 5. The consent tick, and every other field the planner left for a human.
     await settleBlockingFields(page);
-    await scrollTo(page, page.locator(".site-field-consent"), 300);
+    await scrollTo(page, page.locator('[data-testid~="site-field-consent"]'), 300);
     await page.waitForTimeout(BEAT * 2);
 
     // 6. Preview: the exact payload, its fingerprint, and a countdown.
-    await page.locator(".site-review").getByRole("button", { name: "Preview" }).click();
-    await page.locator(".site-preview").waitFor({ state: "visible", timeout: 120_000 });
-    await scrollTo(page, page.locator(".site-preview"), BANNER_CLEARANCE);
+    await page.locator('[data-testid="site-review"]').getByRole("button", { name: "Preview" }).click();
+    await page.locator('[data-testid="site-preview"]').waitFor({ state: "visible", timeout: 120_000 });
+    await scrollTo(page, page.locator('[data-testid="site-preview"]'), BANNER_CLEARANCE);
     await page.waitForTimeout(BEAT * 3);
 
     // 7. Retype the target host, then confirm — and be refused, because the
     //    hosted demo's live-submission gate is shut and no visitor can open it.
-    await page.locator(".site-retype-label input").pressSequentially(new URL(ATS_URL).hostname, { delay: 120 });
+    await page.locator('[data-testid="site-retype-input"]').pressSequentially(new URL(ATS_URL).hostname, { delay: 120 });
     await page.waitForTimeout(BEAT);
     await page.getByRole("button", { name: "Confirm and submit" }).click();
-    await page.locator(".site-outcome").waitFor({ state: "visible", timeout: 120_000 });
-    await scrollTo(page, page.locator(".site-outcome"), BANNER_CLEARANCE);
+    await page.locator('[data-testid="site-outcome"]').waitFor({ state: "visible", timeout: 120_000 });
+    await scrollTo(page, page.locator('[data-testid="site-outcome"]'), BANNER_CLEARANCE);
     await page.waitForTimeout(BEAT * 3);
 
     // 8. What a submission that DID go through leaves behind: the seeded
     //    Wexford Health attempt, its receipt, and the event log it wrote.
     await goto(page, `/applications/${wexford}`);
-    await scrollTo(page, page.locator(".site-panel"), BANNER_CLEARANCE);
+    await scrollTo(page, page.locator('[data-testid="site-panel"]'), BANNER_CLEARANCE);
     await page.waitForTimeout(BEAT * 2);
-    await scrollTo(page, page.locator(".detail-timeline"), 260);
+    await scrollTo(page, page.locator('[data-testid="detail-timeline"]'), 260);
     await page.waitForTimeout(BEAT * 2);
 
     // 9. And the reply that came back, waiting for a decision.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { emailDraftSchema, type EmailDraft } from "@careerhq/contracts";
@@ -9,6 +9,15 @@ import type {
 } from "@careerhq/db";
 import type { ConfirmOutcome, PreviewOutcome } from "../../../../lib/email-submission.js";
 import { formatTimestamp } from "../../../../lib/time.js";
+import { Badge } from "../../../../components/badge.js";
+import { Button } from "../../../../components/button.js";
+import { CONTROL_CLASSES, Field } from "../../../../components/field.js";
+import { Countdown } from "../../../../components/countdown.js";
+import { EmptyState } from "../../../../components/empty-state.js";
+import { OutcomePanel } from "../../../../components/outcome-panel.js";
+import { ReconcilePanel } from "../../../../components/reconcile-panel.js";
+import { Section } from "../../../../components/section.js";
+import { ATTEMPT_TONE } from "../../../../lib/application-state.js";
 import {
   confirmAndSendAction, createEmailAttemptAction, previewSubmissionAction,
   resolveReconcileAction, updateEmailDraftAction,
@@ -44,13 +53,6 @@ function str(value: unknown): string | undefined {
 function humanizeStatus(status: string): string {
   const lower = status.toLowerCase().replace(/_/g, " ");
   return lower.charAt(0).toUpperCase() + lower.slice(1);
-}
-
-function statusBadgeClass(status: ApplicationAttempt["status"]): string {
-  if (status === "SUBMITTED") return "badge badge-ok";
-  if (status === "FAILED" || status === "BLOCKED") return "badge badge-error";
-  if (status === "NEEDS_RECONCILE") return "badge badge-reconcile";
-  return "badge";
 }
 
 interface EmailPanelProps {
@@ -98,25 +100,19 @@ export function EmailPanel({
   const [confirmOutcome, setConfirmOutcome] = useState<ConfirmOutcome | null>(null);
   const [retypedTarget, setRetypedTarget] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-
-  // Drives the expiry countdown on the review screen; only ticks while a
-  // preview (and therefore a live token) is on screen.
-  useEffect(() => {
-    if (!preview) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [preview]);
 
   if (connections.length === 0) {
     return (
-      <section className="email-panel">
-        <h2>Email submission</h2>
-        <p className="email-empty">
-          No mailbox connected yet. <a href="/settings/email">Connect a mailbox</a> to submit by email.
+      <Section title="Email submission">
+        <EmptyState
+          title="No mailbox connected yet"
+          hint="Connect a mailbox to submit by email."
+        />
+        <p className="m-0 text-sm text-muted">
+          <a href="/settings/email" className="font-medium text-ink underline">Connect a mailbox</a>
         </p>
         <AttemptHistory applicationId={applicationId} attempts={attempts} />
-      </section>
+      </Section>
     );
   }
 
@@ -203,62 +199,70 @@ export function EmailPanel({
   const canStartNewAttempt = currentAttempt !== null || !alreadySubmitted;
 
   return (
-    <section className="email-panel">
-      <h2>Email submission</h2>
-
+    <Section title="Email submission">
       {alreadySubmitted && (
-        <p className="email-hint">This application already has a submitted attempt.</p>
+        <p className="m-0 text-sm text-muted">This application already has a submitted attempt.</p>
       )}
 
       {!canStartNewAttempt ? null : preview ? (
-        <div className="email-preview">
-          <h3>Review before sending</h3>
-          <dl className="email-preview-fields">
-            <dt>To</dt>
-            <dd>{preview.payload.to}</dd>
-            <dt>Subject</dt>
-            <dd>{preview.payload.subject}</dd>
-            <dt>Body</dt>
-            <dd><pre className="email-preview-body">{preview.payload.body}</pre></dd>
+        <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-4 shadow-card">
+          <h3 className="m-0 text-sm font-semibold text-ink">Review before sending</h3>
+          <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-sm">
+            <dt className="font-medium text-muted">To</dt>
+            <dd className="m-0 text-ink">{preview.payload.to}</dd>
+            <dt className="font-medium text-muted">Subject</dt>
+            <dd className="m-0 text-ink">{preview.payload.subject}</dd>
+            <dt className="font-medium text-muted">Body</dt>
+            <dd className="m-0 text-ink">
+              <pre className="m-0 whitespace-pre-wrap font-sans">{preview.payload.body}</pre>
+            </dd>
             {preview.payload.attachments[0] && (
               <>
-                <dt>Attachment</dt>
-                <dd>
+                <dt className="font-medium text-muted">Attachment</dt>
+                <dd className="m-0 text-ink">
                   {preview.payload.attachments[0].filename} — sha256{" "}
                   <code>{preview.payload.attachments[0].sha256.slice(0, 12)}…</code>
                 </dd>
               </>
             )}
-            <dt>Fingerprint</dt>
-            <dd><code>{preview.fingerprint.slice(0, 16)}…</code></dd>
-            <dt>Expires</dt>
-            <dd>
-              <ExpiryCountdown expiresAt={preview.expiresAt} now={now} />
+            <dt className="font-medium text-muted">Fingerprint</dt>
+            <dd className="m-0 text-ink"><code>{preview.fingerprint.slice(0, 16)}…</code></dd>
+            <dt className="font-medium text-muted">Expires</dt>
+            <dd className="m-0 text-ink tabular-nums">
+              <Countdown expiresAt={preview.expiresAt} />
             </dd>
           </dl>
+          <p className="m-0 text-xs text-muted">If this expires, go back and preview again.</p>
 
-          <label className="email-retype-label">
-            Type the recipient address exactly to confirm sending
+          <Field label="Type the recipient address exactly to confirm sending">
             <input
               type="text"
               value={retypedTarget}
               onChange={(e) => setRetypedTarget(e.target.value)}
               disabled={isPending}
               autoComplete="off"
+              className={CONTROL_CLASSES}
             />
-          </label>
+          </Field>
 
-          <div className="email-preview-actions">
-            <button type="button" onClick={handleBackToEdit} disabled={isPending}>
+          <div className="flex gap-2">
+            <Button type="button" onClick={handleBackToEdit} disabled={isPending}>
               Back to edit
-            </button>
-            <button
+            </Button>
+            {/*
+              `default` tone, deliberately — the page's single `irreversible`
+              control is `site-panel.tsx`'s "Confirm and submit". Email
+              sending is a real external action too, but the tone is
+              reserved for exactly one control on this page so a user learns
+              to recognise it on sight; see that file's own note.
+            */}
+            <Button
               type="button"
               onClick={handleConfirm}
               disabled={isPending || retypedTarget.trim().length === 0}
             >
               {isPending ? "Sending…" : "Confirm and send"}
-            </button>
+            </Button>
           </div>
 
           {confirmOutcome && attemptId && (
@@ -271,42 +275,54 @@ export function EmailPanel({
           )}
         </div>
       ) : (
-        <div className="email-editor">
-          <label>
-            Send from
+        <div className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-card">
+          <Field label="Send from">
             <select
               value={connectionId}
               onChange={(e) => setConnectionId(e.target.value)}
               disabled={isPending}
+              className={CONTROL_CLASSES}
             >
               {connections.map((c) => (
                 <option key={c.id} value={c.id}>{c.label} ({c.fromAddress})</option>
               ))}
             </select>
-          </label>
+          </Field>
 
-          <label>
-            To
-            <input type="email" value={to} onChange={(e) => setTo(e.target.value)} disabled={isPending} required />
-          </label>
-          <label>
-            Subject
-            <input type="text" value={subject} onChange={(e) => setSubject(e.target.value)} disabled={isPending} required />
-          </label>
-          <label>
-            Body
-            <textarea rows={8} value={body} onChange={(e) => setBody(e.target.value)} disabled={isPending} required />
-          </label>
-          <button type="button" onClick={handleUseApprovedDraft} disabled={isPending || !approvedEmailDoc}>
-            Use approved email draft
-          </button>
+          <Field label="To">
+            <input
+              type="email" value={to} onChange={(e) => setTo(e.target.value)} disabled={isPending} required
+              className={CONTROL_CLASSES}
+            />
+          </Field>
+          <Field label="Subject">
+            <input
+              type="text" value={subject} onChange={(e) => setSubject(e.target.value)} disabled={isPending} required
+              className={CONTROL_CLASSES}
+            />
+          </Field>
+          <Field label="Body">
+            <textarea
+              rows={8} value={body} onChange={(e) => setBody(e.target.value)} disabled={isPending} required
+              className={CONTROL_CLASSES}
+            />
+          </Field>
+          <div>
+            <Button type="button" onClick={handleUseApprovedDraft} disabled={isPending || !approvedEmailDoc}>
+              Use approved email draft
+            </Button>
+          </div>
 
-          <p className="email-attachment-line">
+          <p className="m-0 text-sm text-muted">
             Attachment: {selectedVariant ? selectedVariant.label : "No CV selected"}{" "}
-            <a href="#cv-select">change</a>
+            <a href="#cv-select" className="font-medium text-ink underline">change</a>
           </p>
 
-          {error && <p className="email-error">{error}</p>}
+          {error && (
+            <p className="m-0 text-sm text-bad" role="alert">
+              {error}
+            </p>
+          )}
           {confirmOutcome && attemptId && (
             <ConfirmOutcomePane
               outcome={confirmOutcome}
@@ -316,27 +332,20 @@ export function EmailPanel({
             />
           )}
 
-          <button type="button" onClick={handlePreview} disabled={isPending}>
-            {isPending ? "Working…" : "Preview"}
-          </button>
+          <div>
+            <Button type="button" tone="primary" onClick={handlePreview} disabled={isPending}>
+              {isPending ? "Working…" : "Preview"}
+            </Button>
+          </div>
         </div>
       )}
 
-      <h3>Attempt history</h3>
-      <AttemptHistory applicationId={applicationId} attempts={attempts} />
-    </section>
+      <div className="flex flex-col gap-2">
+        <h3 className="m-0 text-sm font-semibold text-ink">Attempt history</h3>
+        <AttemptHistory applicationId={applicationId} attempts={attempts} />
+      </div>
+    </Section>
   );
-}
-
-function ExpiryCountdown({ expiresAt, now }: { expiresAt: string; now: number }) {
-  const remainingMs = Math.max(0, new Date(expiresAt).getTime() - now);
-  if (remainingMs <= 0) {
-    return <span className="email-expired">Expired — go back and preview again</span>;
-  }
-  const totalSeconds = Math.floor(remainingMs / 1000);
-  const mm = Math.floor(totalSeconds / 60);
-  const ss = String(totalSeconds % 60).padStart(2, "0");
-  return <span>{mm}:{ss}</span>;
 }
 
 function ConfirmOutcomePane({
@@ -350,34 +359,34 @@ function ConfirmOutcomePane({
   switch (outcome.status) {
     case "submitted":
       return (
-        <div className="email-outcome email-outcome-submitted">
-          <p>Submitted — Message-ID <code>{outcome.messageId}</code></p>
-        </div>
+        <OutcomePanel tone="ok">
+          <p className="m-0">Submitted — Message-ID <code>{outcome.messageId}</code></p>
+        </OutcomePanel>
       );
     case "blocked":
       return (
-        <div className="email-outcome email-outcome-blocked">
-          <p>Blocked ({outcome.code}): {outcome.reason}</p>
+        <OutcomePanel tone="warn">
+          <p className="m-0">Blocked ({outcome.code}): {outcome.reason}</p>
           {outcome.code === "gate_closed" && (
-            <p className="email-outcome-hint">
+            <p className="m-0 text-xs text-muted">
               Live email submission is off. Set <code>SUBMISSIONS_LIVE_EMAIL=true</code> (and, for a sandbox
               workspace, <code>SANDBOX_SMTP_ALLOWED_HOST</code>) to enable sending.
             </p>
           )}
           {outcome.code === "application_not_ready" && (
-            <p className="email-outcome-hint">
+            <p className="m-0 text-xs text-muted">
               This application is no longer in a state that can be submitted from. Re-typing the address won&apos;t
               fix this — use the transition buttons above to walk it back to Ready for review, then confirm again.
             </p>
           )}
-        </div>
+        </OutcomePanel>
       );
     case "failed":
       return (
-        <div className="email-outcome email-outcome-failed">
-          <p>Send failed: {outcome.reason}</p>
-          <p className="email-outcome-hint">The draft is retained — start a new attempt to retry.</p>
-        </div>
+        <OutcomePanel tone="bad">
+          <p className="m-0">Send failed: {outcome.reason}</p>
+          <p className="m-0 text-xs text-muted">The draft is retained — start a new attempt to retry.</p>
+        </OutcomePanel>
       );
     case "needs_reconcile":
       return (
@@ -420,32 +429,37 @@ function ReconcilePane({
   }
 
   return (
-    <div className="email-outcome email-outcome-reconcile">
-      <p>Needs reconciliation: {reason}</p>
-      <p className="email-outcome-hint">
+    <ReconcilePanel reason={reason}>
+      <p className="m-0 text-xs text-muted">
         The send outcome is uncertain — check the mailbox&apos;s Sent folder or any bounce, then resolve manually.
       </p>
-      <label>
-        Evidence note (optional)
-        <input type="text" value={note} onChange={(e) => setNote(e.target.value)} disabled={isPending} />
-      </label>
-      <div className="email-reconcile-actions">
-        <button type="button" disabled={isPending} onClick={() => resolve("submitted")}>
+      <Field label="Evidence note (optional)">
+        <input
+          type="text" value={note} onChange={(e) => setNote(e.target.value)} disabled={isPending}
+          className={CONTROL_CLASSES}
+        />
+      </Field>
+      <div className="flex gap-2">
+        <Button type="button" disabled={isPending} onClick={() => resolve("submitted")}>
           Mark submitted (with evidence note)
-        </button>
-        <button type="button" disabled={isPending} onClick={() => resolve("failed")}>
+        </Button>
+        <Button type="button" disabled={isPending} onClick={() => resolve("failed")}>
           Mark failed
-        </button>
+        </Button>
       </div>
-      {error && <p className="email-error">{error}</p>}
-    </div>
+      {error && (
+        <p className="m-0 text-sm text-bad" role="alert">
+          {error}
+        </p>
+      )}
+    </ReconcilePanel>
   );
 }
 
 function AttemptHistory({ applicationId, attempts }: { applicationId: string; attempts: ApplicationAttempt[] }) {
-  if (attempts.length === 0) return <p className="email-empty">No submission attempts yet.</p>;
+  if (attempts.length === 0) return <p className="m-0 text-sm text-soft">No submission attempts yet.</p>;
   return (
-    <ul className="email-attempt-list">
+    <ul className="m-0 flex list-none flex-col gap-2 p-0">
       {[...attempts].reverse().map((attempt) => (
         <AttemptRow key={attempt.id} applicationId={applicationId} attempt={attempt} />
       ))}
@@ -460,14 +474,18 @@ function AttemptRow({ applicationId, attempt }: { applicationId: string; attempt
   const highlighted = attempt.status === "NEEDS_RECONCILE";
 
   return (
-    <li className={highlighted ? "email-attempt-row email-attempt-row-reconcile" : "email-attempt-row"}>
-      <div className="email-attempt-meta">
-        <span className={statusBadgeClass(attempt.status)}>{humanizeStatus(attempt.status)}</span>
-        <span className="email-attempt-date">{formatTimestamp(attempt.startedAt)}</span>
-        {messageId && <span className="email-attempt-message-id">Message-ID: {messageId}</span>}
-        {receiptAt && <span className="email-attempt-date">receipt: {formatTimestamp(receiptAt)}</span>}
+    <li className="flex flex-col gap-1.5 rounded-lg border border-line bg-surface p-3 shadow-card">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Badge tone={ATTEMPT_TONE[attempt.status]}>{humanizeStatus(attempt.status)}</Badge>
+        <span className="text-xs text-soft">{formatTimestamp(attempt.startedAt)}</span>
+        {messageId && <span className="text-xs text-muted">Message-ID: {messageId}</span>}
+        {receiptAt && <span className="text-xs text-soft">receipt: {formatTimestamp(receiptAt)}</span>}
       </div>
-      {attempt.failureReason && <p className="email-error">{attempt.failureReason}</p>}
+      {attempt.failureReason && (
+        <p className="m-0 text-sm text-bad" role="alert">
+          {attempt.failureReason}
+        </p>
+      )}
       {highlighted && (
         <ReconcilePane
           applicationId={applicationId}

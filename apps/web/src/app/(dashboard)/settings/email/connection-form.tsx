@@ -8,6 +8,11 @@ import {
   type ImapConfig, type RetentionMode, type RetentionSetting,
 } from "@careerhq/contracts";
 import type { EmailConnection } from "@careerhq/db";
+import { Badge, type BadgeTone } from "../../../../components/badge.js";
+import { Button } from "../../../../components/button.js";
+import { Card } from "../../../../components/card.js";
+import { CONTROL_CLASSES, Field } from "../../../../components/field.js";
+import { Table, Td, Th } from "../../../../components/table.js";
 import { timeAgo } from "../../../../lib/time.js";
 import { createConnectionAction, disconnectAction, testConnectionAction } from "./actions.js";
 
@@ -24,10 +29,11 @@ function parseRetention(value: unknown): RetentionSetting {
   return parsed.success ? parsed.data : { mode: "metadata_only" };
 }
 
-function healthBadgeClass(health: string): string {
-  if (health === "ok") return "badge badge-ok";
-  if (health === "error") return "badge badge-error";
-  return "badge";
+/** `ok`/`error` map straight onto `ok`/`bad`; anything else (unchecked) is `neutral`. */
+function healthTone(health: string): BadgeTone {
+  if (health === "ok") return "ok";
+  if (health === "error") return "bad";
+  return "neutral";
 }
 
 /**
@@ -44,16 +50,16 @@ export function ConnectionsTable(
   { connections, now }: { connections: EmailConnection[]; now: number },
 ) {
   return (
-    <table className="email-connections-table">
+    <Table>
       <thead>
         <tr>
-          <th>Label</th>
-          <th>From</th>
-          <th>Health</th>
-          <th>Last checked</th>
-          <th>IMAP</th>
-          <th>Retention</th>
-          <th />
+          <Th>Label</Th>
+          <Th>From</Th>
+          <Th>Health</Th>
+          <Th>Last checked</Th>
+          <Th>IMAP</Th>
+          <Th>Retention</Th>
+          <Th />
         </tr>
       </thead>
       <tbody>
@@ -61,7 +67,7 @@ export function ConnectionsTable(
           <ConnectionRow key={connection.id} connection={connection} now={now} />
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }
 
@@ -82,8 +88,16 @@ function ConnectionRow({ connection, now }: { connection: EmailConnection; now: 
     });
   }
 
+  // The copy is deliberately not "this cannot be undone", which is what it used
+  // to say while the control below stays `default`-toned. `--irreversible` is
+  // reserved for controls that touch the outside world, and disconnecting
+  // notifies nobody: it deletes this workspace's own stored credentials and
+  // nothing else, and re-entering them restores the connection. Softening the
+  // sentence is the fix rather than escalating the tone — a confirm that
+  // overstates the stakes teaches the user to distrust the ones that don't.
   function handleDisconnect() {
-    if (typeof window !== "undefined" && !window.confirm(`Disconnect "${connection.label}"? This cannot be undone.`)) {
+    const question = `Disconnect "${connection.label}"? Its stored credentials are deleted — you can reconnect by entering them again.`;
+    if (typeof window !== "undefined" && !window.confirm(question)) {
       return;
     }
     startTransition(async () => {
@@ -97,24 +111,30 @@ function ConnectionRow({ connection, now }: { connection: EmailConnection; now: 
 
   return (
     <tr>
-      <td>{connection.label}</td>
-      <td>{connection.fromAddress}</td>
-      <td>
-        <span className={healthBadgeClass(connection.health)}>{connection.health}</span>
-        {connection.healthDetail && <div className="email-health-detail">{connection.healthDetail}</div>}
-      </td>
-      <td>{connection.lastCheckedAt ? timeAgo(connection.lastCheckedAt, now) : "—"}</td>
-      <td>{hasImap ? "Yes" : "No"}</td>
-      <td>{retention.mode === "days_limited" ? `${retention.mode} (${retention.days}d)` : retention.mode}</td>
-      <td className="email-connection-actions">
-        <button type="button" onClick={handleTest} disabled={isPending}>Test</button>
-        <button type="button" onClick={handleDisconnect} disabled={isPending}>Disconnect</button>
-        {testResult && (
-          <p className={testResult.ok ? "settings-form-success" : "settings-form-error"}>
-            {testResult.ok ? "Connection OK" : testResult.reason}
-          </p>
+      <Td>{connection.label}</Td>
+      <Td>{connection.fromAddress}</Td>
+      <Td>
+        <Badge tone={healthTone(connection.health)}>{connection.health}</Badge>
+        {connection.healthDetail && (
+          <div className="mt-1 max-w-xs text-xs text-bad">{connection.healthDetail}</div>
         )}
-      </td>
+      </Td>
+      <Td>{connection.lastCheckedAt ? timeAgo(connection.lastCheckedAt, now) : "—"}</Td>
+      <Td>{hasImap ? "Yes" : "No"}</Td>
+      <Td>{retention.mode === "days_limited" ? `${retention.mode} (${retention.days}d)` : retention.mode}</Td>
+      <Td>
+        <div className="flex flex-col items-start gap-1">
+          <div className="flex gap-2">
+            <Button type="button" tone="default" onClick={handleTest} disabled={isPending}>Test</Button>
+            <Button type="button" tone="default" onClick={handleDisconnect} disabled={isPending}>Disconnect</Button>
+          </div>
+          {testResult && (
+            <p className={`m-0 text-xs ${testResult.ok ? "text-ok" : "text-bad"}`}>
+              {testResult.ok ? "Connection OK" : testResult.reason}
+            </p>
+          )}
+        </div>
+      </Td>
     </tr>
   );
 }
@@ -154,110 +174,109 @@ export function ConnectionForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="settings-form">
-      <label>
-        Label
-        <input name="label" type="text" required />
-      </label>
-      <label>
-        From address
-        <input name="fromAddress" type="email" required />
-      </label>
-      <label>
-        Display name
-        <input name="displayName" type="text" />
-      </label>
+    <Card className="max-w-lg">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        <Field label="Label">
+          <input name="label" type="text" required className={CONTROL_CLASSES} />
+        </Field>
+        <Field label="From address">
+          <input name="fromAddress" type="email" required className={CONTROL_CLASSES} />
+        </Field>
+        <Field label="Display name">
+          <input name="displayName" type="text" className={CONTROL_CLASSES} />
+        </Field>
 
-      <fieldset className="email-form-fieldset">
-        <legend>SMTP (send)</legend>
-        <label>
-          Host
-          <input name="smtpHost" type="text" required />
-        </label>
-        <label>
-          Port
-          <input name="smtpPort" type="number" min={1} max={65535} defaultValue={587} required />
-        </label>
-        <label>
-          Username
-          <input name="smtpUsername" type="text" required />
-        </label>
-        <label>
-          Password
-          <input
-            ref={smtpPasswordRef} name="smtpPassword" type="password"
-            required autoComplete="new-password"
-          />
-        </label>
-        <label>
-          TLS
-          <select name="smtpTls" defaultValue="starttls">
-            {TLS_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
-          </select>
-        </label>
-      </fieldset>
-
-      <details className="email-form-fieldset" open={imapEnabled}>
-        <summary>
-          <span className="settings-form-checkbox email-imap-toggle">
+        <fieldset className="flex flex-col gap-3 rounded-md border border-line p-3">
+          <legend className="px-1 text-sm font-medium text-ink">SMTP (send)</legend>
+          <Field label="Host">
+            <input name="smtpHost" type="text" required className={CONTROL_CLASSES} />
+          </Field>
+          <Field label="Port">
+            <input name="smtpPort" type="number" min={1} max={65535} defaultValue={587} required className={CONTROL_CLASSES} />
+          </Field>
+          <Field label="Username">
+            <input name="smtpUsername" type="text" required className={CONTROL_CLASSES} />
+          </Field>
+          <Field label="Password">
             <input
-              type="checkbox" name="imapEnabled"
-              checked={imapEnabled}
-              onChange={(event) => setImapEnabled(event.target.checked)}
+              ref={smtpPasswordRef} name="smtpPassword" type="password"
+              required autoComplete="new-password" className={CONTROL_CLASSES}
             />
-            Enable IMAP (optional)
-          </span>
-        </summary>
-        <label>
-          Host
-          <input name="imapHost" type="text" disabled={!imapEnabled} />
-        </label>
-        <label>
-          Port
-          <input name="imapPort" type="number" min={1} max={65535} defaultValue={993} disabled={!imapEnabled} />
-        </label>
-        <label>
-          Username
-          <input name="imapUsername" type="text" disabled={!imapEnabled} />
-        </label>
-        <label>
-          Password
-          <input
-            ref={imapPasswordRef} name="imapPassword" type="password"
-            disabled={!imapEnabled} autoComplete="new-password"
-          />
-        </label>
-        <label>
-          TLS
-          <select name="imapTls" defaultValue="implicit" disabled={!imapEnabled}>
-            {TLS_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+          </Field>
+          <Field label="TLS">
+            <select name="smtpTls" defaultValue="starttls" className={CONTROL_CLASSES}>
+              {TLS_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+            </select>
+          </Field>
+        </fieldset>
+
+        <details className="flex flex-col gap-3 rounded-md border border-line p-3" open={imapEnabled}>
+          <summary className="cursor-pointer list-none">
+            <label className="inline-flex items-center gap-2 text-sm font-semibold text-ink">
+              <input
+                type="checkbox" name="imapEnabled"
+                checked={imapEnabled}
+                onChange={(event) => setImapEnabled(event.target.checked)}
+              />
+              Enable IMAP (optional)
+            </label>
+          </summary>
+          <Field label="Host">
+            <input name="imapHost" type="text" disabled={!imapEnabled} className={CONTROL_CLASSES} />
+          </Field>
+          <Field label="Port">
+            <input
+              name="imapPort" type="number" min={1} max={65535} defaultValue={993} disabled={!imapEnabled}
+              className={CONTROL_CLASSES}
+            />
+          </Field>
+          <Field label="Username">
+            <input name="imapUsername" type="text" disabled={!imapEnabled} className={CONTROL_CLASSES} />
+          </Field>
+          <Field label="Password">
+            <input
+              ref={imapPasswordRef} name="imapPassword" type="password"
+              disabled={!imapEnabled} autoComplete="new-password" className={CONTROL_CLASSES}
+            />
+          </Field>
+          <Field label="TLS">
+            <select name="imapTls" defaultValue="implicit" disabled={!imapEnabled} className={CONTROL_CLASSES}>
+              {TLS_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+            </select>
+          </Field>
+          <Field label="Folders (comma-separated)">
+            <input
+              name="imapFolders" type="text" placeholder="INBOX, Sent" disabled={!imapEnabled}
+              className={CONTROL_CLASSES}
+            />
+          </Field>
+        </details>
+
+        <Field label="Retention">
+          <select
+            name="retentionMode" value={retentionMode}
+            onChange={(event) => setRetentionMode(event.target.value as RetentionMode)}
+            className={CONTROL_CLASSES}
+          >
+            {RETENTION_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
           </select>
-        </label>
-        <label>
-          Folders (comma-separated)
-          <input name="imapFolders" type="text" placeholder="INBOX, Sent" disabled={!imapEnabled} />
-        </label>
-      </details>
+        </Field>
+        {retentionMode === "days_limited" && (
+          <Field label="Days to keep">
+            <input name="retentionDays" type="number" min={1} step={1} defaultValue={30} required className={CONTROL_CLASSES} />
+          </Field>
+        )}
 
-      <label>
-        Retention
-        <select
-          name="retentionMode" value={retentionMode}
-          onChange={(event) => setRetentionMode(event.target.value as RetentionMode)}
-        >
-          {RETENTION_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
-        </select>
-      </label>
-      {retentionMode === "days_limited" && (
-        <label>
-          Days to keep
-          <input name="retentionDays" type="number" min={1} step={1} defaultValue={30} required />
-        </label>
-      )}
-
-      <button type="submit" disabled={isPending}>Create connection</button>
-      {saved && !error && <p className="settings-form-success">Connection created.</p>}
-      {error && <p className="settings-form-error">{error}</p>}
-    </form>
+        <Button type="submit" tone="primary" disabled={isPending} className="self-start">
+          Create connection
+        </Button>
+        {saved && !error && <p className="m-0 text-sm text-ok">Connection created.</p>}
+        {error && (
+          <p className="m-0 text-sm text-bad" role="alert">
+            {error}
+          </p>
+        )}
+      </form>
+    </Card>
   );
 }

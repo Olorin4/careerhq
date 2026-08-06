@@ -1,0 +1,24 @@
+:root {
+  --canvas: #f2f1ed;
+  --surface: #fbfaf8;
+  --ink: #191d1c;
+  --muted: #666c6a;
+  --soft: #8a908d;
+  --line: #dddcd6;
+  --anchor: #16211f;
+  --anchor-soft: #1f2d29;
+  --shadow: 0 14px 40px rgba(29, 36, 32, 0.07);
+
+  --info: #3c6680;
+  --info-soft: #e3edf2;
+  --warn: #8f5d18;
+  --warn-soft: #f6ead6;
+  --ok: #21674f;
+  --ok-soft: #e1efe8;
+  --bad: #a83f39;
+  --bad-soft: #f6e5e3;
+
+  /* Reserved: controls that touch the outside world and cannot be undone.
+     Confirm-and-submit, Send, Delete. Nothing decorative, ever. */
+  --irreversible: #c2503c;
+}

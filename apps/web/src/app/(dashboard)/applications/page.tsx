@@ -35,8 +35,8 @@ export default async function ApplicationsPage() {
     };
   });
   return (
-    <main>
-      <h1>Applications</h1>
+    <main className="flex flex-col gap-6">
+      <h1 className="text-2xl font-semibold text-ink">Applications</h1>
       <NewApplicationForm />
       <Board cards={cards} />
     </main>

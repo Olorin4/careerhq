@@ -3,6 +3,11 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicationState, ReplyClassification } from "@careerhq/contracts";
+import { Badge } from "../../../components/badge.js";
+import { Button } from "../../../components/button.js";
+import { EmptyState } from "../../../components/empty-state.js";
+import { Row } from "../../../components/row.js";
+import { classificationTone } from "../../../lib/application-state.js";
 import { formatTimestamp } from "../../../lib/time.js";
 import { acceptSuggestionAction, dismissSuggestionAction } from "./actions.js";
 
@@ -26,20 +31,16 @@ function humanize(s: string): string {
   return s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");
 }
 
-function classificationBadgeClass(classification: ReplyClassification): string {
-  if (classification === "interview" || classification === "offer") return "badge badge-ok";
-  if (classification === "rejection") return "badge badge-error";
-  return "badge";
-}
-
 export function SuggestionQueue({ suggestions }: { suggestions: SuggestionListItem[] }) {
   if (suggestions.length === 0) {
-    return <p className="inbox-empty">No pending suggestions — the review queue is clear.</p>;
+    return <EmptyState title="No pending suggestions" hint="The review queue is clear." />;
   }
   return (
-    <ul className="inbox-list">
+    <ul className="m-0 flex list-none flex-col gap-3 p-0">
       {suggestions.map((suggestion) => (
-        <SuggestionRow key={suggestion.id} suggestion={suggestion} />
+        <li key={suggestion.id}>
+          <SuggestionRow suggestion={suggestion} />
+        </li>
       ))}
     </ul>
   );
@@ -74,56 +75,65 @@ function SuggestionRow({ suggestion }: { suggestion: SuggestionListItem }) {
   }
 
   return (
-    <li className="inbox-row">
-      <p className="inbox-row-subject">
-        <strong>{suggestion.subject || "(no subject)"}</strong>
-      </p>
-      <p className="inbox-row-meta">
-        From {suggestion.fromAddr} — {formatTimestamp(suggestion.receivedAt)}
-      </p>
-      <p className="inbox-row-snippet">{suggestion.snippet}</p>
-
-      {suggestion.application && (
-        <p className="inbox-row-application">
-          <a href={`/applications/${suggestion.application.id}`}>
-            {suggestion.application.company} · {suggestion.application.title}
-          </a>
-          {" — "}
-          {humanize(suggestion.application.state)}
+    <Row testId="inbox-row">
+      <div className="flex flex-1 flex-col gap-2">
+        <p className="m-0 font-semibold text-ink">{suggestion.subject || "(no subject)"}</p>
+        <p className="m-0 text-xs text-soft">
+          From {suggestion.fromAddr} — {formatTimestamp(suggestion.receivedAt)}
         </p>
-      )}
+        <p className="m-0 text-sm text-ink">{suggestion.snippet}</p>
 
-      <div className="inbox-row-classification">
-        {suggestion.classification && (
-          <span className={classificationBadgeClass(suggestion.classification)}>
-            {humanize(suggestion.classification)}
-            {suggestion.classificationConfidence !== null
-              ? ` (${Math.round(suggestion.classificationConfidence * 100)}%)`
-              : ""}
-          </span>
+        {suggestion.application && (
+          <p className="m-0 text-sm text-muted">
+            <a href={`/applications/${suggestion.application.id}`} className="text-ink underline">
+              {suggestion.application.company} · {suggestion.application.title}
+            </a>
+            {" — "}
+            {humanize(suggestion.application.state)}
+          </p>
         )}
-        {suggestion.suggestedTransition && (
-          <span className="inbox-row-transition">→ {humanize(suggestion.suggestedTransition)}</span>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {suggestion.classification && (
+            <Badge tone={classificationTone(suggestion.classification)}>
+              {humanize(suggestion.classification)}
+              {suggestion.classificationConfidence !== null
+                ? ` (${Math.round(suggestion.classificationConfidence * 100)}%)`
+                : ""}
+            </Badge>
+          )}
+          {suggestion.suggestedTransition && (
+            <span className="text-sm text-muted">→ {humanize(suggestion.suggestedTransition)}</span>
+          )}
+        </div>
+
+        {suggestion.quotedEvidence && (
+          <blockquote
+            data-testid="inbox-row-evidence"
+            className="m-0 border-l-2 border-line pl-3 text-sm italic text-muted"
+          >
+            &ldquo;{suggestion.quotedEvidence}&rdquo;
+          </blockquote>
+        )}
+
+        <div className="flex gap-2">
+          <Button
+            type="button" tone="primary"
+            disabled={isPending || !suggestion.application || !suggestion.suggestedTransition}
+            onClick={handleAccept}
+          >
+            Accept
+          </Button>
+          <Button type="button" tone="default" disabled={isPending} onClick={handleDismiss}>
+            Dismiss
+          </Button>
+        </div>
+        {error && (
+          <p className="m-0 text-sm text-bad" role="alert">
+            {error}
+          </p>
         )}
       </div>
-
-      {suggestion.quotedEvidence && (
-        <blockquote className="inbox-row-evidence">&ldquo;{suggestion.quotedEvidence}&rdquo;</blockquote>
-      )}
-
-      <div className="inbox-row-actions">
-        <button
-          type="button"
-          disabled={isPending || !suggestion.application || !suggestion.suggestedTransition}
-          onClick={handleAccept}
-        >
-          Accept
-        </button>
-        <button type="button" disabled={isPending} onClick={handleDismiss}>
-          Dismiss
-        </button>
-      </div>
-      {error && <p className="inbox-row-error">{error}</p>}
-    </li>
+    </Row>
   );
 }

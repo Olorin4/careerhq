@@ -2,6 +2,9 @@
 
 import { useActionState, useState } from "react";
 import { FACT_CATEGORIES, SENSITIVITIES } from "@careerhq/contracts";
+import { Button } from "../../../components/button.js";
+import { Card } from "../../../components/card.js";
+import { CONTROL_CLASSES, Field } from "../../../components/field.js";
 import { createFactAction } from "./actions.js";
 
 function humanize(s: string): string {
@@ -27,46 +30,63 @@ export function FactForm() {
   const typed = state?.values ?? {};
 
   return (
-    <form action={submit} className="fact-form">
-      <h2>Add fact</h2>
-      <label>
-        Category
-        <select name="category" required defaultValue={typed.category ?? FACT_CATEGORIES[0]}>
-          {FACT_CATEGORIES.map((category) => (
-            <option key={category} value={category}>
-              {humanize(category)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Claim
-        <input name="claim" type="text" required defaultValue={typed.claim ?? ""} />
-      </label>
-      <label>
-        Detail
-        <textarea name="detail" defaultValue={typed.detail ?? ""} />
-      </label>
-      <label>
-        Evidence URL
-        <input name="evidenceUrl" type="url" defaultValue={typed.evidenceUrl ?? ""} />
-      </label>
-      <label>
-        Sensitivity
-        <select name="sensitivity" required defaultValue={typed.sensitivity ?? "normal"}>
-          {SENSITIVITIES.map((sensitivity) => (
-            <option key={sensitivity} value={sensitivity}>
-              {humanize(sensitivity)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Review by
-        <input name="reviewBy" type="date" defaultValue={typed.reviewBy ?? reviewBy} required />
-      </label>
-      <button type="submit">Add fact</button>
-      {state && <p className="form-error">Not saved — {state.reason}.</p>}
-    </form>
+    <Card className="max-w-lg">
+      <form action={submit} className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-ink">Add fact</h2>
+        <Field label="Category">
+          <select
+            name="category" required defaultValue={typed.category ?? FACT_CATEGORIES[0]}
+            className={CONTROL_CLASSES}
+          >
+            {FACT_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {humanize(category)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Claim">
+          <input
+            name="claim" type="text" required defaultValue={typed.claim ?? ""}
+            className={CONTROL_CLASSES}
+          />
+        </Field>
+        <Field label="Detail">
+          <textarea name="detail" defaultValue={typed.detail ?? ""} className={CONTROL_CLASSES} />
+        </Field>
+        <Field label="Evidence URL">
+          <input
+            name="evidenceUrl" type="url" defaultValue={typed.evidenceUrl ?? ""}
+            className={CONTROL_CLASSES}
+          />
+        </Field>
+        <Field label="Sensitivity">
+          <select
+            name="sensitivity" required defaultValue={typed.sensitivity ?? "normal"}
+            className={CONTROL_CLASSES}
+          >
+            {SENSITIVITIES.map((sensitivity) => (
+              <option key={sensitivity} value={sensitivity}>
+                {humanize(sensitivity)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Review by">
+          <input
+            name="reviewBy" type="date" defaultValue={typed.reviewBy ?? reviewBy} required
+            className={CONTROL_CLASSES}
+          />
+        </Field>
+        <Button type="submit" tone="primary" className="self-start">
+          Add fact
+        </Button>
+        {state && (
+          <p className="text-sm text-bad" role="alert">
+            Not saved — {state.reason}.
+          </p>
+        )}
+      </form>
+    </Card>
   );
 }

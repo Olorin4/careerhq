@@ -1,4 +1,7 @@
 import type { EmailMessage } from "@careerhq/db";
+import { Badge } from "../../../../components/badge.js";
+import { EmptyState } from "../../../../components/empty-state.js";
+import { Section } from "../../../../components/section.js";
 import { formatTimestamp } from "../../../../lib/time.js";
 
 function humanize(s: string): string {
@@ -18,30 +21,32 @@ function humanize(s: string): string {
  */
 export function Messages({ messages }: { messages: EmailMessage[] }) {
   return (
-    <section className="messages">
-      <h2>Messages</h2>
+    <Section title="Messages">
       {messages.length === 0 ? (
-        <p className="messages-empty">No email messages for this application yet.</p>
+        <EmptyState title="No messages yet" hint="No email messages for this application yet." />
       ) : (
-        <ul className="messages-list">
+        <ul className="m-0 flex list-none flex-col gap-3 p-0">
           {messages.map((message) => (
-            <li key={message.id} className="messages-row">
-              <div className="messages-row-meta">
-                <span className={message.direction === "inbound" ? "badge" : "badge badge-ok"}>
+            <li
+              key={message.id}
+              className="flex flex-col gap-1 rounded-lg border border-line bg-surface p-4 shadow-card"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Sent is the applicant's own confirmed action (`ok`); a
+                    received message is just system state to read, `neutral`. */}
+                <Badge tone={message.direction === "inbound" ? "neutral" : "ok"}>
                   {message.direction === "inbound" ? "Received" : "Sent"}
-                </span>
-                {message.classification && <span className="badge">{humanize(message.classification)}</span>}
-                <span className="messages-row-date">{formatTimestamp(message.receivedAt)}</span>
+                </Badge>
+                {message.classification && <Badge tone="neutral">{humanize(message.classification)}</Badge>}
+                <span className="text-xs text-soft">{formatTimestamp(message.receivedAt)}</span>
               </div>
-              <p className="messages-row-subject">
-                <strong>{message.subject || "(no subject)"}</strong>
-              </p>
-              <p className="messages-row-addr">
+              <p className="m-0 text-sm font-semibold text-ink">{message.subject || "(no subject)"}</p>
+              <p className="m-0 text-xs text-muted">
                 {message.direction === "inbound" ? `From ${message.fromAddr}` : `To ${message.toAddrs.join(", ")}`}
               </p>
-              <p className="messages-row-snippet">{message.snippet}</p>
+              <p className="m-0 text-sm text-ink">{message.snippet}</p>
               {message.bodyRef && (
-                <p className="messages-row-note">
+                <p className="m-0 text-xs italic text-soft">
                   Full body stored — download is not available in this build.
                 </p>
               )}
@@ -49,6 +54,6 @@ export function Messages({ messages }: { messages: EmailMessage[] }) {
           ))}
         </ul>
       )}
-    </section>
+    </Section>
   );
 }
