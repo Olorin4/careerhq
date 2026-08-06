@@ -19,6 +19,14 @@ export function Th({ children }: { children?: ReactNode }): JSX.Element {
   return <th className={HEAD_CELL}>{children}</th>;
 }
 
-export function Td({ children }: { children?: ReactNode }): JSX.Element {
-  return <td className={BODY_CELL}>{children}</td>;
+/**
+ * `className` is optional and additive (same pattern as `Card`) — found
+ * converting the ingest health table (Task 6): its Fetched/Inserted/Updated/
+ * Duplicates columns are counts stacked in a column, exactly what
+ * `tabular-nums` is for, and there was no way to reach the cell from the
+ * caller without it.
+ */
+export function Td({ children, className }: { children?: ReactNode; className?: string }): JSX.Element {
+  const classes = className ? `${BODY_CELL} ${className}` : BODY_CELL;
+  return <td className={classes}>{children}</td>;
 }
