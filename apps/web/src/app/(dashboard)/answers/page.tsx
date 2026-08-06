@@ -20,7 +20,7 @@ export default async function AnswersPage() {
   const answers = await readWorkspaceSnapshot(getDb(), (tx, ws) => listReusableAnswers(tx, ws.id));
 
   return (
-    <main className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <h1 className="text-2xl font-semibold text-ink">Answer bank</h1>
       <p className="text-sm text-muted">
         Reusable answers approved from applications, available to reuse anywhere in this
@@ -59,6 +59,6 @@ export default async function AnswersPage() {
           ))}
         </ul>
       )}
-    </main>
+    </div>
   );
 }

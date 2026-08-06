@@ -23,7 +23,7 @@ export default async function SettingsPage() {
   }));
 
   return (
-    <main className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8">
       <h1 className="text-2xl font-semibold text-ink">Settings</h1>
 
       <Section title="Scoring profile">
@@ -61,7 +61,7 @@ export default async function SettingsPage() {
           </a>
         </p>
       </Section>
-    </main>
+    </div>
   );
 }
 

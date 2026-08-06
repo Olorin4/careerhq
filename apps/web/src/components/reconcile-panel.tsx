@@ -10,12 +10,14 @@ import type { JSX, ReactNode } from "react";
 export function ReconcilePanel({
   reason,
   children,
+  testId,
 }: {
   reason: string;
   children?: ReactNode;
+  testId?: string;
 }): JSX.Element {
   return (
-    <div className="flex gap-3 rounded-lg bg-surface p-4 shadow-card" data-testid="reconcile-panel">
+    <div className="flex gap-3 rounded-lg bg-surface p-4 shadow-card" data-testid={testId}>
       <div
         aria-hidden="true"
         className="w-1.5 shrink-0 rounded-full"

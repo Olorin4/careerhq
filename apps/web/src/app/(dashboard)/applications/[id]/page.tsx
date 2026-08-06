@@ -86,7 +86,7 @@ export default async function ApplicationDetailPage({
   const latestSiteSnapshot = currentSiteAttempt ? await getLatestSnapshot(db, currentSiteAttempt.id) : null;
 
   return (
-    <main className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold text-ink">
           {company?.name ?? "?"} · {job.title}
@@ -199,6 +199,6 @@ export default async function ApplicationDetailPage({
           </Card>
         </aside>
       </div>
-    </main>
+    </div>
   );
 }

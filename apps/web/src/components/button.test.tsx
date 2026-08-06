@@ -19,4 +19,16 @@ describe("Button", () => {
     render(<Button tone="irreversible">Confirm</Button>);
     expect(screen.getByRole("button")).toBeEnabled();
   });
+
+  it("defaults to the unchanged size when no size prop is given", () => {
+    render(<Button>Save</Button>);
+    expect(screen.getByRole("button")).toHaveClass("px-3", "py-2", "text-sm");
+  });
+
+  it("renders smaller with size=\"compact\", for tight repeated layouts like the board", () => {
+    render(<Button size="compact">Move</Button>);
+    const button = screen.getByRole("button");
+    expect(button).toHaveClass("px-2", "py-1", "text-xs");
+    expect(button).not.toHaveClass("px-3", "py-2", "text-sm");
+  });
 });

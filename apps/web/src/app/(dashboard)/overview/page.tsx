@@ -60,7 +60,7 @@ export default async function OverviewPage() {
   });
 
   return (
-    <main className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8">
       <h1 className="text-2xl font-semibold text-ink">Overview</h1>
 
       {/* Every stage renders, including ones at zero — this is the whole
@@ -118,6 +118,6 @@ export default async function OverviewPage() {
           </ul>
         )}
       </Section>
-    </main>
+    </div>
   );
 }

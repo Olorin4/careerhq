@@ -38,7 +38,7 @@ export default async function FactsPage() {
   );
 
   return (
-    <main className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8">
       <h1 className="text-2xl font-semibold text-ink">Fact bank</h1>
       <FactForm />
       {categories.length === 0 ? (
@@ -66,7 +66,7 @@ export default async function FactsPage() {
           );
         })
       )}
-    </main>
+    </div>
   );
 }
 

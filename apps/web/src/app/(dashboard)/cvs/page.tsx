@@ -25,7 +25,7 @@ export default async function CvsPage() {
   const variants = await readWorkspaceSnapshot(getDb(), (tx, ws) => listCvVariants(tx, ws.id));
 
   return (
-    <main className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-semibold text-ink">CV variants</h1>
       {/* `humanize` runs here, on the server: a "use client" module's exports
           are client references, so the form takes already-labelled options
@@ -64,6 +64,6 @@ export default async function CvsPage() {
           </tbody>
         </Table>
       )}
-    </main>
+    </div>
   );
 }

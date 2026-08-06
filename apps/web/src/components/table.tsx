@@ -16,7 +16,11 @@ export function Table({ children }: { children: ReactNode }): JSX.Element {
 }
 
 export function Th({ children }: { children?: ReactNode }): JSX.Element {
-  return <th className={HEAD_CELL}>{children}</th>;
+  return (
+    <th scope="col" className={HEAD_CELL}>
+      {children}
+    </th>
+  );
 }
 
 /**
